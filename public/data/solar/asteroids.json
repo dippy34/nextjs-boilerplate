@@ -1,0 +1,1 @@
+{"count":75565,"refEpochJd":2461000.5,"stride":8,"layout":["a_au","e","i_deg","node_deg","peri_deg","M_at_ref_deg","H","class"],"classes":["MBA","IMB","OMB","MCA","APO","ATE","AMO","IEO","TJN","CEN","TNO","HYA","PAA","AST"],"frame":"ecliptic J2000, heliocentric","source":"JPL SBDB Query API: numbered asteroids with H < 15"}

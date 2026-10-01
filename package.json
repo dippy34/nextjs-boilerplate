@@ -1,26 +1,25 @@
 {
-  "name": "nextjs",
-  "version": "0.1.0",
+  "name": "space-explorer",
   "private": true,
+  "version": "0.1.0",
+  "description": "A real-time, seamless, scale-free universe explorer (SpaceEngine-style) built on real astronomical catalogs and deterministic procedural generation.",
+  "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types tests/",
+    "data": "bash pipeline/run_all.sh"
   },
+  "license": "MIT",
   "dependencies": {
-    "next": "16.1.1",
-    "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "three": "^0.186.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.1.1",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "@playwright/test": "1.56",
+    "@types/three": "^0.186.0",
+    "typescript": "5.9",
+    "vite": "^8.3.2"
   }
 }
