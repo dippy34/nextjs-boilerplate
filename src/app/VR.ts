@@ -6,6 +6,7 @@ import {
 import { formatUtc } from '../core/time';
 import { formatDistance, formatSpeed } from '../core/units';
 import type { LabelCandidate } from '../render/Labels';
+import { BlackHole } from '../universe/BlackHoles';
 import { Body, type SpaceObject } from '../universe/Body';
 import { CatalogStar } from '../universe/Stars';
 import { VRMenu, type VRSettings } from '../vr/Menu';
@@ -346,6 +347,11 @@ export class VRSupport {
     this.card.dirty = true;
   }
 
+  /** Objects this class adds to the scene itself (hidden from environment captures). */
+  get sceneOverlays(): Object3D[] {
+    return [this.labelsGroup, this.hoverRing, this.hoverLabel];
+  }
+
   travelTo(obj: SpaceObject): void {
     this.app.select(obj);
     if (obj instanceof Body) this.app.bodies.prefetch(obj);
@@ -363,6 +369,7 @@ export class VRSupport {
       return Math.max(obj.radius / Math.sin((24 * Math.PI) / 180), 3e3);
     }
     if (obj instanceof CatalogStar) return Math.max(obj.radius * 9, 1e9);
+    if (obj instanceof BlackHole) return obj.radius * 18;
     return obj.radius > 0 ? obj.radius * 80 : 3e7;
   }
 
@@ -387,6 +394,12 @@ export class VRSupport {
           const cam = this.app.renderer.camera;
           cam.updateMatrixWorld(true);
           const headFwd = new Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new Quaternion()));
+          if (tr.target instanceof BlackHole) {
+            // eyes closed: move round to a side that shows the disk at a low angle
+            const from = rig.upos.sub(tr.target.upos, new Vector3());
+            const dist = from.length();
+            rig.upos.copy(tr.target.upos).addVec(tr.target.approachDir(from), dist);
+          }
           const toTarget = tr.target.upos.sub(rig.upos, new Vector3()).normalize();
           rig.quat.premultiply(new Quaternion().setFromUnitVectors(headFwd, toTarget)).normalize();
           if (this.settings.travel === 'blink') {
@@ -584,7 +597,7 @@ export class VRSupport {
     const { head, up } = this.headPose();
     const top = cands.filter((c) => c.rel).sort((a, b) => b.priority - a.priority).slice(0, MAX_LABELS);
     const placed: Vector3[] = [];
-    const colors: Record<string, string> = { planet: '#9cc4ff', dwarf: '#ffbe7a', moon: '#9fe0bb', star: '#f3e3b0', comet: '#9feaff', selected: COLORS.sel };
+    const colors: Record<string, string> = { planet: '#9cc4ff', dwarf: '#ffbe7a', moon: '#9fe0bb', star: '#f3e3b0', comet: '#9feaff', blackhole: '#d3a6ff', selected: COLORS.sel };
     let n = 0;
     for (const c of top) {
       const dir = c.rel!.clone().sub(head).normalize();

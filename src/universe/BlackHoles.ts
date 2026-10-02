@@ -32,6 +32,10 @@ export class BlackHole implements SpaceObject {
   readonly diskNormal: Vector3;
   /** accretion disk outer radius (m); 0 = no disk (dormant) */
   readonly diskOuter: number;
+  /** accretion disk inner edge (m): the innermost stable circular orbit of a non-spinning hole, 3 rs */
+  readonly diskInner: number;
+  /** peak disk temperature (K) */
+  readonly diskTmax: number;
   readonly companion: CatalogStar | null = null;
   readonly data: BlackHoleData;
   private orbitE1 = new Vector3();
@@ -60,6 +64,10 @@ export class BlackHole implements SpaceObject {
     this.orbitE1.crossVectors(this.diskNormal, los).normalize();
     this.orbitE2.crossVectors(this.diskNormal, this.orbitE1).normalize();
     this.diskOuter = d.diskOuterM ?? (this.supermassive ? this.radius * 600 : 0);
+    this.diskInner = this.radius * 3;
+    // X-ray binaries in outburst: inner disk ~1 keV (~1e7 K). The supermassive holes accrete through
+    // faint, hot flows that glow mainly in radio; their thin disk here is illustrative and cool.
+    this.diskTmax = this.supermassive ? (d.name.startsWith('M87') ? 5200 : 6200) : 1.0e7;
     if (d.companion) {
       const c = d.companion;
       // V absolute magnitude consistent with the engine's radius estimate: R = Rsun (Tsun/T)^2 10^(-0.2 (M - Msun))
@@ -81,6 +89,24 @@ export class BlackHole implements SpaceObject {
     this.companion.upos.copy(this.upos).addVec(off);
   }
 
+  /**
+   * Direction (unit, from the hole) to arrive from when coming from `from`: the nearest
+   * direction 8-25 degrees above or below the disk plane, so the disk is seen at a low angle
+   * with its far side lensed over the shadow.
+   */
+  approachDir(from: Vector3): Vector3 {
+    const f = from.clone().normalize();
+    const n = this.diskNormal;
+    const s = f.dot(n);
+    const side = s < 0 ? -1 : 1;
+    const elev = Math.asin(Math.min(1, Math.abs(s)));
+    const want = Math.min(Math.max(elev, (8 * Math.PI) / 180), (25 * Math.PI) / 180);
+    let inPlane = f.clone().addScaledVector(n, -s);
+    if (inPlane.lengthSq() < 1e-12) inPlane = this.orbitE1.clone();
+    inPlane.normalize();
+    return inPlane.multiplyScalar(Math.cos(want)).addScaledVector(n, side * Math.sin(want)).normalize();
+  }
+
   info(): [string, string][] {
     const d = this.data;
     const rows: [string, string][] = [
@@ -93,6 +119,9 @@ export class BlackHole implements SpaceObject {
       rows.push(['Companion', `${d.companion.spType || 'star'}, ${d.companion.massSun.toFixed(2)} Suns`]);
       rows.push(['Orbital period', d.companion.periodDays < 100 ? `${d.companion.periodDays.toFixed(2)} days` : `${(d.companion.periodDays / 365.25).toFixed(2)} years`]);
     }
+    rows.push(['Accretion disk', this.diskOuter === 0 ? 'none (dormant: the companion is too far to feed it)'
+      : this.supermassive ? 'illustrative (the real flow is faint, hot gas seen mainly in radio)'
+      : `shown in outburst, inner edge ~10 million K, ${((2 * this.diskOuter) / 1e9).toPrecision(2)} million km across`]);
     if (d.aliases.length) rows.push(['Also known as', d.aliases.join(', ')]);
     rows.push(['Data', d.ref]);
     return rows;

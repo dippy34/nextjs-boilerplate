@@ -2,6 +2,7 @@ import { Vector3 } from 'three';
 import type { App } from '../app/App';
 import { formatUtc } from '../core/time';
 import { formatDistance, LY } from '../core/units';
+import { BlackHole } from '../universe/BlackHoles';
 import { Body, type SpaceObject } from '../universe/Body';
 import { CatalogStar } from '../universe/Stars';
 import { COLORS, Panel } from './Panel';
@@ -21,8 +22,10 @@ export interface MenuHost {
   exitVR(): void;
 }
 
-type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'search' | 'settings';
-const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small worlds'], ['stars', 'Stars'], ['search', 'Search'], ['settings', 'Settings']];
+type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'holes' | 'search' | 'settings';
+const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small worlds'], ['stars', 'Stars'], ['holes', 'Black holes'], ['search', 'Search'], ['settings', 'Settings']];
+const HOLES = ['Sagittarius A*', 'M87*', 'Cygnus X-1', 'Gaia BH1', 'Gaia BH2', 'Gaia BH3', '3A 0620-003', 'GS 2023+338', 'GRS 1915+105',
+  'XTE J1118+480', '4U 1543-475', 'GRO J0422+32'];
 const PLANETS = ['Sun', 'Mercury', 'Venus', 'Earth', 'Moon', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Ceres'];
 const MOON_PARENTS = ['Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
 const STARS = ['Proxima Centauri', 'Rigil Kentaurus', 'Sirius', 'Betelgeuse', 'Rigel', 'Vega', 'Polaris', 'Arcturus', 'Antares', 'Aldebaran',
@@ -76,8 +79,9 @@ export class VRMenu {
     p.text(app.clock.paused ? 'PAUSED' : app.rateText(), 560, 84, 24, app.clock.paused ? COLORS.warn : COLORS.accent, 500);
     p.button('pause', 1080, 30, 170, 64, app.clock.paused ? '▶ Play' : '⏸ Pause', () => { app.togglePause(); p.dirty = true; }, { size: 28 });
     p.button('close', 1460, 26, 110, 72, '✕', () => this.host.closeMenu(), { size: 40 });
+    const tw = (p.width - 80 + 12) / TABS.length;
     TABS.forEach(([id, label], i) => {
-      p.button(`tab:${id}`, 40 + i * 255, 122, 240, 76, label, () => { this.tab = id; p.dirty = true; }, { active: this.tab === id, size: 30 });
+      p.button(`tab:${id}`, 40 + i * tw, 122, tw - 12, 76, label, () => { this.tab = id; p.dirty = true; }, { active: this.tab === id, size: 27 });
     });
     const area = { x: 40, y: 222, w: p.width - 80, h: p.height - 262 };
     switch (this.tab) {
@@ -85,6 +89,7 @@ export class VRMenu {
       case 'moons': this.paintMoons(p, area); break;
       case 'small': this.paintSmall(p, area); break;
       case 'stars': this.paintGrid(p, area, STARS.map((n) => app.findByName(n)).filter(nonNull).slice(0, 16), 4, 4); break;
+      case 'holes': this.paintGrid(p, area, HOLES.map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull), 4, 3); break;
       case 'search': this.paintSearch(p, area); break;
       case 'settings': this.paintSettings(p, area); break;
     }
@@ -94,6 +99,11 @@ export class VRMenu {
     const app = this.host.app;
     const d = o.upos.sub(app.rig.upos, new Vector3()).length();
     if (o instanceof CatalogStar) return `${(d / LY).toFixed(d < 10 * LY ? 2 : 1)} light years`;
+    if (o instanceof BlackHole) {
+      const ly = d / LY;
+      const dist = ly > 1e6 ? `${(ly / 1e6).toFixed(0)} million ly` : ly > 0.01 ? `${Math.round(ly).toLocaleString()} ly` : formatDistance(d);
+      return `${o.supermassive ? `${(o.massSun / 1e6).toPrecision(3)} million Suns` : `${o.massSun.toFixed(1)} Suns`} · ${dist}`;
+    }
     if (o instanceof Body) {
       const kind = o.kind === 'moon' ? `moon of ${o.parent?.name}` : o.kind === 'star' ? 'star' : o.kind === 'dwarf' ? 'dwarf planet' : o.kind;
       return `${kind} · ${formatDistance(d)}`;
@@ -107,6 +117,24 @@ export class VRMenu {
     if (this.thumbs && this.thumbIndex && idx) {
       const s = this.thumbIndex.cell;
       c.drawImage(this.thumbs, idx[0] * s, idx[1] * s, s, s, cx - r, cy - r, 2 * r, 2 * r);
+      return;
+    }
+    if (o instanceof BlackHole) {
+      // shadow with a lensed ring of disk light
+      const ring = o.diskOuter > 0 ? (o.supermassive ? [255, 170, 90] : [170, 205, 255]) : [200, 200, 215];
+      const g = c.createRadialGradient(cx, cy, r * 0.38, cx, cy, r);
+      g.addColorStop(0, 'rgb(0,0,0)');
+      g.addColorStop(0.08, `rgba(${ring.join(',')},1)`);
+      g.addColorStop(0.3, `rgba(${ring.join(',')},0.35)`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g;
+      c.beginPath();
+      c.arc(cx, cy, r, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = '#000';
+      c.beginPath();
+      c.arc(cx, cy, r * 0.4, 0, Math.PI * 2);
+      c.fill();
       return;
     }
     const col = o instanceof CatalogStar ? starColor(o) : o instanceof Body ? o.color : [0.7, 0.7, 0.7];
@@ -187,7 +215,7 @@ export class VRMenu {
     // results
     const rx = a.x + 950, rw = a.w - 950;
     const results = this.query.trim() ? app.searchItems(this.query.trim()).slice(0, 8) : [];
-    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
+    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars, 23 black holes', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
     results.forEach((r, i) => {
       p.button(`res:${r.id}`, rx, a.y + i * 92, rw, 82, r.label, () => {
         const o = app.resolveSearchId(r.id);

@@ -65,6 +65,7 @@ export class NearStarsLayer {
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     }));
     this.sprites.frustumCulled = false;
+    this.sprites.renderOrder = 40; // after black holes, so a star in front of one stays visible
     this.group.add(this.sprites);
   }
 

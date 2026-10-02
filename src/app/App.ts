@@ -3,6 +3,7 @@ import { blackbodyRGB, irradianceToMag, luminance, magToIrradiance, sunIrradianc
 import { formatUtc, SimClock, utcToTdb, dateToJdUtc } from '../core/time';
 import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/units';
 import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
+import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
 import { Labels, type LabelCandidate } from '../render/Labels';
 import { NearStarsLayer } from '../render/NearStars';
@@ -13,6 +14,7 @@ import { SkyLayer } from '../render/Sky';
 import { Comet, SmallBodiesLayer } from '../render/SmallBodies';
 import { StarFieldLayer } from '../render/StarField';
 import { Hud } from '../ui/Hud';
+import { BlackHole, loadBlackHoles } from '../universe/BlackHoles';
 import { Body, type SpaceObject } from '../universe/Body';
 import { SolarSystem } from '../universe/SolarSystem';
 import { StarCatalog } from '../universe/StarCatalog';
@@ -24,6 +26,10 @@ import { VRSupport } from './VR';
 const DATA = `${import.meta.env.BASE_URL}data`;
 /** catalogue stars closer than this (pc) are drawn individually by the near-star layer */
 const NEAR_STAR_RADIUS = 0.02;
+/** black-hole companions closer than this (pc) are drawn by the near-star layer */
+const COMPANION_RADIUS = 2;
+/** black holes are labelled within this distance (pc) */
+const BH_LABEL_PC = 400;
 const RATE_STEPS = [1, 10, 60, 600, 3600, 21600, DAY, 7 * DAY, 30.4375 * DAY, 365.25 * DAY, 3652.5 * DAY, 36525 * DAY];
 
 export class App {
@@ -57,6 +63,8 @@ export class App {
   vr!: VRSupport;
   sky!: SkyLayer;
   atmospheres!: AtmospheresLayer;
+  blackHoles: BlackHole[] = [];
+  holes!: BlackHoleLayer;
   private cssW = 1;
   private cssH = 1;
   private rateIndex = 0;
@@ -88,7 +96,7 @@ export class App {
     const xrCapable = await VRSupport.detect();
     const renderer = new Renderer(canvas, xrCapable);
     const useGaia = new URLSearchParams(location.search).get('gaia') !== '0';
-    const [system, catalog, gaia, named, manifest, rings, atmoData] = await Promise.all([
+    const [system, catalog, gaia, named, manifest, rings, atmoData, blackHoles] = await Promise.all([
       SolarSystem.load(DATA),
       StarCatalog.load('athyg', `${DATA}/stars`),
       useGaia ? StarCatalog.load('gaia', `${DATA}/stars-gaia`) : Promise.resolve(null),
@@ -96,6 +104,7 @@ export class App {
       fetch(`${DATA}/textures/manifest.json`).then((r) => r.json()),
       fetch(`${DATA}/solar/rings.json`).then((r) => r.json()),
       fetch(`${DATA}/solar/atmospheres.json`).then((r) => r.json()) as Promise<AtmosphereData>,
+      loadBlackHoles(DATA).catch((e) => { console.warn('black holes', e); return [] as BlackHole[]; }),
     ]);
     // Titan's visible disk is the top of its haze: shade it with the measured albedo spectrum
     // (Karkoschka 1998) rather than the Cassini near-infrared surface map.
@@ -124,9 +133,11 @@ export class App {
     const sky = new SkyLayer(`${DATA}/sky/milkyway_4k.jpg`);
     app.sky = sky;
     app.atmospheres = atmospheres;
+    app.blackHoles = blackHoles;
+    app.holes = new BlackHoleLayer(blackHoles, bodies.surfaceExposure, renderer.depthMode === 'reversed-z');
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
@@ -172,6 +183,12 @@ export class App {
       if (obj) {
         const dist = Number(q.get('dist') ?? 4) * Math.max(obj.radius, 1);
         this.placeNear(obj, dist, Number(q.get('az') ?? 35), Number(q.get('el') ?? 15));
+        if (obj instanceof BlackHole && !q.get('el')) {
+          // the view the autopilot arrives at: just above the disk plane
+          const dir = obj.approachDir(this.rig.upos.sub(obj.upos, new Vector3()));
+          this.rig.upos.copy(obj.upos).addVec(dir, dist);
+          this.rig.lookAt(dir.clone().negate(), obj.diskNormal);
+        }
         this.select(obj);
       }
     } else {
@@ -195,7 +212,12 @@ export class App {
     const dir = sunDir.clone().applyAxisAngle(north, (az * Math.PI) / 180).applyAxisAngle(axis, (el * Math.PI) / 180);
     this.rig.upos.copy(obj.upos).addVec(dir, dist);
     this.rig.lookAt(dir.clone().negate(), north);
-    this.rig.setAnchor(obj instanceof Body || obj instanceof Comet ? obj : null);
+    this.rig.setAnchor(obj instanceof Body || obj instanceof Comet || this.isCompanion(obj) ? obj : null);
+  }
+
+  /** true for the companion star of a black hole (it moves on its orbit). */
+  isCompanion(obj: SpaceObject | null): boolean {
+    return !!obj && this.blackHoles.some((b) => b.companion === obj);
   }
 
   private bindKeys(): void {
@@ -292,7 +314,7 @@ export class App {
    * is compiled while presenting.
    */
   private warmUp(): void {
-    const objs = [...this.bodies.warmupObjects(), ...this.atmospheres.warmupObjects()];
+    const objs = [...this.bodies.warmupObjects(), ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
@@ -301,6 +323,11 @@ export class App {
 
   goTo(obj: SpaceObject): void {
     if (obj instanceof Body) this.bodies.prefetch(obj);
+    if (obj instanceof BlackHole) {
+      this.rig.flyTo(obj, obj.radius * 22, undefined, true, obj.approachDir(this.rig.upos.sub(obj.upos, new Vector3())));
+      this.hud.toast(`Going to ${obj.name}`);
+      return;
+    }
     let d: number;
     if (obj instanceof Body) d = obj.kind === 'star' ? obj.radius * 8 : Math.max(obj.radius * 3.5, 2e3);
     else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 8, 1e9);
@@ -329,6 +356,8 @@ export class App {
     if (b) return b;
     const c = this.small.cometObjects.find((x) => x.name.toLowerCase().includes(n));
     if (c) return c;
+    const h = this.blackHoles.find((x) => x.name.toLowerCase() === n || x.data.aliases.some((a) => a.toLowerCase() === n));
+    if (h) return h;
     const s = this.named.list.find((x) => x.names.some((nm) => nm.toLowerCase() === n));
     if (s) return this.getStar(this.catalog, s.node, s.slot);
     return null;
@@ -352,6 +381,12 @@ export class App {
       const s = score(c.name);
       if (s >= 0) out.push({ label: c.name, detail: 'comet', id: `comet:${i}`, score: s + 0.2 });
     });
+    this.blackHoles.forEach((h, i) => {
+      const names = [h.name, ...h.data.aliases, 'black hole'];
+      const best = Math.min(...names.map(score).filter((x) => x >= 0));
+      if (Number.isFinite(best)) out.push({ label: h.name, detail: h.supermassive ? 'supermassive black hole' : 'black hole', id: `bh:${i}`, score: best - 0.1 });
+      if (h.companion && score(h.companion.name) >= 0) out.push({ label: h.companion.name, detail: 'star orbiting a black hole', id: `bhc:${i}`, score: score(h.companion.name) + 0.3 });
+    });
     for (const st of this.named.list) {
       let best = -1;
       for (const nm of st.names) {
@@ -368,6 +403,8 @@ export class App {
     const [kind, v] = id.split(':');
     if (kind === 'body') return this.system.byId.get(Number(v)) ?? null;
     if (kind === 'comet') return this.small.cometObjects[Number(v)] ?? null;
+    if (kind === 'bh') return this.blackHoles[Number(v)] ?? null;
+    if (kind === 'bhc') return this.blackHoles[Number(v)]?.companion ?? null;
     if (kind === 'star') { const st = this.named.list[Number(v)]; return this.getStar(this.catalog, st.node, st.slot); }
     return null;
   }
@@ -400,6 +437,10 @@ export class App {
       const d = sel.upos.sub(this.rig.upos, rel).length();
       if (d < 1e9) { this.rig.setAnchor(sel); return; }
     }
+    if (sel && this.isCompanion(sel) && sel.upos.sub(this.rig.upos, rel).length() < sel.radius * 60) {
+      this.rig.setAnchor(sel);
+      return;
+    }
     this.rig.setAnchor(best);
   }
 
@@ -413,6 +454,10 @@ export class App {
     }
     if (this.selection instanceof Comet) alt = Math.min(alt, this.selection.upos.sub(this.rig.upos, rel).length() - this.selection.radius);
     alt = Math.min(alt, this.nearestStarDist);
+    for (const h of this.blackHoles) {
+      alt = Math.min(alt, h.upos.sub(this.rig.upos, rel).length() - h.radius);
+      if (h.companion) alt = Math.min(alt, h.companion.upos.sub(this.rig.upos, rel).length() - h.companion.radius);
+    }
     return Math.max(alt, 0.5);
   }
 
@@ -470,6 +515,9 @@ export class App {
       // nearest star surface distance
       this.nearestStarDist = Math.min(this.nearestStarDist, dist * PC - cs.radius);
     }
+    for (const h of this.blackHoles) {
+      if (h.companion && h.companion.upos.sub(this.rig.upos, new Vector3()).length() < COMPANION_RADIUS * PC) list.push(h.companion);
+    }
     this.near.stars = list;
   }
 
@@ -494,6 +542,14 @@ export class App {
         : (Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI;
       wBest = w;
       lBest = L;
+    }
+    for (const hv of this.holes.views) {
+      if (!hv.diskRadiance) continue;
+      const p = this.project(hv.rel);
+      const pr = hv.innerDiskPx / this.view.pixelRatio;
+      if (!p || p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
+      const w = smoothstep(0.0015, 0.08, Math.min(1, (Math.PI * pr * pr) / screen));
+      if (w > wBest) { wBest = w; lBest = hv.diskRadiance; }
     }
     for (const s of this.near.stars) {
       const rel = s.upos.sub(this.rig.upos, new Vector3());
@@ -522,6 +578,9 @@ export class App {
       const b = v.body;
       if (b.kind === 'star') lightCap = Math.min(lightCap, 2.5 / (AU / SUN_RADIUS) ** 2);
       else diskCap = Math.min(diskCap, 1.6 / ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI));
+    }
+    for (const hv of this.holes.views) {
+      if (hv.diskRadiance && hv.innerDiskPx > 1.5 && onScreen(hv.rel)) diskCap = Math.min(diskCap, 2 / hv.diskRadiance);
     }
     // Unresolved point sources never drive the exposure (their displayed glare is capped in the PSF).
     for (const s of this.near.stars) {
@@ -567,6 +626,7 @@ export class App {
       consider(c, this.project(c.upos.sub(this.rig.upos, rel)), 0, 0);
     }
     for (const s of this.near.stars) consider(s, this.project(s.upos.sub(this.rig.upos, rel)), 0, -2);
+    for (const { bh, rel: r, shadowPx } of this.labelledHoles()) consider(bh, this.project(r), shadowPx / this.view.pixelRatio, -4);
     if (best) return best;
     // Catalogue stars currently drawn
     let bestRef: { cat: StarCatalog; node: number; slot: number } | null = null;
@@ -628,6 +688,7 @@ export class App {
       consider(c, c.upos.sub(this.rig.upos, rel).clone(), c.radius, 0);
     }
     for (const st of this.near.stars) consider(st, st.upos.sub(this.rig.upos, rel).clone(), st.radius, -0.2);
+    for (const { bh, rel: r } of this.labelledHoles()) consider(bh, r, bh.radius * 2.6, -0.5);
     if (best) return best;
     let bestRef: { cat: StarCatalog; node: number; slot: number } | null = null;
     const cam = this.camPc;
@@ -701,6 +762,7 @@ export class App {
       consider(c, c.upos.sub(this.rig.upos, rel).clone(), c.radius, 0);
     }
     for (const st of this.near.stars) consider(st, st.upos.sub(this.rig.upos, rel).clone(), st.radius, -0.2);
+    for (const { bh, rel: r } of this.labelledHoles()) consider(bh, r, bh.radius * 2.6, -0.5);
     if (best) return best;
     const cam = this.camPc;
     let bestStar: { node: number; slot: number } | null = null;
@@ -733,6 +795,29 @@ export class App {
     return false;
   }
   private occluders: { body: Body; rel: Vector3; dist: number }[] = [];
+
+  /** Black holes worth a label/pick: near ones, ones being drawn, and the selection. */
+  private labelledHoles(): { bh: BlackHole; rel: Vector3; shadowPx: number }[] {
+    const out: { bh: BlackHole; rel: Vector3; shadowPx: number }[] = [];
+    for (const bh of this.blackHoles) {
+      const v = this.holes.views.find((x) => x.bh === bh);
+      if (v) { out.push({ bh, rel: v.rel, shadowPx: v.shadowPx }); continue; }
+      const rel = bh.upos.sub(this.rig.upos, new Vector3());
+      if (bh === this.selection || rel.length() < BH_LABEL_PC * PC) out.push({ bh, rel, shadowPx: 0 });
+    }
+    return out;
+  }
+
+  /** Never let the camera reach an event horizon. */
+  private keepOutsideHorizons(): void {
+    const rel = new Vector3();
+    for (const h of this.blackHoles) {
+      this.rig.upos.sub(h.upos, rel);
+      const d = rel.length();
+      const min = h.radius * 1.15;
+      if (d < min) this.rig.upos.copy(h.upos).addVec(d > 0 ? rel.divideScalar(d) : rel.set(0, 0, 1), min);
+    }
+  }
 
   private labelCandidates(): LabelCandidate[] {
     const out: LabelCandidate[] = [];
@@ -787,6 +872,10 @@ export class App {
       const p = this.project(s.upos.sub(this.rig.upos, rel));
       if (p) out.push({ rel: rel.clone(), key: s.key, text: s.name, x: p.x, y: p.y, radius: 4, priority: s === sel ? 1e4 : 450, cls: s === sel ? 'selected' : 'star' });
     }
+    for (const { bh, rel: r, shadowPx } of this.labelledHoles()) {
+      const p = this.project(r);
+      if (p && !this.occluded(r, null)) out.push({ rel: r, key: bh.key, text: bh.name, x: p.x, y: p.y, radius: shadowPx / dpr, priority: bh === sel ? 1e4 : 420, cls: bh === sel ? 'selected' : 'blackhole' });
+    }
     if (sel instanceof CatalogStar && !this.near.stars.includes(sel)) {
       const p = this.project(sel.upos.sub(this.rig.upos, rel));
       if (p) out.push({ rel: rel.clone(), key: sel.key, text: sel.name, x: p.x, y: p.y, radius: 3, priority: 1e4, cls: 'selected' });
@@ -813,6 +902,7 @@ export class App {
     this.clock.advance(Math.min(rawDt, 1));
     const jd = this.clock.jdTdb;
     this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
+    for (const h of this.blackHoles) h.update(jd);
 
     if (this.selection instanceof CatalogStar && !this.selection.exact && this.selection.ref) {
       const r = this.selection.ref;
@@ -829,6 +919,7 @@ export class App {
     this.rig.altitude = this.computeAltitude();
     if (this.vr.active) this.vr.updateInput(dt);
     this.rig.update(dt, this.input);
+    this.keepOutsideHorizons();
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
 
     // The dolly carries the explorer's orientation; a headset pose is applied on top of it.
@@ -852,6 +943,8 @@ export class App {
     this.bodies.update(this.rig.upos, pixelAngle, dt, this.view.quat);
     this.atmospheres.steps = this.vr.active ? 10 : 16;
     this.atmospheres.update(this.rig.upos, this.bodies.views);
+    this.holes.vr = this.vr.active;
+    this.holes.update(this.rig.upos, pixelAngle, now / 1000);
     const { xStar, xSurf, mLim, xDark } = this.updateExposure(dt);
     this.sky.update(xStar / xDark, this.camPc.length());
     this.lastMLim = mLim;
@@ -873,6 +966,7 @@ export class App {
       this.warmupPending = false;
       this.warmUp();
     }
+    this.holes.capture(this.renderer.gl, this.renderer.scene, [this.renderer.rig, this.orbits.group, ...this.vr.sceneOverlays], psf);
     this.renderer.render();
 
     // 5. overlays

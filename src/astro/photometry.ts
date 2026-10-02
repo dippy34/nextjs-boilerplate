@@ -69,20 +69,41 @@ function cieZ(l: number) {
   return 1.217 * Math.exp(-0.5 * t1 * t1) + 0.681 * Math.exp(-0.5 * t2 * t2);
 }
 
-export function blackbodyRGB(teff: number): [number, number, number] {
+/** Unnormalised CIE XYZ of a blackbody (relative units, consistent across temperatures). */
+export function blackbodyXYZ(teff: number): [number, number, number] {
   const h = 6.62607015e-34, c = 2.99792458e8, k = 1.380649e-23;
   let X = 0, Y = 0, Z = 0;
   for (let l = 380; l <= 780; l += 5) {
     const lm = l * 1e-9;
-    const B = 1 / (Math.pow(lm, 5) * (Math.exp((h * c) / (lm * k * teff)) - 1));
+    const B = 1 / (Math.pow(lm, 5) * Math.expm1((h * c) / (lm * k * teff)));
     X += B * cieX(l); Y += B * cieY(l); Z += B * cieZ(l);
   }
-  let r = 3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z;
-  let g = -0.969266 * X + 1.8760108 * Y + 0.041556 * Z;
-  let b = 0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z;
-  r = Math.max(r, 0); g = Math.max(g, 0); b = Math.max(b, 0);
+  return [X, Y, Z];
+}
+
+/** Linear sRGB of XYZ (negative components clipped). */
+function xyzToRgb([X, Y, Z]: [number, number, number]): [number, number, number] {
+  const r = 3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z;
+  const g = -0.969266 * X + 1.8760108 * Y + 0.041556 * Z;
+  const b = 0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z;
+  return [Math.max(r, 0), Math.max(g, 0), Math.max(b, 0)];
+}
+
+export function blackbodyRGB(teff: number): [number, number, number] {
+  const [r, g, b] = xyzToRgb(blackbodyXYZ(teff));
   const m = Math.max(r, g, b);
   return [r / m, g / m, b / m];
+}
+
+/**
+ * Blackbody of temperature `teff` seen as a surface: linear sRGB chromaticity with luminance 1,
+ * and its visual luminance relative to a blackbody at the Sun's temperature.
+ */
+export function blackbodySurface(teff: number, sunTeff = 5772): { rgb: [number, number, number]; relY: number } {
+  const xyz = blackbodyXYZ(teff);
+  const rgb = xyzToRgb(xyz);
+  const L = luminance(rgb) || 1;
+  return { rgb: [rgb[0] / L, rgb[1] / L, rgb[2] / L], relY: xyz[1] / blackbodyXYZ(sunTeff)[1] };
 }
 
 /** Luminance (Rec.709 weights) of a linear RGB triple. */

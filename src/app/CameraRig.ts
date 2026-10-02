@@ -69,8 +69,11 @@ export class CameraRig {
    * (farther than ~300 radii) is crossed quickly, and the time goes into the approach where
    * it visibly grows, easing to a stop. Monotone cubic Hermite, so there is no overshoot and
    * no change of pace between the two stretches.
+   *
+   * `arriveDir` (unit, from the target): swing round to arrive from that side, during the
+   * visible approach, keeping the target in view.
    */
-  flyTo(target: SpaceObject, finalDistance: number, duration?: number, rotate = true): void {
+  flyTo(target: SpaceObject, finalDistance: number, duration?: number, rotate = true, arriveDir?: Vector3): void {
     const rel = this.upos.sub(target.upos, new Vector3());
     const d0 = Math.max(rel.length(), 1e-3);
     const d1 = Math.max(finalDistance, 1);
@@ -93,11 +96,14 @@ export class CameraRig {
       }
     }
     const T = knots[knots.length - 1].t;
-    const look = dir.clone().negate();
-    const m = new Matrix4().lookAt(new Vector3(), look, this.up(new Vector3()));
-    const q1 = new Quaternion().setFromRotationMatrix(m);
+    const up = this.up(new Vector3());
+    const swing = arriveDir && arriveDir.angleTo(dir) > 1e-4 ? new Quaternion().setFromUnitVectors(dir, arriveDir.clone().normalize()) : null;
+    const Ls = Math.min(L0, Math.log(Math.max(target.radius, 1) * 300) + 2);
     this.target = target;
-    this.goto = { target, dir, knots, t: 0, T, fastUntil: knots.length > 2 ? knots[1].t : 0, q0: this.quat.clone(), q1: rotate ? q1 : null };
+    this.goto = {
+      target, dir, knots, t: 0, T, fastUntil: knots.length > 2 ? knots[1].t : 0, q0: this.quat.clone(), rotate, up,
+      swing, swingFrom: Ls, swingTo: L1,
+    };
     this.setAnchor(target);
   }
 
@@ -151,7 +157,7 @@ export class CameraRig {
       const qy = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -left.dx * rotSpeed);
       const qx = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -left.dy * rotSpeed);
       this.quat.multiply(qy).multiply(qx);
-      if (this.goto) this.goto.q1 = null;
+      if (this.goto) this.goto.rotate = false;
     }
     const roll = (k.has('KeyQ') ? 1 : 0) - (k.has('KeyE') ? 1 : 0);
     if (roll) this.quat.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), roll * dt * 1.2));
@@ -185,10 +191,18 @@ export class CameraRig {
       const g = this.goto;
       g.t = Math.min(g.T, g.t + dt);
       const s = g.t / g.T;
-      const d = Math.exp(hermite(g.knots, g.t));
-      const want = g.target.upos.clone().addVec(g.dir, d);
+      const L = hermite(g.knots, g.t);
+      const dir = g.dir.clone();
+      if (g.swing) {
+        const w = smooth((g.swingFrom - L) / Math.max(g.swingFrom - g.swingTo, 1e-6));
+        dir.applyQuaternion(new Quaternion().slerp(g.swing, w));
+      }
+      const want = g.target.upos.clone().addVec(dir, Math.exp(L));
       this.upos.copy(want);
-      if (g.q1) this.quat.copy(g.q0).slerp(g.q1, Math.min(1, smooth(s / 0.35)));
+      if (g.rotate) {
+        const look = new Quaternion().setFromRotationMatrix(new Matrix4().lookAt(new Vector3(), dir.negate(), g.up));
+        this.quat.copy(g.q0).slerp(look, Math.min(1, smooth(s / 0.35)));
+      }
       this.speed = 0;
       if (g.t >= g.T) this.goto = null;
       return;
@@ -228,7 +242,13 @@ interface GotoState {
   T: number;
   fastUntil: number;
   q0: Quaternion;
-  q1: Quaternion | null;
+  /** turn to face the target (off once the user looks around) */
+  rotate: boolean;
+  up: Vector3;
+  /** rotation from `dir` to the arrival direction, applied between log-distances swingFrom -> swingTo */
+  swing: Quaternion | null;
+  swingFrom: number;
+  swingTo: number;
 }
 
 /** Piecewise cubic Hermite through `knots` (value L, slope m). */
