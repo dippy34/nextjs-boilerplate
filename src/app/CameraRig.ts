@@ -63,7 +63,7 @@ export class CameraRig {
   }
 
   /** Begin the autopilot towards `target`, stopping at `finalDistance` from its centre. */
-  flyTo(target: SpaceObject, finalDistance: number, duration?: number): void {
+  flyTo(target: SpaceObject, finalDistance: number, duration?: number, rotate = true): void {
     const rel = this.upos.sub(target.upos, new Vector3());
     const d0 = Math.max(rel.length(), 1e-3);
     const d1 = Math.max(finalDistance, 1);
@@ -75,7 +75,7 @@ export class CameraRig {
     const m = new Matrix4().lookAt(new Vector3(), look, this.up(new Vector3()));
     const q1 = new Quaternion().setFromRotationMatrix(m);
     this.target = target;
-    this.goto = { target, dir, d0, d1, t: 0, T, q0: this.quat.clone(), q1 };
+    this.goto = { target, dir, d0, d1, t: 0, T, q0: this.quat.clone(), q1: rotate ? q1 : null };
     this.setAnchor(target);
   }
 
@@ -99,6 +99,11 @@ export class CameraRig {
 
   cancelGoto(): void {
     this.goto = null;
+  }
+
+  /** Autopilot progress 0..1 (1 when idle). */
+  get gotoProgress(): number {
+    return this.goto ? this.goto.t / this.goto.T : 1;
   }
 
   update(dt: number, input: Input): void {

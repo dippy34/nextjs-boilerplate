@@ -8,7 +8,13 @@
    "lonLeft": -180,
    "credit": "NASA Earth Observatory, Blue Marble: Next Generation (Oct 2004), R. St\u00f6ckli",
    "source": "https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74167/world.200410.3x5400x2700.jpg",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "hi": {
+    "file": "earth_day_8k.jpg",
+    "width": 8192,
+    "height": 4096,
+    "source": "https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74167/world.200410.3x21600x10800.jpg"
+   }
   },
   "earth_night": {
    "file": "earth_night.jpg",
@@ -38,32 +44,50 @@
    "lonLeft": -180,
    "credit": "NASA Scientific Visualization Studio, CGI Moon Kit (LRO LROC WAC colour)",
    "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_4k.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "hi": {
+    "file": "moon_8k.jpg",
+    "width": 8192,
+    "height": 4096,
+    "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_8k.tif"
+   }
   },
   "mercury": {
    "file": "mercury.jpg",
-   "width": 1024,
-   "height": 512,
+   "width": 2048,
+   "height": 1024,
    "channels": "L",
    "lonLeft": -180,
-   "credit": "NASA/JHUAPL/CIW, MESSENGER MDIS global mosaic, via USGS Astrogeology",
-   "source": "https://astrogeology.usgs.gov/ckan/dataset/279e5d50-ff2f-4250-bde3-bb510096079e/resource/2b5865c2-bd0d-4962-bdb0-c12f0502def1/download/mercury_messenger_mosaic_global_1024.jpg",
-   "license": "Public domain (U.S. Government work)"
+   "credit": "NASA/JHUAPL/CIW, MESSENGER MDIS BDR global mosaic (166 m), via USGS Astrogeology",
+   "source": "https://planetarymaps.usgs.gov/mosaic/Mercury_MESSENGER_MDIS_Basemap_BDR_Mosaic_Global_166m.tif",
+   "license": "Public domain (U.S. Government work)",
+   "hi": {
+    "file": "mercury_8k.jpg",
+    "width": 8192,
+    "height": 4096,
+    "source": "https://planetarymaps.usgs.gov/mosaic/Mercury_MESSENGER_MDIS_Basemap_BDR_Mosaic_Global_166m.tif"
+   }
   },
   "mars": {
    "file": "mars.jpg",
-   "width": 1024,
-   "height": 512,
+   "width": 2048,
+   "height": 1024,
    "channels": "RGB",
    "lonLeft": -180,
-   "credit": "NASA/JPL, Viking global colour mosaic, via USGS Astrogeology",
-   "source": "https://astrogeology.usgs.gov/ckan/dataset/dfdc2242-52dc-4126-bc89-03af8253ae79/resource/0d7b31dc-0b2e-4ca6-89dc-e3c1404c0232/download/mars_viking_clrmosaic_global_1024.jpg",
-   "license": "Public domain (U.S. Government work)"
+   "credit": "NASA/JPL/USGS, Viking MDIM 2.1 global colour mosaic (232 m), via USGS Astrogeology",
+   "source": "https://planetarymaps.usgs.gov/mosaic/Mars_Viking_MDIM21_ClrMosaic_global_232m.tif",
+   "license": "Public domain (U.S. Government work)",
+   "hi": {
+    "file": "mars_8k.jpg",
+    "width": 8192,
+    "height": 4096,
+    "source": "https://planetarymaps.usgs.gov/mosaic/Mars_Viking_MDIM21_ClrMosaic_global_232m.tif"
+   }
   },
   "jupiter": {
    "file": "jupiter.jpg",
-   "width": 2048,
-   "height": 1024,
+   "width": 4096,
+   "height": 2048,
    "channels": "RGB",
    "lonLeft": -180,
    "credit": "NASA/JPL/Space Science Institute, Cassini cylindrical map of Jupiter (PIA07782)",
@@ -188,7 +212,8 @@
    "lonLeft": 0,
    "credit": "NASA/JHUAPL/SwRI, New Horizons LORRI\u2013MVIC Pluto global mosaic, via USGS",
    "source": "https://astrogeology.usgs.gov/ckan/dataset/a5f1b7f4-9822-4697-a201-e23ef4bd3e16/resource/96be2aa1-f384-4a9f-9458-a8431a0e7956/download/pluto_newhorizons_global_mosaic_300m_jul2017_1024.jpg",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "note": "unimaged areas filled with the mean colour of the imaged surface"
   },
   "charon": {
    "file": "charon.jpg",
@@ -198,7 +223,8 @@
    "lonLeft": 0,
    "credit": "NASA/JHUAPL/SwRI, New Horizons LORRI\u2013MVIC Charon global mosaic, via USGS",
    "source": "https://astrogeology.usgs.gov/ckan/dataset/93827f6c-8feb-42b6-98e6-b0ce57c7d2c8/resource/1abf318c-3290-4aa0-932e-a34f32d7f6ad/download/charon_newhorizons_global_mosaic_300m_jul2017_1024.jpg",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "note": "unimaged areas filled with the mean colour of the imaged surface"
   },
   "ceres": {
    "file": "ceres.jpg",
@@ -218,6 +244,83 @@
    "lonLeft": -180,
    "credit": "NASA/JPL/DLR, Dawn FC HAMO Vesta global mosaic, via USGS",
    "source": "https://astrogeology.usgs.gov/ckan/dataset/ec63e420-a8bd-4a90-9341-a5754b551574/resource/9306febf-0c7a-49ee-b7b0-a1f043297bf7/download/vesta_dawn_fc_hamo_mosaic_global_1024.jpg",
+   "license": "Public domain (U.S. Government work)"
+  },
+  "saturn": {
+   "file": "saturn.jpg",
+   "width": 2048,
+   "height": 1024,
+   "channels": "RGB",
+   "lonLeft": 0,
+   "latitude": "planetographic",
+   "credit": "NASA/ESA Hubble OPAL program (PI A. Simon), saturn-2025a F631N/F502N/F395N maps (STScI MAST HLSP, DOI 10.17909/T9G593); colour from Karkoschka (1998) albedo spectra",
+   "source": "https://archive.stsci.edu/missions/hlsp/opal/cycle32/saturn/",
+   "license": "CC BY 4.0"
+  },
+  "uranus": {
+   "file": "uranus.jpg",
+   "width": 2048,
+   "height": 1024,
+   "channels": "RGB",
+   "lonLeft": 0,
+   "latitude": "planetographic",
+   "credit": "NASA/ESA Hubble OPAL program (PI A. Simon), uranus-2025a F657N/F547M/F467M maps (STScI MAST HLSP, DOI 10.17909/T9G593); colour from Karkoschka (1998) albedo spectra",
+   "source": "https://archive.stsci.edu/missions/hlsp/opal/cycle33/uranus/",
+   "license": "CC BY 4.0"
+  },
+  "neptune": {
+   "file": "neptune.jpg",
+   "width": 2048,
+   "height": 1024,
+   "channels": "RGB",
+   "lonLeft": 0,
+   "latitude": "planetographic",
+   "credit": "NASA/ESA Hubble OPAL program (PI A. Simon), neptune-2025b F657N/F547M/F467M maps (STScI MAST HLSP, DOI 10.17909/T9G593); colour from Karkoschka (1998) albedo spectra",
+   "source": "https://archive.stsci.edu/missions/hlsp/opal/cycle32/neptune/",
+   "license": "CC BY 4.0"
+  },
+  "earth_relief": {
+   "file": "earth_relief_4k.jpg",
+   "width": 4096,
+   "height": 2048,
+   "channels": "relief+water",
+   "lonLeft": -180,
+   "exaggeration": 4.0,
+   "credit": "NOAA NCEI, ETOPO 2022 60 arc-second Global Relief Model (surface), DOI 10.25921/fd45-gt74",
+   "source": "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif",
+   "license": "Public domain (U.S. Government work)"
+  },
+  "moon_relief": {
+   "file": "moon_relief_4k.jpg",
+   "width": 4096,
+   "height": 2048,
+   "channels": "relief",
+   "lonLeft": -180,
+   "exaggeration": 2.0,
+   "credit": "NASA SVS CGI Moon Kit, LRO LOLA gridded elevation (LDEM 16 ppd)",
+   "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif",
+   "license": "Public domain (U.S. Government work)"
+  },
+  "mars_relief": {
+   "file": "mars_relief_4k.jpg",
+   "width": 4096,
+   "height": 2048,
+   "channels": "relief",
+   "lonLeft": -180,
+   "exaggeration": 2.0,
+   "credit": "NASA/JPL/GSFC MGS MOLA, global DEM 463 m, via USGS Astrogeology",
+   "source": "https://planetarymaps.usgs.gov/mosaic/Mars_MGS_MOLA_DEM_mosaic_global_463m.tif",
+   "license": "Public domain (U.S. Government work)"
+  },
+  "mercury_relief": {
+   "file": "mercury_relief_4k.jpg",
+   "width": 4096,
+   "height": 2048,
+   "channels": "relief",
+   "lonLeft": -180,
+   "exaggeration": 2.0,
+   "credit": "NASA/JHUAPL/CIW MESSENGER, USGS global DEM 665 m v2",
+   "source": "https://planetarymaps.usgs.gov/mosaic/Mercury_Messenger_USGS_DEM_Global_665m_v2.tif",
    "license": "Public domain (U.S. Government work)"
   }
  },
@@ -257,6 +360,58 @@
    ],
    "credit": "NASA/JPL-Caltech, Mariner 10 (PIA23791, reprocessed true colour)",
    "source": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia23/pia23791/PIA23791.jpg"
+  }
+ },
+ "spectralColors": {
+  "jupiter": {
+   "linearRGB": [
+    0.5344,
+    0.5334,
+    0.4438
+   ],
+   "visualAlbedo": 0.5277,
+   "credit": "E. Karkoschka (1998), Icarus 133, 134; ESO 1995 full-disk albedo spectra, NASA PDS Atmospheres GBAT_0001 (1995LOW.TAB)",
+   "source": "https://pds-atmospheres.nmsu.edu/PDS/data/gbat_0001/data/1995low.tab"
+  },
+  "saturn": {
+   "linearRGB": [
+    0.5537,
+    0.4835,
+    0.3264
+   ],
+   "visualAlbedo": 0.4897,
+   "credit": "E. Karkoschka (1998), Icarus 133, 134; ESO 1995 full-disk albedo spectra, NASA PDS Atmospheres GBAT_0001 (1995LOW.TAB)",
+   "source": "https://pds-atmospheres.nmsu.edu/PDS/data/gbat_0001/data/1995low.tab"
+  },
+  "uranus": {
+   "linearRGB": [
+    0.3492,
+    0.5454,
+    0.5938
+   ],
+   "visualAlbedo": 0.5023,
+   "credit": "E. Karkoschka (1998), Icarus 133, 134; ESO 1995 full-disk albedo spectra, NASA PDS Atmospheres GBAT_0001 (1995LOW.TAB)",
+   "source": "https://pds-atmospheres.nmsu.edu/PDS/data/gbat_0001/data/1995low.tab"
+  },
+  "neptune": {
+   "linearRGB": [
+    0.2658,
+    0.4749,
+    0.5963
+   ],
+   "visualAlbedo": 0.4336,
+   "credit": "E. Karkoschka (1998), Icarus 133, 134; ESO 1995 full-disk albedo spectra, NASA PDS Atmospheres GBAT_0001 (1995LOW.TAB)",
+   "source": "https://pds-atmospheres.nmsu.edu/PDS/data/gbat_0001/data/1995low.tab"
+  },
+  "titan": {
+   "linearRGB": [
+    0.276,
+    0.2092,
+    0.1129
+   ],
+   "visualAlbedo": 0.2186,
+   "credit": "E. Karkoschka (1998), Icarus 133, 134; ESO 1995 full-disk albedo spectra, NASA PDS Atmospheres GBAT_0001 (1995LOW.TAB)",
+   "source": "https://pds-atmospheres.nmsu.edu/PDS/data/gbat_0001/data/1995low.tab"
   }
  }
 }

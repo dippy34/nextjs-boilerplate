@@ -218,7 +218,8 @@ export class Renderer {
   /** Tone mapping inside materials while presenting to a headset. */
   setXrMode(on: boolean): void {
     this.gl.toneMapping = on ? ACESFilmicToneMapping : NoToneMapping;
-    this.gl.toneMappingExposure = 1;
+    // three's ACES multiplies by exposure / 0.6; 0.6 makes it the same curve as the desktop composite
+    this.gl.toneMappingExposure = on ? 0.6 : 1;
   }
 
   private viewQuat = new Quaternion();

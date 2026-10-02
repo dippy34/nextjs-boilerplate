@@ -1,13 +1,15 @@
 import { Quaternion, Vector3 } from 'three';
-import { irradianceToMag, magToIrradiance, sunIrradianceAt } from '../astro/photometry';
+import { blackbodyRGB, irradianceToMag, luminance, magToIrradiance, sunIrradianceAt } from '../astro/photometry';
 import { formatUtc, SimClock, utcToTdb, dateToJdUtc } from '../core/time';
 import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/units';
+import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BodiesLayer } from '../render/Bodies';
 import { Labels, type LabelCandidate } from '../render/Labels';
 import { NearStarsLayer } from '../render/NearStars';
 import { OrbitsLayer } from '../render/Orbits';
 import { Renderer, type ViewInfo } from '../render/Renderer';
 import { GLOBALS, depthK } from '../render/shaders/xr';
+import { SkyLayer } from '../render/Sky';
 import { Comet, SmallBodiesLayer } from '../render/SmallBodies';
 import { StarFieldLayer } from '../render/StarField';
 import { Hud } from '../ui/Hud';
@@ -43,6 +45,7 @@ export class App {
   private hudTimer = 0;
   private nearTimer = 0;
   private nearestStarDist = Infinity;
+  private fieldMinDistPc = 0;
   /** one object per catalogue star so selection, labels and near-star rendering agree */
   private starCache = new Map<string, CatalogStar>();
   private camPc = new Vector3();
@@ -50,6 +53,8 @@ export class App {
   /** geometry of the current view (desktop camera or the headset's left eye) */
   view: ViewInfo = { quat: new Quaternion(), fovY: 50, aspect: 1, width: 1, height: 1, pixelAngle: 1e-3, pixelRatio: 1, far: Infinity, xr: false };
   vr!: VRSupport;
+  sky!: SkyLayer;
+  atmospheres!: AtmospheresLayer;
   private cssW = 1;
   private cssH = 1;
   private rateIndex = 0;
@@ -81,14 +86,27 @@ export class App {
     const xrCapable = await VRSupport.detect();
     const renderer = new Renderer(canvas, xrCapable);
     const useGaia = new URLSearchParams(location.search).get('gaia') !== '0';
-    const [system, catalog, gaia, named, manifest, rings] = await Promise.all([
+    const [system, catalog, gaia, named, manifest, rings, atmoData] = await Promise.all([
       SolarSystem.load(DATA),
       StarCatalog.load('athyg', `${DATA}/stars`),
       useGaia ? StarCatalog.load('gaia', `${DATA}/stars-gaia`) : Promise.resolve(null),
       NamedStars.load(`${DATA}/stars`),
       fetch(`${DATA}/textures/manifest.json`).then((r) => r.json()),
       fetch(`${DATA}/solar/rings.json`).then((r) => r.json()),
+      fetch(`${DATA}/solar/atmospheres.json`).then((r) => r.json()) as Promise<AtmosphereData>,
     ]);
+    // Titan's visible disk is the top of its haze: shade it with the measured albedo spectrum
+    // (Karkoschka 1998) rather than the Cassini near-infrared surface map.
+    const spectral = (manifest as { spectralColors?: Record<string, { linearRGB: [number, number, number]; visualAlbedo: number }> }).spectralColors;
+    const titan = system.bodies.find((b) => b.name === 'Titan');
+    if (titan && spectral?.titan) {
+      const [r, g, bl] = spectral.titan.linearRGB;
+      const m = Math.max(r, g, bl);
+      titan.texture = null;
+      titan.color = [r / m, g / m, bl / m];
+      titan.albedo = spectral.titan.visualAlbedo;
+      titan.meta.albedo = spectral.titan.visualAlbedo;
+    }
     const catalogs = gaia ? [catalog, gaia] : [catalog];
     const starField = new StarFieldLayer(catalog);
     const starFields = [starField, ...catalogs.slice(1).map((c) => new StarFieldLayer(c, starField.psf))];
@@ -97,10 +115,19 @@ export class App {
     const small = new SmallBodiesLayer(system, starField.psf);
     const near = new NearStarsLayer(starField.psf, bodies.surfaceExposure);
     const app = new App(canvas, hudRoot, labelRoot, system, catalogs, named, starFields, bodies, orbits, small, near, renderer);
-    renderer.scene.add(bodies.group, orbits.group, small.group, near.group, ...starFields.map((f) => f.group));
+    const sc = blackbodyRGB(system.sun.teff);
+    const sl = luminance(sc);
+    const atmospheres = new AtmospheresLayer(system, atmoData, bodies.surfaceExposure, [sc[0] / sl, sc[1] / sl, sc[2] / sl]);
+    bodies.atmosphere = (b) => atmospheres.spec(b);
+    const sky = new SkyLayer(`${DATA}/sky/milkyway_4k.jpg`);
+    app.sky = sky;
+    app.atmospheres = atmospheres;
+    const mw = new URLSearchParams(location.search).get('mw');
+    if (mw !== null) sky.brightness = Number(mw);
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
-    app.vr = new VRSupport(app, xrCapable);
+    app.vr = new VRSupport(app, xrCapable, DATA);
     app.applyUrl();
     app.bindKeys();
     app.resize();
@@ -176,7 +203,7 @@ export class App {
       const hit = this.pick(x, y);
       if (hit) { this.select(hit); this.goTo(hit); }
     };
-    this.hud.onSearch = (q) => this.search(q);
+    this.hud.onSearch = (q) => this.searchItems(q);
     this.hud.onSearchPick = (id) => {
       const obj = this.resolveSearchId(id);
       if (obj) { this.select(obj); this.goTo(obj); }
@@ -289,7 +316,7 @@ export class App {
     return null;
   }
 
-  private search(q: string): { label: string; detail: string; id: string }[] {
+  searchItems(q: string): { label: string; detail: string; id: string }[] {
     const n = q.toLowerCase();
     const out: { label: string; detail: string; id: string; score: number }[] = [];
     const score = (name: string) => {
@@ -319,7 +346,7 @@ export class App {
     return out.slice(0, 14);
   }
 
-  private resolveSearchId(id: string): SpaceObject | null {
+  resolveSearchId(id: string): SpaceObject | null {
     const [kind, v] = id.split(':');
     if (kind === 'body') return this.system.byId.get(Number(v)) ?? null;
     if (kind === 'comet') return this.small.cometObjects[Number(v)] ?? null;
@@ -411,6 +438,11 @@ export class App {
       .sort((a, b) => a.dist - b.dist)
       .slice(0, 12);
     const nearestCat = near.length ? near[0].dist : Infinity;
+    // Lower bound on the distance of any star the star field draws (half, for motion between updates)
+    const searchR = Math.max(NEAR_STAR_RADIUS, Math.min(1, nearestNamed));
+    const beyond = near.find((x) => x.dist > NEAR_STAR_RADIUS);
+    const bound = beyond ? beyond.dist : near.length < 12 ? searchR : NEAR_STAR_RADIUS;
+    this.fieldMinDistPc = Math.min(bound, nearestNamed > NEAR_STAR_RADIUS ? nearestNamed : bound) * 0.5;
     this.nearestStarDist = Math.min(nearestNamed, nearestCat) * PC;
     const list: CatalogStar[] = [];
     for (const { ref, dist } of near) {
@@ -423,7 +455,7 @@ export class App {
     this.near.stars = list;
   }
 
-  private updateExposure(dt: number): { xStar: number; xSurf: number; mLim: number } {
+  private updateExposure(dt: number): { xStar: number; xSurf: number; mLim: number; xDark: number } {
     const pixSA = (this.view.pixelAngle * this.view.pixelRatio) ** 2; // per CSS pixel
     const xDark = (0.01 * pixSA) / magToIrradiance(this.starMagLimit);
     let wBest = 0;
@@ -493,7 +525,7 @@ export class App {
     const xStar = Math.max(xSurf, Math.min(xDark * this.starFloor, Math.exp(this.logStarCap)));
     const minEnergy = this.starFields[0].psf.uMinEnergy.value;
     const mLim = irradianceToMag((minEnergy * pixSA) / xStar);
-    return { xStar, xSurf, mLim };
+    return { xStar, xSurf, mLim, xDark };
   }
 
   private pick(cx: number, cy: number): SpaceObject | null {
@@ -549,6 +581,8 @@ export class App {
    */
   pickRay(origin: Vector3, dir: Vector3): SpaceObject | null {
     const d = dir.clone().normalize();
+    const surface = this.rayHitBody(origin, d);
+    if (surface) return surface;
     const tol = (1.5 * Math.PI) / 180;
     let best: SpaceObject | null = null;
     let bestScore = Infinity;
@@ -596,6 +630,74 @@ export class App {
       }
     }
     return bestRef ? this.getStar(bestRef.cat, bestRef.node, bestRef.slot) : null;
+  }
+
+  /** Nearest resolved body whose sphere the ray actually hits (what you see along the ray). */
+  private rayHitBody(origin: Vector3, d: Vector3): Body | null {
+    let best: Body | null = null;
+    let bestT = Infinity;
+    const oc = new Vector3();
+    for (const v of this.bodies.views.values()) {
+      if (!v.resolved) continue;
+      oc.copy(origin).sub(v.rel);
+      const b = oc.dot(d);
+      const c = oc.lengthSq() - v.body.radius * v.body.radius;
+      const disc = b * b - c;
+      if (disc < 0) continue;
+      const t = -b - Math.sqrt(disc);
+      if (t > 0 && t < bestT) { bestT = t; best = v.body; }
+    }
+    return best;
+  }
+
+  /**
+   * Cheap ray pick for per-frame hover in VR: Solar System bodies, comets, nearby stars and
+   * named stars (no scan of the full catalogue).
+   */
+  pickRayFast(origin: Vector3, dir: Vector3, tolDeg = 2): SpaceObject | null {
+    const d = dir.clone().normalize();
+    const surface = this.rayHitBody(origin, d);
+    if (surface) return surface;
+    const tol = (tolDeg * Math.PI) / 180;
+    let best: SpaceObject | null = null;
+    let bestScore = Infinity;
+    const tmp = new Vector3();
+    const consider = (obj: SpaceObject, rel: Vector3, radius: number, bias: number) => {
+      tmp.copy(rel).sub(origin);
+      const len = tmp.length();
+      const ang = Math.acos(Math.max(-1, Math.min(1, tmp.dot(d) / len)));
+      const size = Math.asin(Math.min(1, radius / Math.max(len, radius * 1.0001)));
+      if (ang > Math.max(tol, size)) return;
+      const score = ang / tol + bias;
+      if (score < bestScore) { bestScore = score; best = obj; }
+    };
+    const mLim = this.lastMLim;
+    for (const v of this.bodies.views.values()) {
+      if (!v.resolved && v.apparentMag > mLim + 1.5) continue;
+      if (this.occluded(v.rel, v.body)) continue;
+      consider(v.body, v.rel, v.body.radius, v.resolved ? -1 : -0.3);
+    }
+    const rel = new Vector3();
+    for (const c of this.small.cometObjects) {
+      if (c.apparentMag > mLim) continue;
+      consider(c, c.upos.sub(this.rig.upos, rel).clone(), c.radius, 0);
+    }
+    for (const st of this.near.stars) consider(st, st.upos.sub(this.rig.upos, rel).clone(), st.radius, -0.2);
+    if (best) return best;
+    const cam = this.camPc;
+    let bestStar: { node: number; slot: number } | null = null;
+    for (const s of this.named.list) {
+      const dist = s.pos.distanceTo(cam);
+      if (dist < NEAR_STAR_RADIUS) continue;
+      const m = s.absMag + 5 * Math.log10(dist) - 5;
+      if (m > Math.min(mLim, 6.5)) continue;
+      rel.copy(s.pos).sub(cam);
+      const ang = Math.acos(Math.max(-1, Math.min(1, rel.dot(d) / rel.length())));
+      if (ang > tol) continue;
+      const score = ang / tol + 0.1 * m;
+      if (score < bestScore) { bestScore = score; bestStar = s; }
+    }
+    return bestStar ? this.getStar(this.catalog, bestStar.node, bestStar.slot) : null;
   }
 
   /** true if the segment camera -> rel is blocked by a resolved body (other than `self`). */
@@ -727,8 +829,12 @@ export class App {
 
     // 3. exposure and level of detail
     const pixelAngle = this.view.pixelAngle;
-    this.bodies.update(this.rig.upos, pixelAngle, dt);
-    const { xStar, xSurf, mLim } = this.updateExposure(dt);
+    this.bodies.glareOn = this.vr.active;
+    this.bodies.update(this.rig.upos, pixelAngle, dt, this.view.quat);
+    this.atmospheres.steps = this.vr.active ? 10 : 16;
+    this.atmospheres.update(this.rig.upos, this.bodies.views);
+    const { xStar, xSurf, mLim, xDark } = this.updateExposure(dt);
+    this.sky.update(xStar / xDark, this.camPc.length());
     this.lastMLim = mLim;
     const psf = this.starFields[0].psf;
     psf.uExposure.value = xStar;
@@ -736,7 +842,7 @@ export class App {
     psf.uPixelSA.value = (this.view.pixelAngle * dpr) ** 2;
     psf.uDpr.value = dpr;
     this.bodies.surfaceExposure.value = xSurf;
-    for (const c of this.catalogs) c.update(this.camPc, mLim);
+    for (const c of this.catalogs) c.update(this.camPc, mLim, this.fieldMinDistPc);
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);
     this.near.update(this.rig.upos, pixelAngle, now / 1000);
     this.orbits.focus = this.rig.anchor instanceof Body ? this.rig.anchor : null;

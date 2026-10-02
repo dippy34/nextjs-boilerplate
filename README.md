@@ -29,7 +29,7 @@ npm install
 npm run dev          # http://127.0.0.1:5173
 ```
 
-All processed data (≈75 MB) is committed under `public/data/`, so the app runs without the
+All processed data (≈125 MB) is committed under `public/data/`, so the app runs without the
 pipeline. To rebuild every data file from the original sources, see [`pipeline/`](pipeline/README.md)
 (`npm run data`, needs Python 3.10+ and ~0.5 GB of downloads).
 
@@ -53,33 +53,46 @@ Deploy to GitHub Pages: `bash scripts/deploy-pages.sh` (builds and force-pushes 
 | L · O · M | Labels · orbits · minor-body orbits |
 | P · H · Esc | Screenshot · help · stop autopilot / deselect |
 
-### VR (WebXR)
+### VR (WebXR) — built for the headset
 
-The **ENTER VR** button appears whenever the browser reports an immersive-VR capable headset.
+Open the link in the headset's browser (Meta Quest Browser, or Chrome/Edge on a PC with a Link /
+SteamVR headset) and press **ENTER VR**. The view fades in and the **menu** opens in front of you.
+
+* **Menu** (Y on the left controller, or MENU on your wrist): tabs for Planets, Moons (by planet),
+  Small worlds (dwarf planets, big asteroids, famous comets), Stars, **Search** (virtual keyboard over
+  every planet, moon, asteroid, comet and 12,585 named stars) and Settings. Every item shows a
+  thumbnail rendered from the real map and its live distance; **point and pull the trigger** to fly there.
+* **Travel** blinks, turns the view so the destination is straight ahead, then flies there in a
+  straight line with a comfort vignette and parks you where the world fills your view ("Blink" travel in
+  Settings jumps instead).
+* **Point at anything in the sky**: a ring and its name/distance appear (with a haptic tick); the trigger
+  selects it and opens an info card; pull the trigger on it again, press **A**, or "Fly to" to go there.
 
 | Controller | Action |
 |---|---|
-| Left stick | Fly where the left controller points (speed scales with altitude) · left grip: ×10 |
-| Right stick | Snap-turn 30° (left/right) · flight speed (up/down) |
-| Right grip + right stick | Orbit around (left/right) / zoom to (up/down) the selection |
-| Right trigger | Select what the ray points at · **A** go to it · **B** stop autopilot / deselect |
-| Left trigger · X / Y · left stick click | Pause · slower / faster time · real time now |
-| Right stick click | Labels on/off |
+| Trigger (either hand) | Click menus · select what the laser points at · again on the selection: fly there |
+| A · B | Fly to the selection · back (stop flight / close card / close menu / deselect) |
+| Y · X | Menu · pause / resume time |
+| Left stick · left grip | Fly where the left controller points (speed scales with altitude) · ×10 |
+| Right stick | Turn (snap 30° or smooth, in Settings) · up/down: flight speed |
+| Right grip + right stick | Orbit around / zoom to the selection |
+| Stick clicks | Right: labels on/off · left: real time, now |
 
-Hand tracking (no controllers) and gaze-and-pinch: pinch to select, pinch the selection again to fly
-there, pinch empty sky to stop. A wrist panel on the left hand shows the date, time rate, selection and
-speed; names float in the sky as 3D labels.
+Hand tracking (no controllers) and gaze-and-pinch work the same way: pinch = trigger. The left wrist
+shows the date, time rate, selection and MENU / FLY TO / PAUSE buttons. Settings: labels, orbit lines
+(off by default in VR), travel and turning style, Milky Way and star brightness, time controls, exit.
 
-In VR the frame is rendered straight into the headset's stereo framebuffer: tone mapping runs inside
-every material (no bloom pass), depth is logarithmic, and should a runtime clamp the far plane, distant
-geometry is pulled inside it along each eye's line of sight with depth still ordered by true distance.
-Tested with Meta's IWER WebXR emulator (Quest 3 profile, stereo, controllers and hands —
-`npm run verify:vr`); not yet profiled on headset hardware.
+Frames go straight into the headset's stereo framebuffer (tone mapping inside every material, the
+same ACES curve as the desktop), logarithmic depth, a glare sprite around the Sun instead of bloom,
+and a pull-in projection for runtimes that clamp the far plane. Tested with Meta's IWER WebXR emulator
+(Quest 3 profile, stereo, projection layers, controllers and hands — `npm run verify:vr`, 23 checks
+including "every VR draw lands in the headset framebuffer"); not yet profiled on headset hardware.
 
 URL parameters (also used by the automated tests): `time=2026-10-01T20:00:00Z`, `rate=86400`,
 `paused=1`, `target=Saturn&dist=6&az=40&el=20` (distance in radii), `look=Betelgeuse`,
 `campc=x,y,z` (camera position in parsecs), `fov=60`, `starlimit=7.5`, `gaia=0` (skip the
-non-commercial Gaia dataset), `depth=log` (force logarithmic depth), `xr=0` (never offer VR).
+non-commercial Gaia dataset), `depth=log` (force logarithmic depth), `xr=0` (never offer VR),
+`mw=1` (Milky Way brightness, 0 hides it).
 
 ## Why Three.js (WebGL2) + TypeScript + Vite
 
@@ -100,9 +113,10 @@ src/
   core/      units, double-double universal positions (UPos), time scales, reference frames
   astro/     DE442S chunk evaluator, Kepler/universal propagation, IAU rotation models, photometry
   universe/  Solar System (planets, 459 moons, minor bodies), streaming star catalogue, named stars
-  render/    HDR renderer (bloom + ACES), star field, bodies (planets, rings, Sun), orbits,
-             GPU asteroids, comets (Web Worker), near-star renderer, labels
+  render/    HDR renderer (bloom + ACES), star field, Milky Way, bodies (planets, rings, Sun, relief,
+             glint), atmospheres, orbits, GPU asteroids, comets (Web Worker), near stars, labels
   app/       main loop, camera rig (free fly / orbit / autopilot), input, WebXR (VR.ts)
+  vr/        in-headset UI: canvas panels with hit regions, the explorer menu
   workers/   comet propagation (double precision, off the main thread)
 pipeline/    Python: download → validate → convert raw catalogues into public/data/
 tests/       unit tests incl. comparison against JPL Horizons reference vectors
@@ -147,14 +161,21 @@ Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`, 
 * Free flight with altitude-scaled speed (metres/s to parsecs/s), orbit mode, logarithmic go-to
   autopilot, time control (pause, ×1 … 100 years/s, reverse), labels, orbit lines, search, info panel,
   screenshots.
-* Immersive VR (WebXR): stereo rendering at astronomical scale, controller and hand-tracking flight,
-  ray selection, go-to, time control, wrist panel and 3D labels.
+* Immersive VR (WebXR) designed for the headset: in-headset menu with planet/moon/star browser and
+  virtual-keyboard search, laser pointing with hover and haptics, comfortable travel, info cards,
+  wrist panel, 3D labels, controllers and hand tracking.
+* Visuals: the real Milky Way (NASA SVS Deep Star Maps, Gaia DR2) behind the catalogue stars;
+  single-scattering atmospheres (Earth, Mars, Venus, Titan, giant-planet limb haze) with reddened
+  sunlight at the terminator; relief from real elevation models (LOLA, MOLA, MESSENGER, ETOPO 2022);
+  sun glint on Earth's oceans; 8k maps of Earth, Moon, Mars and Mercury streamed on demand; Saturn,
+  Uranus and Neptune from 2025 Hubble OPAL maps; giant-planet and Titan colours from measured albedo
+  spectra.
 
 Known limitations (planned for later phases unless noted):
 
-* Planets are textured ellipsoids — LOD terrain, atmospheres, oceans and landing are Phase 2.
-* Saturn, Uranus, Neptune and Venus use procedural banding tinted with colours measured from real
-  spacecraft images (no public-domain global maps exist); the Viking Mars mosaic is over-saturated.
+* Planets are textured ellipsoids with relief shading — LOD terrain geometry and landing are Phase 2.
+* Venus uses procedural banding tinted with the Mariner 10 disk colour; the Viking Mars mosaic is
+  somewhat over-saturated; OPAL maps miss the latitudes Hubble could not see (filled zonally).
 * No Milky Way model yet: beyond ~1 kpc you only see catalogue stars (Phase 3 adds the galaxy,
   nebulae, clusters and procedural stars).
 * Star radii are estimated from V magnitude and temperature (no bolometric correction). Gaia DR3
@@ -163,8 +184,11 @@ Known limitations (planned for later phases unless noted):
 * Comets are points (no coma/tail yet); the asteroid-belt brightness boost for distant asteroids is
   artistic (physical within 0.05 AU).
 * Pluto has no ephemeris outside 1849–2150; no eclipses or body-on-body shadows yet (Phase 6).
-* VR has no bloom or lens glare, no in-headset search box (select by pointing; desktop search still
-  works while the headset is on) and runs at a lower star magnitude limit (6.8) to protect frame rate.
+* VR has no bloom pass (a glare sprite around the Sun stands in) and starts at a lower star magnitude
+  limit (6.8, adjustable in Settings) to protect frame rate.
+* Atmospheres are single scattering (no multiple scattering), seen from space; there is no terrain
+  geometry or landing yet (relief is shading only). The Milky Way map is Earth-centred and fades out
+  beyond ~1 kpc.
 * Performance has been verified only under software rendering (≈20–30 fps at 720p; ~3–5 ms JS per
   frame). GPU profiling and quality presets come in Phase 6.
 

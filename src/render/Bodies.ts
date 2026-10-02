@@ -1,20 +1,33 @@
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, CustomBlending, DoubleSide, DynamicDrawUsage, FrontSide, Group,
-  LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, OneFactor, OneMinusSrcAlphaFactor, Points,
-  RepeatWrapping, ShaderMaterial, SRGBColorSpace, Texture, TextureLoader, Vector3, ClampToEdgeWrapping,
+  ImageBitmapLoader, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, NoColorSpace, OneFactor,
+  OneMinusSrcAlphaFactor, PlaneGeometry, Points, Quaternion, RepeatWrapping, ShaderMaterial, SRGBColorSpace, Texture,
+  TextureLoader, Vector3, ClampToEdgeWrapping,
 } from 'three';
 import { blackbodyRGB, lambertPhase, luminance, sunIrradianceAt } from '../astro/photometry';
 import { AU, SUN_RADIUS } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
-import { BODY_FRAG, BODY_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
+import type { AtmosphereSpec } from './Atmospheres';
+import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
-interface TextureManifest {
-  maps: Record<string, { file: string; channels: string; lonLeft: number; credit: string }>;
+interface MapInfo {
+  file: string; channels: string; lonLeft: number; credit: string;
+  /** optional high-resolution tier, loaded only while the body fills a large part of the view */
+  hi?: { file: string; width: number; height: number };
 }
+interface TextureManifest {
+  maps: Record<string, MapInfo>;
+}
+
+/** pixel radius above which the high-resolution map is wanted, and below which it may be released */
+const HI_WANT_PX = 420;
+const HI_KEEP_PX = 180;
+const HI_RELEASE_S = 20;
+const RELIEF_WANT_PX = 40;
 
 /** Unit sphere in body-fixed coordinates with the texture seam at `lonLeftDeg`. */
 function makeSphere(lonLeftDeg: number, wSeg = 128, hSeg = 64): BufferGeometry {
@@ -113,6 +126,13 @@ export class BodiesLayer {
   private textures = new Map<string, Promise<{ tex: Texture; meanLum: number }>>();
   private loadedTex = new Map<string, { tex: Texture; meanLum: number }>();
   private loader = new TextureLoader();
+  private bitmapLoader = new ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none' });
+  private hiTex = new Map<string, { tex: Texture | null; lastWanted: number }>();
+  private glare: Mesh | null = null;
+  /** camera-facing glare around the Sun (VR only: the desktop path has a bloom pass) */
+  glareOn = false;
+  /** atmosphere parameters per body (for sunlight transmitted to the surface) */
+  atmosphere: (b: Body) => AtmosphereSpec | null = () => null;
   private sprites: Points;
   private spritePos: Float32Array;
   private spriteIrr: Float32Array;
@@ -185,8 +205,73 @@ export class BodiesLayer {
     return p;
   }
 
+  /** map key for a body: its catalogue texture, or a map named after it (e.g. the OPAL giant-planet maps) */
+  textureKey(b: Body): string | null {
+    if (b.texture) return b.texture;
+    const k = b.name.toLowerCase();
+    return this.manifest.maps[k] ? k : null;
+  }
+
+  private reliefKey(b: Body): string | null {
+    const k = `${b.name.toLowerCase()}_relief`;
+    return this.manifest.maps[k] ? k : null;
+  }
+
+  private loadData(key: string): Promise<Texture> {
+    const info = this.manifest.maps[key];
+    return this.loader.loadAsync(`${this.texBase}/${info.file}`).then((tex) => {
+      tex.colorSpace = NoColorSpace;
+      tex.wrapS = RepeatWrapping;
+      tex.wrapT = ClampToEdgeWrapping;
+      tex.minFilter = LinearMipmapLinearFilter;
+      tex.magFilter = LinearFilter;
+      tex.anisotropy = 4;
+      return tex;
+    });
+  }
+
+  /** The high-resolution tier of `key` if loaded; starts loading it (decoded off the main thread). */
+  private wantHi(key: string, now: number): Texture | null {
+    const info = this.manifest.maps[key];
+    if (!info?.hi) return null;
+    let e = this.hiTex.get(key);
+    if (!e) {
+      e = { tex: null, lastWanted: now };
+      this.hiTex.set(key, e);
+      const entry = e;
+      this.bitmapLoader.loadAsync(`${this.texBase}/${info.hi.file}`).then((bmp) => {
+        if (this.hiTex.get(key) !== entry) { (bmp as ImageBitmap).close?.(); return; }
+        const tex = new Texture(bmp as ImageBitmap);
+        tex.flipY = false;
+        tex.colorSpace = '';
+        tex.wrapS = RepeatWrapping;
+        tex.wrapT = ClampToEdgeWrapping;
+        tex.minFilter = LinearMipmapLinearFilter;
+        tex.magFilter = LinearFilter;
+        tex.anisotropy = 8;
+        tex.needsUpdate = true;
+        entry.tex = tex;
+      }).catch((err) => console.warn('high-resolution map failed', key, err));
+    }
+    e.lastWanted = now;
+    return e.tex;
+  }
+
+  private releaseHi(now: number): void {
+    for (const [key, e] of this.hiTex) {
+      if (now - e.lastWanted < HI_RELEASE_S) continue;
+      if (e.tex) {
+        const img = e.tex.image as ImageBitmap | undefined;
+        e.tex.dispose();
+        img?.close?.();
+      }
+      this.hiTex.delete(key);
+    }
+  }
+
   private createMesh(b: Body): Mesh {
-    const mapInfo = b.texture ? this.manifest.maps[b.texture] : undefined;
+    const texKey = this.textureKey(b);
+    const mapInfo = texKey ? this.manifest.maps[texKey] : undefined;
     const isStar = b.kind === 'star';
     const mat = new ShaderMaterial({
       vertexShader: BODY_VERT,
@@ -198,7 +283,10 @@ export class BodiesLayer {
         uColor: { value: new Vector3(...b.color) },
         uAlbedoScale: { value: 1 },
         uAirless: { value: b.isAirless ? 1 : 0 },
-        uBands: { value: !b.texture && (b.isGasGiant || b.name === 'Venus') ? 1 : 0 },
+        uBands: { value: !texKey && (b.isGasGiant || b.name === 'Venus') ? 1 : 0 },
+        uRelief: { value: null }, uHasRelief: { value: 0 }, uWater: { value: 0 },
+        uAtmo: { value: 0 }, uRp: { value: b.radii[0] }, uBetaR: { value: new Vector3() }, uHR: { value: 8000 },
+        uBetaMe: { value: new Vector3() }, uHM: { value: 1200 },
         uSeed: { value: (b.id % 97) * 1.37 },
         uSunDir: { value: new Vector3(1, 0, 0) },
         uSunIrr: { value: Math.PI },
@@ -231,8 +319,8 @@ export class BodiesLayer {
       const geomAlbedo = b.meta.albedo as number | undefined;
       const known = geomAlbedo !== undefined;
       const lambertRho = Math.min(1, 1.5 * b.albedo);
-      if (b.texture) {
-        this.texture(b.texture).then(({ tex, meanLum }) => {
+      if (texKey) {
+        this.texture(texKey).then(({ tex, meanLum }) => {
           u.uMap.value = tex;
           u.uHasMap.value = 1;
           u.uAlbedoScale.value = known ? lambertRho / Math.max(meanLum, 1e-3) : 1;
@@ -246,8 +334,35 @@ export class BodiesLayer {
       }
       const ring = this.rings_[b.name.toLowerCase()];
       if (ring) this.createRings(b, ring, u);
+      const atmo = this.atmosphere(b);
+      if (atmo?.surfaceTransmittance) {
+        u.uAtmo.value = 1;
+        u.uBetaR.value.set(...atmo.betaR);
+        u.uHR.value = atmo.HR;
+        u.uBetaMe.value.set(...atmo.betaMe);
+        u.uHM.value = atmo.HM;
+      }
     }
+    if (isStar) this.createGlare(b);
     return mesh;
+  }
+
+  private createGlare(b: Body): void {
+    if (this.glare) return;
+    const c = blackbodyRGB(b.teff);
+    const L = luminance(c);
+    const mat = new ShaderMaterial({
+      vertexShader: GLARE_VERT, fragmentShader: GLARE_FRAG,
+      uniforms: { uColor: { value: new Vector3(c[0] / L, c[1] / L, c[2] / L) }, uIntensity: { value: 1 }, uDiskFrac: { value: 0.1 },
+        uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+      transparent: true, depthWrite: false, blending: AdditiveBlending,
+    });
+    this.glare = new Mesh(new PlaneGeometry(2, 2), mat);
+    this.glare.matrixAutoUpdate = false;
+    this.glare.frustumCulled = false;
+    this.glare.renderOrder = 15;
+    this.glare.visible = false;
+    this.group.add(this.glare);
   }
 
   private createRings(b: Body, ring: { innerKm: number; outerKm: number; texture: string }, planetUniforms: Record<string, { value: unknown }>): void {
@@ -285,8 +400,9 @@ export class BodiesLayer {
    * Update all body transforms for the camera at `cam`.
    * `pixelAngle`: radians per pixel; `exposure`: current pre-exposure.
    */
-  update(cam: UPos, pixelAngle: number, dt: number): void {
+  update(cam: UPos, pixelAngle: number, dt: number, viewQuat?: Quaternion): void {
     this.time += dt;
+    const now = performance.now() / 1000;
     const sun = this.system.sun;
     const sunRel = sun.upos.sub(cam, new Vector3());
     let n = 0;
@@ -341,6 +457,7 @@ export class BodiesLayer {
         mesh.matrix.copy(m4);
         mesh.matrixWorldNeedsUpdate = true;
         const u = (mesh.material as ShaderMaterial).uniforms;
+        this.updateMaps(b, u, view.pixelRadius, now);
         rot3.setFromMatrix4(b.orientation);
         u.uBodyToWorld.value.copy(rot3);
         u.uBodyCenter.value.copy(view.rel);
@@ -371,10 +488,56 @@ export class BodiesLayer {
       const ringMesh = this.rings.get(b);
       if (ringMesh && !view.resolved) ringMesh.visible = false;
     }
+    this.updateGlare(viewQuat);
+    this.releaseHi(now);
     this.sprites.geometry.setDrawRange(0, n);
     (this.sprites.geometry.attributes.position as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aIrr as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aColor as BufferAttribute).needsUpdate = true;
+  }
+
+  /** Swap in the high-resolution map and the relief map when the body is large on screen. */
+  private updateMaps(b: Body, u: Record<string, { value: unknown }>, pixelRadius: number, now: number): void {
+    const key = this.textureKey(b);
+    if (key && this.manifest.maps[key]?.hi) {
+      const entry = this.hiTex.get(key);
+      const want = pixelRadius > HI_WANT_PX || (entry !== undefined && pixelRadius > HI_KEEP_PX);
+      const hi = want ? this.wantHi(key, now) : null;
+      const lo = this.loadedTex.get(key)?.tex ?? null;
+      const tex = hi ?? lo;
+      if (tex && u.uMap.value !== tex) u.uMap.value = tex;
+    }
+    const rk = this.reliefKey(b);
+    if (rk && pixelRadius > RELIEF_WANT_PX && !this.reliefRequested.has(rk)) {
+      this.reliefRequested.add(rk);
+      const water = this.manifest.maps[rk].channels === 'relief+water';
+      this.loadData(rk).then((tex) => {
+        u.uRelief.value = tex;
+        u.uHasRelief.value = 1;
+        u.uWater.value = water ? 1 : 0;
+      }).catch((err) => console.warn('relief map failed', rk, err));
+    }
+  }
+  private reliefRequested = new Set<string>();
+
+  /** VR: glare quad around the resolved Sun, facing the viewer. */
+  private updateGlare(viewQuat?: Quaternion): void {
+    const g = this.glare;
+    if (!g) return;
+    const sun = this.system.sun;
+    const v = this.views.get(sun);
+    g.visible = this.glareOn && !!v && v.resolved && !!viewQuat;
+    if (!g.visible || !v || !viewQuat) return;
+    const angR = Math.asin(Math.min(1, sun.radius / Math.max(v.dist, sun.radius * 1.0001)));
+    const halfAng = Math.max(angR * 14, (10 * Math.PI) / 180);
+    const half = Math.tan(Math.min(halfAng, 1.2)) * v.dist;
+    const u = (g.material as ShaderMaterial).uniforms;
+    u.uDiskFrac.value = Math.min(0.9, angR / Math.min(halfAng, 1.2));
+    // the disk is shown at ~2.5 (eye adaptation caps it); scale the glare with it
+    const diskDisplay = this.surfaceExposure.value * (AU / SUN_RADIUS) ** 2;
+    u.uIntensity.value = 0.9 * Math.min(1, diskDisplay / 2.5);
+    g.matrix.compose(v.rel, viewQuat, new Vector3(half, half, half));
+    g.matrixWorldNeedsUpdate = true;
   }
 }
 

@@ -98,16 +98,19 @@ export class StarCatalog {
 
   /**
    * Select needed nodes for a camera at `cam` (pc) with limiting apparent magnitude `mLim`.
+   * `minDistPc` is a lower bound on the distance of any star drawn by the field (the nearest star
+   * outside the near-star layer); it keeps tiles around the camera from drawing every faint star.
    * Fills `this.needed` with ready nodes and queues loads (brightest first).
    */
-  update(cam: Vector3, mLim: number): void {
+  update(cam: Vector3, mLim: number, minDistPc = 0): void {
     this.frame++;
     this.needed.length = 0;
     const want: { node: StarNode; m: number }[] = [];
     const stack = [0];
     while (stack.length) {
       const n = this.nodes[stack.pop()!];
-      const d = aabbDistance(cam, n.center, n.half);
+      // no star can be closer than the nearest star (outside the near-star layer)
+      const d = Math.max(aabbDistance(cam, n.center, n.half), minDistPc);
       n.dmin = d;
       const distMod = 5 * Math.log10(Math.max(d, 1e-9) / 10);
       if (n.subMag + distMod > mLim) continue;
