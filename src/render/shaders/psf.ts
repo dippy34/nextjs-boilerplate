@@ -23,8 +23,22 @@ uniform float uPointGamma;
 uniform float uPointGain;
 uniform float uDpr;
 uniform float uMaxEnergy;
+uniform float uSat;
+uniform float uHalo;   // halo/spike strength (1 for stars; small bodies use less)
 `;
 
+/*
+ * Appearance of a point source. `energy` E is the displayed energy (physical, pre-exposed
+ * irradiance per pixel compressed by a perceptual power law); `g` = log2(raw / threshold) is how
+ * many factors of two the source is above the visibility limit:
+ *  - core: a sharp Gaussian (sigma 0.65 px) whose peak saturates softly at ~1, so a bright star
+ *    stays a point instead of clipping into a white disc;
+ *  - halo: a coloured glow whose size and strength grow with g (the eye reads a brighter star as
+ *    a bigger glow, as in SpaceEngine/Celestia);
+ *  - spikes: faint four-point diffraction spikes for the brightest sources (uGlare scales them).
+ * Values are display-referred (~0..1.3), so hue survives the tone curve; uSat sets the colour
+ * saturation (1 = blackbody chromaticity; stars are shown somewhat more saturated by default).
+ */
 export const PSF_VERTEX = /* glsl */ `
 float magToIrradiance(float m) { return 3.14159265 * exp2(-1.3287712 * (clamp(m, -60.0, 60.0) + 26.74)); }
 // Returns sprite radius in CSS pixels (0 => cull). uPixelSA is the solid angle of one CSS pixel;
@@ -32,9 +46,11 @@ float magToIrradiance(float m) { return 3.14159265 * exp2(-1.3287712 * (clamp(m,
 float psfSetup(float irradiance, out float energy) {
   float raw = uExposure * irradiance / uPixelSA;
   if (!(raw >= uMinEnergy)) { energy = 0.0; return 0.0; }
-  // Displayed energy is capped: very bright points get a large but finite glare (bloom does the rest).
   energy = min(uPointGain * pow(raw, uPointGamma), uMaxEnergy);
-  return min(uMaxRadius, 1.8 + 1.4 * log2(1.0 + energy) + 0.12 * sqrt(energy) * uGlare);
+  float g = max(0.0, log2(raw / uMinEnergy));
+  float rh = 0.6 + 0.42 * g * uHalo;
+  float spikes = g > 8.0 ? 4.0 * rh * uGlare * uHalo : 0.0;
+  return min(uMaxRadius, max(2.5, max(rh * 3.5, spikes)));
 }
 `;
 
@@ -42,12 +58,22 @@ export const PSF_FRAGMENT = /* glsl */ `
 vec3 psfShade(vec2 pointCoord, float radius, float energy, vec3 color) {
   vec2 p = (pointCoord - 0.5) * 2.0 * radius;   // CSS pixels from centre
   float r2 = dot(p, p);
-  // Gaussian core, sigma = 0.8 px, normalised to unit integral
-  float core = exp(-r2 * 0.78125) * 0.24868;
-  // Faint wide glare for bright sources (power-law wings, unit-ish integral scaled by uGlare)
-  float glare = uGlare * 0.02 / pow(1.0 + 0.5 * r2, 1.5);
-  float edge = 1.0 - smoothstep(0.75, 1.0, sqrt(r2) / radius);
-  // energy is per CSS pixel; spread over uDpr^2 device pixels
-  return min(color * energy * (core + glare) * edge / (uDpr * uDpr), vec3(6.0e4));
+  float raw = pow(max(energy, 1e-6) / uPointGain, 1.0 / uPointGamma);
+  float g = max(0.0, log2(raw / uMinEnergy));
+  float core = (1.0 - exp(-energy * 0.35)) * exp(-r2 * 1.1834);           // sigma 0.65 px
+  float rh = 0.6 + 0.42 * g * uHalo;
+  float halo = uHalo * (0.04 + 0.3 * smoothstep(3.0, 11.0, g)) * min(1.0, energy) / pow(1.0 + r2 / (rh * rh), 1.5);
+  float spikes = 0.0;
+  if (g > 8.0 && uGlare > 0.0) {
+    float L = 4.0 * rh;
+    vec2 a = abs(p);
+    float s1 = exp(-a.y * 1.6) * (1.0 - smoothstep(0.0, L, a.x)) / (1.0 + 4.0 * a.x / L);
+    float s2 = exp(-a.x * 1.6) * (1.0 - smoothstep(0.0, L, a.y)) / (1.0 + 4.0 * a.y / L);
+    spikes = (s1 + s2) * 0.28 * smoothstep(8.0, 13.0, g) * uGlare * uHalo;
+  }
+  float edge = 1.0 - smoothstep(0.8, 1.0, sqrt(r2) / radius);
+  float lum = (core + halo + spikes) * edge;
+  vec3 c = max(mix(vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), color, uSat), 0.0);
+  return c * lum;
 }
 `;

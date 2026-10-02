@@ -153,7 +153,7 @@ export class SmallBodiesLayer {
     geo.setAttribute('position', new InterleavedBufferAttribute(ib, 3, 0));
     const mat = new ShaderMaterial({
       vertexShader: ASTEROID_VERT, fragmentShader: FRAG,
-      uniforms: { ...this.psf, uDt: { value: 0 }, uSunRel: { value: new Vector3() }, uEclToEqu: { value: this.eclToEqu }, uBoost: { value: this.boost } },
+      uniforms: { ...this.psf, uHalo: { value: 0.2 }, uDt: { value: 0 }, uSunRel: { value: new Vector3() }, uEclToEqu: { value: this.eclToEqu }, uBoost: { value: this.boost } },
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
     this.asteroids = new Points(geo, mat);
@@ -169,7 +169,7 @@ export class SmallBodiesLayer {
     cgeo.setAttribute('aMag', new BufferAttribute(new Float32Array(rows.length).fill(99), 1).setUsage(DynamicDrawUsage));
     const cmat = new ShaderMaterial({
       vertexShader: COMET_VERT, fragmentShader: FRAG,
-      uniforms: { ...this.psf, uSunRel: { value: new Vector3() }, uBoost: { value: 1 } },
+      uniforms: { ...this.psf, uHalo: { value: 0.2 }, uSunRel: { value: new Vector3() }, uBoost: { value: 1 } },
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
     this.comets = new Points(cgeo, cmat);

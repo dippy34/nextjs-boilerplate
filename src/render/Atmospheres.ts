@@ -136,6 +136,16 @@ export class AtmospheresLayer {
     return s;
   }
 
+  /** Create every atmosphere shell now (for shader warm-up and so none is built mid-flight). */
+  warmupObjects(): Mesh[] {
+    const out: Mesh[] = [];
+    for (const b of this.system.bodies) {
+      const s = this.shell(b);
+      if (s) out.push(s.mesh);
+    }
+    return out;
+  }
+
   update(cam: UPos, views: Map<Body, BodyView>): void {
     const sunRel = this.system.sun.upos.sub(cam, new Vector3());
     const rot = new Matrix3();

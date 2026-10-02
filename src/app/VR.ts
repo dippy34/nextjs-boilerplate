@@ -60,7 +60,7 @@ export class VRSupport {
   private hoverKey = '';
   private vignette: Mesh;
   private vig = { fade: { value: 0 }, tunnel: { value: 0 } };
-  private travel: { phase: 'out' | 'fly' | 'in'; t: number; target: SpaceObject } | null = null;
+  private travel: { phase: 'enter' | 'out' | 'reveal' | 'fly' | 'jump' | 'done'; t: number; target: SpaceObject } | null = null;
   private pendingMenu = false;
   private flashText = '';
   private flashUntil = 0;
@@ -170,7 +170,8 @@ export class VRSupport {
     this.vignette.visible = true;
     // fade in from black, then show the menu
     this.vig.fade.value = 1;
-    this.travel = { phase: 'in', t: 0, target: app.selection ?? app.system.sun };
+    this.travel = { phase: 'enter', t: 0, target: app.selection ?? app.system.sun };
+    app.warmupPending = true; // tone mapping changed: compile the headset's shader variants while black
     this.pendingMenu = true;
     this.flash('Trigger: select · A: fly there · Y: menu');
   }
@@ -347,6 +348,7 @@ export class VRSupport {
 
   travelTo(obj: SpaceObject): void {
     this.app.select(obj);
+    if (obj instanceof Body) this.app.bodies.prefetch(obj);
     this.menu.panel.setVisible(false);
     this.card.setVisible(false);
     this.travel = { phase: 'out', t: 0, target: obj };
@@ -364,6 +366,10 @@ export class VRSupport {
     return obj.radius > 0 ? obj.radius * 80 : 3e7;
   }
 
+  /**
+   * Travel: blink, turn so the destination is straight ahead, open the eyes on it, then one
+   * continuous flight (tunnel vignette only while it is still a dot), easing to a stop.
+   */
   private updateTravel(dt: number): void {
     const tr = this.travel;
     const rig = this.app.rig;
@@ -374,45 +380,57 @@ export class VRSupport {
       return;
     }
     tr.t += dt;
-    if (tr.phase === 'out') {
-      v.fade.value = Math.min(1, tr.t / 0.22);
-      if (v.fade.value >= 1) {
-        // re-aim while the view is black: the destination ends up straight ahead of the head
-        const cam = this.app.renderer.camera;
-        cam.updateMatrixWorld(true);
-        const headFwd = new Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new Quaternion()));
-        const toTarget = tr.target.upos.sub(rig.upos, new Vector3()).normalize();
-        rig.quat.premultiply(new Quaternion().setFromUnitVectors(headFwd, toTarget)).normalize();
-        const blink = this.settings.travel === 'blink';
-        rig.flyTo(tr.target, this.arrivalDistance(tr.target), blink ? 0.05 : undefined, false);
-        tr.phase = 'fly';
-        tr.t = 0;
-      }
-      return;
-    }
-    if (tr.phase === 'fly') {
-      if (this.settings.travel === 'blink') {
-        if (!rig.autopilot) { tr.phase = 'in'; tr.t = 0; }
+    switch (tr.phase) {
+      case 'out':
+        v.fade.value = Math.min(1, tr.t / 0.16);
+        if (v.fade.value >= 1) {
+          const cam = this.app.renderer.camera;
+          cam.updateMatrixWorld(true);
+          const headFwd = new Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new Quaternion()));
+          const toTarget = tr.target.upos.sub(rig.upos, new Vector3()).normalize();
+          rig.quat.premultiply(new Quaternion().setFromUnitVectors(headFwd, toTarget)).normalize();
+          if (this.settings.travel === 'blink') {
+            rig.flyTo(tr.target, this.arrivalDistance(tr.target), 0.05, false);
+            tr.phase = 'jump';
+          } else {
+            tr.phase = 'reveal';
+          }
+          tr.t = 0;
+        }
+        return;
+      case 'reveal':
+        // eyes open on the destination before moving
+        v.fade.value = Math.max(0, 1 - tr.t / 0.25);
+        if (v.fade.value <= 0) {
+          rig.flyTo(tr.target, this.arrivalDistance(tr.target), undefined, false);
+          tr.phase = 'fly';
+          tr.t = 0;
+        }
+        return;
+      case 'fly': {
+        const want = rig.gotoCruising ? 0.6 : 0;
+        v.tunnel.value += (want - v.tunnel.value) * Math.min(1, dt * 4);
+        if (!rig.autopilot) { tr.phase = 'done'; tr.t = 0; }
         return;
       }
-      v.fade.value = Math.max(0, v.fade.value - dt * 3);
-      const p = rig.gotoProgress;
-      v.tunnel.value = 0.75 * Math.min(1, p * 8, (1 - p) * 4);
-      if (!rig.autopilot) { tr.phase = 'in'; tr.t = 0; }
-      return;
-    }
-    // 'in'
-    v.fade.value = Math.max(0, v.fade.value - dt * 2.5);
-    v.tunnel.value = Math.max(0, v.tunnel.value - dt * 2);
-    if (v.fade.value <= 0 && v.tunnel.value <= 0) {
-      const arrived = tr.target;
-      this.travel = null;
-      if (this.pendingMenu) {
-        this.pendingMenu = false;
-        this.toggleMenu();
-      } else {
-        this.flash(arrived.name);
-      }
+      case 'jump':
+        if (!rig.autopilot) { tr.phase = 'done'; tr.t = 0; }
+        return;
+      case 'enter':
+      case 'done':
+        v.fade.value = Math.max(0, v.fade.value - dt * 3);
+        v.tunnel.value = Math.max(0, v.tunnel.value - dt * 2.5);
+        if (v.fade.value <= 0 && v.tunnel.value <= 0) {
+          const arrived = tr.target;
+          const entering = tr.phase === 'enter';
+          this.travel = null;
+          if (entering && this.pendingMenu) {
+            this.pendingMenu = false;
+            this.toggleMenu();
+          } else if (!entering) {
+            this.flash(arrived.name);
+          }
+        }
     }
   }
 
@@ -500,7 +518,7 @@ export class VRSupport {
   }
 
   private back(): void {
-    if (this.travel) { this.app.rig.cancelGoto(); this.travel = { ...this.travel, phase: 'in', t: 0 }; return; }
+    if (this.travel) { this.app.rig.cancelGoto(); this.travel = { ...this.travel, phase: 'done', t: 0 }; return; }
     if (this.card.visible) { this.card.setVisible(false); return; }
     if (this.menu.isOpen) { this.menu.panel.setVisible(false); return; }
     this.app.cancelOrDeselect();

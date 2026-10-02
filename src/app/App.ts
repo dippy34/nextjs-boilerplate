@@ -45,6 +45,8 @@ export class App {
   private hudTimer = 0;
   private nearTimer = 0;
   private nearestStarDist = Infinity;
+  /** compile every shader before it is first needed (set again when VR changes tone mapping) */
+  warmupPending = false;
   private fieldMinDistPc = 0;
   /** one object per catalogue star so selection, labels and near-star rendering agree */
   private starCache = new Map<string, CatalogStar>();
@@ -128,6 +130,8 @@ export class App {
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
+    bodies.uploader = (t) => renderer.gl.initTexture(t);
+    app.warmupPending = true;
     app.applyUrl();
     app.bindKeys();
     app.resize();
@@ -282,7 +286,21 @@ export class App {
     if (obj instanceof CatalogStar) obj.resolve(this.named, () => undefined);
   }
 
+  /**
+   * Compile every material the scene can need (planets, rings, stars, glare, all atmospheres) up
+   * front, so a shader is never compiled mid-flight. Runs inside a frame so the headset's variant
+   * is compiled while presenting.
+   */
+  private warmUp(): void {
+    const objs = [...this.bodies.warmupObjects(), ...this.atmospheres.warmupObjects()];
+    const was = objs.map((o) => o.visible);
+    for (const o of objs) o.visible = true;
+    void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
+    objs.forEach((o, i) => { o.visible = was[i]; });
+  }
+
   goTo(obj: SpaceObject): void {
+    if (obj instanceof Body) this.bodies.prefetch(obj);
     let d: number;
     if (obj instanceof Body) d = obj.kind === 'star' ? obj.radius * 8 : Math.max(obj.radius * 3.5, 2e3);
     else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 8, 1e9);
@@ -830,6 +848,7 @@ export class App {
     // 3. exposure and level of detail
     const pixelAngle = this.view.pixelAngle;
     this.bodies.glareOn = this.vr.active;
+    this.bodies.allowHi = !this.vr.active;
     this.bodies.update(this.rig.upos, pixelAngle, dt, this.view.quat);
     this.atmospheres.steps = this.vr.active ? 10 : 16;
     this.atmospheres.update(this.rig.upos, this.bodies.views);
@@ -850,6 +869,10 @@ export class App {
     this.small.update(this.rig.upos, jd);
 
     // 4. draw
+    if (this.warmupPending) {
+      this.warmupPending = false;
+      this.warmUp();
+    }
     this.renderer.render();
 
     // 5. overlays

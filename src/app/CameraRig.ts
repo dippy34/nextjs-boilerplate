@@ -62,20 +62,42 @@ export class CameraRig {
     this.quat.setFromRotationMatrix(m);
   }
 
-  /** Begin the autopilot towards `target`, stopping at `finalDistance` from its centre. */
+  /**
+   * Begin the autopilot towards `target`, stopping at `finalDistance` from its centre.
+   *
+   * The distance follows a curve in log space: the stretch where the target is still a dot
+   * (farther than ~300 radii) is crossed quickly, and the time goes into the approach where
+   * it visibly grows, easing to a stop. Monotone cubic Hermite, so there is no overshoot and
+   * no change of pace between the two stretches.
+   */
   flyTo(target: SpaceObject, finalDistance: number, duration?: number, rotate = true): void {
     const rel = this.upos.sub(target.upos, new Vector3());
     const d0 = Math.max(rel.length(), 1e-3);
     const d1 = Math.max(finalDistance, 1);
     const dir = rel.clone().divideScalar(d0);
     if (!Number.isFinite(dir.x)) dir.set(0, 0, 1);
-    const ratio = Math.abs(Math.log(d0 / d1));
-    const T = duration ?? Math.min(14, Math.max(2.5, 1.6 + 0.42 * ratio));
+    const L0 = Math.log(d0), L1 = Math.log(d1);
+    let knots: Knot[];
+    if (duration !== undefined) {
+      knots = [{ t: 0, L: L0, m: 0 }, { t: Math.max(duration, 1e-3), L: L1, m: 0 }];
+    } else {
+      const Lv = Math.max(L1, Math.log(Math.max(target.radius, 1) * 300));
+      if (L0 > Lv + 0.7) {
+        const TA = clamp(1.0 + 0.15 * (L0 - Lv), 1.7, 3.6);
+        const TB = clamp(1.4 + 0.5 * Math.abs(Lv - L1), 2.4, 4.6);
+        const sA = (Lv - L0) / TA, sB = (L1 - Lv) / TB;
+        const mJ = sA * sB > 0 ? (2 * sA * sB) / (sA + sB) : 0;
+        knots = [{ t: 0, L: L0, m: 0 }, { t: TA, L: Lv, m: mJ }, { t: TA + TB, L: L1, m: 0 }];
+      } else {
+        knots = [{ t: 0, L: L0, m: 0 }, { t: clamp(1.8 + 0.5 * Math.abs(L0 - L1), 2.2, 4.6), L: L1, m: 0 }];
+      }
+    }
+    const T = knots[knots.length - 1].t;
     const look = dir.clone().negate();
     const m = new Matrix4().lookAt(new Vector3(), look, this.up(new Vector3()));
     const q1 = new Quaternion().setFromRotationMatrix(m);
     this.target = target;
-    this.goto = { target, dir, d0, d1, t: 0, T, q0: this.quat.clone(), q1: rotate ? q1 : null };
+    this.goto = { target, dir, knots, t: 0, T, fastUntil: knots.length > 2 ? knots[1].t : 0, q0: this.quat.clone(), q1: rotate ? q1 : null };
     this.setAnchor(target);
   }
 
@@ -104,6 +126,11 @@ export class CameraRig {
   /** Autopilot progress 0..1 (1 when idle). */
   get gotoProgress(): number {
     return this.goto ? this.goto.t / this.goto.T : 1;
+  }
+
+  /** true while the autopilot crosses the far stretch where the target is still a dot */
+  get gotoCruising(): boolean {
+    return !!this.goto && this.goto.t < this.goto.fastUntil;
   }
 
   update(dt: number, input: Input): void {
@@ -158,8 +185,7 @@ export class CameraRig {
       const g = this.goto;
       g.t = Math.min(g.T, g.t + dt);
       const s = g.t / g.T;
-      const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, s * 1.05));
-      const d = Math.exp(Math.log(g.d0) + (Math.log(g.d1) - Math.log(g.d0)) * e);
+      const d = Math.exp(hermite(g.knots, g.t));
       const want = g.target.upos.clone().addVec(g.dir, d);
       this.upos.copy(want);
       if (g.q1) this.quat.copy(g.q0).slerp(g.q1, Math.min(1, smooth(s / 0.35)));
@@ -192,15 +218,32 @@ export class CameraRig {
   }
 }
 
+interface Knot { t: number; L: number; m: number }
+
 interface GotoState {
   target: SpaceObject;
   dir: Vector3;
-  d0: number;
-  d1: number;
+  knots: Knot[];
   t: number;
   T: number;
+  fastUntil: number;
   q0: Quaternion;
   q1: Quaternion | null;
+}
+
+/** Piecewise cubic Hermite through `knots` (value L, slope m). */
+function hermite(k: Knot[], t: number): number {
+  let i = 0;
+  while (i < k.length - 2 && t > k[i + 1].t) i++;
+  const a = k[i], b = k[i + 1];
+  const h = b.t - a.t;
+  const s = clamp((t - a.t) / h, 0, 1);
+  const s2 = s * s, s3 = s2 * s;
+  return (2 * s3 - 3 * s2 + 1) * a.L + (s3 - 2 * s2 + s) * h * a.m + (-2 * s3 + 3 * s2) * b.L + (s3 - s2) * h * b.m;
+}
+
+function clamp(x: number, a: number, b: number): number {
+  return Math.max(a, Math.min(b, x));
 }
 
 function smooth(x: number): number {

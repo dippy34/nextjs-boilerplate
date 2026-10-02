@@ -131,6 +131,10 @@ export class BodiesLayer {
   private glare: Mesh | null = null;
   /** camera-facing glare around the Sun (VR only: the desktop path has a bloom pass) */
   glareOn = false;
+  /** allow the 8k map tier (off in VR: uploading an 8k texture stalls a headset frame) */
+  allowHi = true;
+  /** uploads a texture to the GPU now (set by the app: renderer.initTexture) */
+  uploader: (tex: Texture) => void = () => undefined;
   /** atmosphere parameters per body (for sunlight transmitted to the surface) */
   atmosphere: (b: Body) => AtmosphereSpec | null = () => null;
   private sprites: Points;
@@ -267,6 +271,38 @@ export class BodiesLayer {
       }
       this.hiTex.delete(key);
     }
+  }
+
+  /**
+   * Get a body ready before the camera arrives: create its materials and load and upload its
+   * maps now, so nothing stalls a frame when it fills the view.
+   */
+  prefetch(b: Body): void {
+    if (!b.valid) return;
+    const mesh = this.meshes.get(b) ?? this.createMesh(b);
+    mesh.visible = false;
+    const key = this.textureKey(b);
+    const tasks: Promise<unknown>[] = [];
+    if (key) tasks.push(this.texture(key));
+    if (b.name === 'Earth') tasks.push(this.texture('earth_night'), this.texture('earth_clouds'));
+    const rk = this.reliefKey(b);
+    if (rk) this.requestRelief(rk, (mesh.material as ShaderMaterial).uniforms);
+    for (const t of tasks) t.then((v) => this.uploader((v as { tex: Texture }).tex)).catch(() => undefined);
+  }
+
+  /** Create one of every kind of body material (planet, rings, star, glare) for shader warm-up. */
+  warmupObjects(): Mesh[] {
+    const out: Mesh[] = [];
+    const sat = this.system.bodies.find((b) => b.name === 'Saturn');
+    for (const b of [this.system.sun, sat]) {
+      if (!b) continue;
+      const m = this.meshes.get(b) ?? this.createMesh(b);
+      out.push(m);
+      const r = this.rings.get(b);
+      if (r) out.push(r);
+    }
+    if (this.glare) out.push(this.glare);
+    return out;
   }
 
   private createMesh(b: Body): Mesh {
@@ -501,22 +537,26 @@ export class BodiesLayer {
     const key = this.textureKey(b);
     if (key && this.manifest.maps[key]?.hi) {
       const entry = this.hiTex.get(key);
-      const want = pixelRadius > HI_WANT_PX || (entry !== undefined && pixelRadius > HI_KEEP_PX);
+      const want = this.allowHi && (pixelRadius > HI_WANT_PX || (entry !== undefined && pixelRadius > HI_KEEP_PX));
       const hi = want ? this.wantHi(key, now) : null;
       const lo = this.loadedTex.get(key)?.tex ?? null;
       const tex = hi ?? lo;
       if (tex && u.uMap.value !== tex) u.uMap.value = tex;
     }
     const rk = this.reliefKey(b);
-    if (rk && pixelRadius > RELIEF_WANT_PX && !this.reliefRequested.has(rk)) {
-      this.reliefRequested.add(rk);
-      const water = this.manifest.maps[rk].channels === 'relief+water';
-      this.loadData(rk).then((tex) => {
-        u.uRelief.value = tex;
-        u.uHasRelief.value = 1;
-        u.uWater.value = water ? 1 : 0;
-      }).catch((err) => console.warn('relief map failed', rk, err));
-    }
+    if (rk && pixelRadius > RELIEF_WANT_PX) this.requestRelief(rk, u);
+  }
+
+  private requestRelief(rk: string, u: Record<string, { value: unknown }>): void {
+    if (this.reliefRequested.has(rk)) return;
+    this.reliefRequested.add(rk);
+    const water = this.manifest.maps[rk].channels === 'relief+water';
+    this.loadData(rk).then((tex) => {
+      this.uploader(tex);
+      u.uRelief.value = tex;
+      u.uHasRelief.value = 1;
+      u.uWater.value = water ? 1 : 0;
+    }).catch((err) => console.warn('relief map failed', rk, err));
   }
   private reliefRequested = new Set<string>();
 

@@ -70,12 +70,14 @@ export class StarFieldLayer {
     uExposure: { value: 1 },
     uPixelSA: { value: 1e-6 },
     uMinEnergy: { value: 0.004 },
-    uMaxRadius: { value: 48 },
+    uMaxRadius: { value: 64 },
     uGlare: { value: 1 },
     uPointGamma: { value: 0.55 },
     uPointGain: { value: 2.5 },
     uDpr: { value: 1 },
-    uMaxEnergy: { value: 2500 },
+    uMaxEnergy: { value: 8000 },
+    uSat: { value: 1.7 },
+    uHalo: { value: 1 },
     uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
   };
 
