@@ -1,0 +1,177 @@
+import { Matrix4, Quaternion, Vector3 } from 'three';
+import { UPos } from '../core/upos';
+import type { SpaceObject } from '../universe/Body';
+import type { Input } from './Input';
+
+/**
+ * Camera state in universal coordinates plus the SpaceEngine-style flight
+ * model: free fly with speed proportional to altitude, orbit around the
+ * selection, and a logarithmic "go to" autopilot.
+ */
+export class CameraRig {
+  readonly upos = new UPos();
+  readonly quat = new Quaternion();
+  fov = 50;
+  /** body the camera co-moves with (so planets do not run away under time acceleration) */
+  anchor: SpaceObject | null = null;
+  private anchorPrev = new UPos();
+  /** user speed multiplier (mouse wheel / +-) */
+  speedFactor = 1;
+  /** current linear speed (m/s), for the HUD */
+  speed = 0;
+  /** distance to the nearest surface (m), provided by the app every frame */
+  altitude = 1e9;
+  target: SpaceObject | null = null;
+  private goto: GotoState | null = null;
+  private velocity = new Vector3();
+  private tmp = new Vector3();
+  private tmp2 = new Vector3();
+
+  get autopilot(): boolean {
+    return this.goto !== null;
+  }
+
+  /** Re-anchor without moving: the camera keeps its absolute position. */
+  setAnchor(a: SpaceObject | null): void {
+    if (a === this.anchor) return;
+    this.anchor = a;
+    if (a) this.anchorPrev.copy(a.upos);
+  }
+
+  /** Apply the anchor's motion since the previous frame (call after objects were updated). */
+  followAnchor(): void {
+    if (!this.anchor) return;
+    const d = this.anchor.upos.sub(this.anchorPrev, this.tmp);
+    this.upos.addVec(d);
+    this.anchorPrev.copy(this.anchor.upos);
+  }
+
+  forward(out = new Vector3()): Vector3 {
+    return out.set(0, 0, -1).applyQuaternion(this.quat);
+  }
+  up(out = new Vector3()): Vector3 {
+    return out.set(0, 1, 0).applyQuaternion(this.quat);
+  }
+  right(out = new Vector3()): Vector3 {
+    return out.set(1, 0, 0).applyQuaternion(this.quat);
+  }
+
+  lookAt(dir: Vector3, upHint?: Vector3): void {
+    const up = upHint ?? this.up(new Vector3());
+    const m = new Matrix4().lookAt(new Vector3(0, 0, 0), dir, up);
+    this.quat.setFromRotationMatrix(m);
+  }
+
+  /** Begin the autopilot towards `target`, stopping at `finalDistance` from its centre. */
+  flyTo(target: SpaceObject, finalDistance: number, duration?: number): void {
+    const rel = this.upos.sub(target.upos, new Vector3());
+    const d0 = Math.max(rel.length(), 1e-3);
+    const d1 = Math.max(finalDistance, 1);
+    const dir = rel.clone().divideScalar(d0);
+    if (!Number.isFinite(dir.x)) dir.set(0, 0, 1);
+    const ratio = Math.abs(Math.log(d0 / d1));
+    const T = duration ?? Math.min(14, Math.max(2.5, 1.6 + 0.42 * ratio));
+    const look = dir.clone().negate();
+    const m = new Matrix4().lookAt(new Vector3(), look, this.up(new Vector3()));
+    const q1 = new Quaternion().setFromRotationMatrix(m);
+    this.target = target;
+    this.goto = { target, dir, d0, d1, t: 0, T, q0: this.quat.clone(), q1 };
+    this.setAnchor(target);
+  }
+
+  cancelGoto(): void {
+    this.goto = null;
+  }
+
+  update(dt: number, input: Input): void {
+    const { left, right, wheel } = input.consume();
+    const k = input.keys;
+    const rotSpeed = (this.fov / 50) * 0.0025;
+
+    // Free look (left drag) and roll (Q/E)
+    if (left.dx || left.dy) {
+      const qy = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -left.dx * rotSpeed);
+      const qx = new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -left.dy * rotSpeed);
+      this.quat.multiply(qy).multiply(qx);
+      if (this.goto) this.goto.q1 = null;
+    }
+    const roll = (k.has('KeyQ') ? 1 : 0) - (k.has('KeyE') ? 1 : 0);
+    if (roll) this.quat.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), roll * dt * 1.2));
+
+    // Orbit around the target (right drag / shift+left drag)
+    if ((right.dx || right.dy) && this.target) {
+      const rel = this.upos.sub(this.target.upos, this.tmp);
+      const yaw = new Quaternion().setFromAxisAngle(this.up(new Vector3()), -right.dx * 0.005);
+      const pitch = new Quaternion().setFromAxisAngle(this.right(new Vector3()), -right.dy * 0.005);
+      const q = yaw.multiply(pitch);
+      const newRel = rel.clone().applyQuaternion(q);
+      this.upos.addVec(newRel.sub(rel));
+      this.quat.premultiply(q);
+    }
+
+    // Wheel: zoom towards the target, or change speed in free flight
+    if (wheel) {
+      if (this.target && !this.goto) {
+        const rel = this.upos.sub(this.target.upos, this.tmp);
+        const d = rel.length();
+        const minD = Math.max(this.target.radius * 1.002, 1);
+        const nd = Math.max(minD, d * Math.pow(1.18, wheel));
+        this.upos.addVec(rel, nd / d - 1);
+      } else {
+        this.speedFactor = Math.min(1e6, Math.max(1e-4, this.speedFactor * Math.pow(1.5, -wheel)));
+      }
+    }
+
+    // Autopilot
+    if (this.goto) {
+      const g = this.goto;
+      g.t = Math.min(g.T, g.t + dt);
+      const s = g.t / g.T;
+      const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, s * 1.05));
+      const d = Math.exp(Math.log(g.d0) + (Math.log(g.d1) - Math.log(g.d0)) * e);
+      const want = g.target.upos.clone().addVec(g.dir, d);
+      this.upos.copy(want);
+      if (g.q1) this.quat.copy(g.q0).slerp(g.q1, Math.min(1, smooth(s / 0.35)));
+      this.speed = 0;
+      if (g.t >= g.T) this.goto = null;
+      return;
+    }
+
+    // Translation (WASD + R/F), speed proportional to altitude
+    const move = this.tmp2.set(
+      (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0),
+      (k.has('KeyR') ? 1 : 0) - (k.has('KeyF') ? 1 : 0),
+      (k.has('KeyS') ? 1 : 0) - (k.has('KeyW') ? 1 : 0),
+    );
+    let mult = this.speedFactor;
+    if (k.has('ShiftLeft') || k.has('ShiftRight')) mult *= 10;
+    if (k.has('ControlLeft') || k.has('ControlRight')) mult *= 0.1;
+    const base = Math.max(this.altitude, 1) * 0.8 * mult;
+    const wantVel = move.lengthSq() > 0 ? move.normalize().applyQuaternion(this.quat).multiplyScalar(base) : new Vector3();
+    // Smooth acceleration
+    const a = 1 - Math.exp(-dt * 6);
+    this.velocity.lerp(wantVel, a);
+    if (move.lengthSq() === 0 && this.velocity.length() < base * 1e-3) this.velocity.set(0, 0, 0);
+    // Never fly through a surface: limit the step to 90 % of the altitude
+    let step = this.velocity.length() * dt;
+    if (step > this.altitude * 0.9 && this.altitude > 0) step = this.altitude * 0.9;
+    if (step > 0) this.upos.addVec(this.velocity.clone().normalize(), step);
+    this.speed = dt > 0 ? step / dt : 0;
+  }
+}
+
+interface GotoState {
+  target: SpaceObject;
+  dir: Vector3;
+  d0: number;
+  d1: number;
+  t: number;
+  T: number;
+  q0: Quaternion;
+  q1: Quaternion | null;
+}
+
+function smooth(x: number): number {
+  const t = Math.max(0, Math.min(1, x));
+  return t * t * (3 - 2 * t);
+}

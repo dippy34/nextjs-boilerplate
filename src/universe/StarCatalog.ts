@@ -39,6 +39,7 @@ export interface StarNode {
 }
 
 interface StarIndex {
+  source?: string; license?: string;
   nodeCapacity: number; rootHalf: number;
   absMag: { min: number; step: number };
   teff: { min: number; max: number };
@@ -47,7 +48,7 @@ interface StarIndex {
   nodes: [number, number, number, number, number, number, number, number, number, number, number, 'u' | 'f', number[]][];
 }
 
-export interface StarRef { node: StarNode; slot: number }
+export interface StarRef { catalog: StarCatalog; node: StarNode; slot: number }
 
 export class StarCatalog {
   readonly nodes: StarNode[];
@@ -67,7 +68,12 @@ export class StarCatalog {
   private extraIds: string[] | null = null;
   private extraPromise: Promise<string[]> | null = null;
 
-  constructor(private base: string, index: StarIndex) {
+  readonly license: string;
+  readonly source: string;
+
+  constructor(readonly id: string, private base: string, index: StarIndex) {
+    this.license = index.license ?? '';
+    this.source = index.source ?? '';
     this.absMin = index.absMag.min;
     this.absStep = index.absMag.step;
     this.totalStars = index.stars;
@@ -80,10 +86,10 @@ export class StarCatalog {
     }));
   }
 
-  static async load(base: string): Promise<StarCatalog> {
+  static async load(id: string, base: string): Promise<StarCatalog> {
     const res = await fetch(`${base}/index.json`);
     if (!res.ok) throw new Error(`star index: HTTP ${res.status}`);
-    return new StarCatalog(base, await res.json());
+    return new StarCatalog(id, base, await res.json());
   }
 
   decodeAbsMag(code: number): number {
@@ -254,7 +260,7 @@ export class StarCatalog {
       for (let i = 0; i < n.count; i++) {
         const dx = p[i * 3] - cam.x, dy = p[i * 3 + 1] - cam.y, dz = p[i * 3 + 2] - cam.z;
         const d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 < radius * radius) out.push({ ref: { node: n, slot: i }, dist: Math.sqrt(d2) });
+        if (d2 < radius * radius) out.push({ ref: { catalog: this, node: n, slot: i }, dist: Math.sqrt(d2) });
       }
     }
     out.sort((a, b) => a.dist - b.dist);

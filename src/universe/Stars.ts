@@ -3,7 +3,7 @@ import { formatRaDec } from '../core/frames';
 import { UPos } from '../core/upos';
 import { LY, PC, SUN_ABS_MAG, SUN_RADIUS, SUN_TEFF } from '../core/units';
 import type { SpaceObject } from './Body';
-import type { StarCatalog, StarRef } from './StarCatalog';
+import type { StarRef } from './StarCatalog';
 
 /** Notable stars (proper names, Bayer/Flamsteed, HR, Gliese) used for labels, search and the info panel. */
 export interface NamedStar {
@@ -47,6 +47,8 @@ export function estimateStarRadius(absMag: number, teff: number): number {
 export class CatalogStar implements SpaceObject {
   readonly kind = 'star';
   readonly upos: UPos;
+  /** true once the position comes from the decoded catalogue tile (exact) */
+  exact = false;
   readonly radius: number;
   readonly parentObject = null;
   name: string;
@@ -69,15 +71,17 @@ export class CatalogStar implements SpaceObject {
     this.designations = names;
   }
 
-  static fromNamed(s: NamedStar): CatalogStar {
-    return new CatalogStar(`star:${s.node}:${s.slot}`, s.pos.clone(), s.absMag, s.teff, s.spect, s.names, null);
+  /** Adopt the exact catalogue position (pc). */
+  setPosition(pc: Vector3): void {
+    this.posPc.copy(pc);
+    this.upos.set(pc.x * PC, pc.y * PC, pc.z * PC);
   }
 
   /** Resolve the designation of an anonymous catalogue star (HIP/HD/TYC/Gaia). */
-  resolve(catalog: StarCatalog, named: NamedStars, onDone: () => void): void {
+  resolve(named: NamedStars, onDone: () => void): void {
     if (!this.ref || this.resolving || this.designations.length) return;
     this.resolving = true;
-    catalog.designation(this.ref).then((d) => {
+    this.ref.catalog.designation(this.ref).then((d) => {
       if (d.notable !== null) {
         const s = named.list[d.notable];
         this.designations = s.names;
@@ -100,6 +104,7 @@ export class CatalogStar implements SpaceObject {
     rows.push(['Distance from Sun', `${d.toPrecision(4)} pc (${((d * PC) / LY).toPrecision(4)} ly)`]);
     rows.push(['RA / Dec (from Sun)', formatRaDec(this.posPc)]);
     if (this.designations.length > 1) rows.push(['Designations', this.designations.slice(1, 6).join(', ')]);
+    if (this.ref) rows.push(['Catalogue', `${this.ref.catalog.source.split(' (')[0]} — ${this.ref.catalog.license}`]);
     return rows;
   }
 }

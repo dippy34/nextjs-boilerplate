@@ -37,7 +37,7 @@ void main() {
   }
   gl_Position = projectionMatrix * (viewMatrix * vec4(rel * PC, 1.0));
   #include <logdepthbuf_vertex>
-  gl_PointSize = 2.0 * radius;
+  gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius;
   vEnergy = energy;
   vColor = texture2D(uColorLut, vec2(floor(aMT / 256.0) / 255.0, 0.5)).rgb * 2.0;
@@ -61,17 +61,21 @@ export class StarFieldLayer {
   private objects = new Map<number, Points>();
   readonly colorLut: DataTexture;
   private template: ShaderMaterial;
-  private tmp = new Vector3();
   /** shared PSF uniforms (also used by other point layers) */
-  readonly psf = {
+  readonly psf: Record<string, { value: number }> = {
     uExposure: { value: 1 },
     uPixelSA: { value: 1e-6 },
     uMinEnergy: { value: 0.004 },
     uMaxRadius: { value: 48 },
     uGlare: { value: 1 },
+    uPointGamma: { value: 0.55 },
+    uPointGain: { value: 2.5 },
+    uDpr: { value: 1 },
+    uMaxEnergy: { value: 2500 },
   };
 
-  constructor(private catalog: StarCatalog) {
+  constructor(private catalog: StarCatalog, sharedPsf?: Record<string, { value: number }>) {
+    if (sharedPsf) this.psf = sharedPsf;
     this.group.name = 'catalog-stars';
     this.colorLut = new DataTexture(buildStarColorLut(256), 256, 1, RGBAFormat);
     this.colorLut.magFilter = LinearFilter;
@@ -139,7 +143,6 @@ export class StarFieldLayer {
       pts.geometry.setDrawRange(0, n.drawCount);
       pts.visible = true;
     }
-    void this.tmp;
   }
 
   get drawnStars(): number {

@@ -86,6 +86,281 @@ def f(x):
     return None if x in (None, "") else float(x)
 
 
+# ----------------------------------------------------------------------------- moon calibration
+def _radec(ra, dec):
+    ra, dec = math.radians(ra), math.radians(dec)
+    return np.array([math.cos(dec) * math.cos(ra), math.cos(dec) * math.sin(ra), math.sin(dec)])
+
+
+def _pole_frame(ra, dec):
+    z = _radec(ra, dec)
+    x = np.cross([0.0, 0.0, 1.0], z)
+    x /= np.linalg.norm(x)
+    return np.stack([x, np.cross(z, x), z], 1)
+
+
+def satellite_frame(orbit: dict, parent: dict) -> np.ndarray:
+    """Plane frame -> ICRF. Must match SolarSystem.ts."""
+    if orbit["frame"] == "laplace" and "poleRa" in orbit:
+        return _pole_frame(orbit["poleRa"], orbit["poleDec"])
+    if orbit["frame"] == "equatorial" and parent.get("rot"):
+        r = parent["rot"]
+        ra, dec = r["ra"][0], r["dec"][0]
+        if r["pm"][1] < 0:  # retrograde rotator (Uranus): elements use the angular-momentum pole
+            ra, dec = (ra + 180) % 360, -dec
+        return _pole_frame(ra, dec)
+    eps = math.radians(84381.448 / 3600)
+    return np.array([[1, 0, 0], [0, math.cos(eps), -math.sin(eps)], [0, math.sin(eps), math.cos(eps)]])
+
+
+def satellite_position(o: dict, jd: float, F: np.ndarray) -> np.ndarray:
+    """Planet-centred ICRF position (km) from mean elements. Must match SolarSystem.ts."""
+    dt = jd - o["epochJd"]
+    fit = o.get("fit", {})
+    retro = -1 if math.cos(math.radians(o["i"])) < 0 else 1
+    node_rate = -fit.get("nodeSign", 1) * retro * 360 / (o["Pnode"] * 365.25) if o.get("Pnode") else 0.0
+    if "nodeRate" in fit:
+        node_rate = fit["nodeRate"]
+    peri_rate = 360 / (o["Pw"] * 365.25) if o.get("Pw") else 0.0
+    inc = o["i"] + fit.get("di", 0)
+    node = o["node"] + fit.get("dNode", 0) + node_rate * dt
+    w = o["w"] + peri_rate * dt
+    M = o["M"] + 360 * dt / o["P"]
+    if fit.get("lambdaMode") == 1:  # tabulated period is the sidereal period of the mean longitude
+        M -= (peri_rate + node_rate) * dt
+    M += fit.get("dM", 0) + fit.get("dn", 0) * dt + fit.get("dn2", 0) * dt * dt
+    if fit.get("libAmp"):
+        M += fit["libAmp"] * math.sin(2 * math.pi * dt / fit["libPeriod"] + fit["libPhase"])
+    e = o["e"]
+    Mr = math.radians(M % 360)
+    E = Mr
+    for _ in range(60):
+        E -= (E - e * math.sin(E) - Mr) / (1 - e * math.cos(E))
+    p = np.array([o["a"] * (math.cos(E) - e), o["a"] * math.sqrt(1 - e * e) * math.sin(E), 0.0])
+    cO, sO = math.cos(math.radians(node)), math.sin(math.radians(node))
+    ci, si = math.cos(math.radians(inc)), math.sin(math.radians(inc))
+    cw, sw = math.cos(math.radians(w)), math.sin(math.radians(w))
+    Rm = np.array([[cO * cw - sO * sw * ci, -cO * sw - sO * cw * ci, sO * si],
+                   [sO * cw + cO * sw * ci, -sO * sw + cO * cw * ci, -cO * si],
+                   [sw * si, cw * si, ci]])
+    return F @ Rm @ p
+
+
+def _observed_pole(o, F, jd, obs):
+    """Mean orbital pole (plane frame) from the dense series, using consecutive positions.
+    The expected advance per step (from the tabulated period) resolves the direction of motion."""
+    dense = np.where(np.abs(jd - 2461192.5) < 400)[0]
+    hs = []
+    for a, b in zip(dense[:-1], dense[1:]):
+        adv = (360 * (jd[b] - jd[a]) / o["P"]) % 360
+        if min(adv, 360 - adv) < 20 or abs(adv - 180) < 20:
+            continue
+        h = np.cross(F.T @ obs[a], F.T @ obs[b])
+        h /= np.linalg.norm(h)
+        if adv > 180:
+            h = -h
+        if math.cos(math.radians(o["i"])) < 0:
+            pass  # retrograde: h naturally points away from the plane pole
+        hs.append(h)
+    if len(hs) < 10:
+        return None
+    h = np.mean(hs, axis=0)
+    h /= np.linalg.norm(h)
+    return h, float(np.mean(jd[dense]))
+
+
+def _phase_residuals(o, F, jd, obs):
+    """In-plane longitude residual (rad) observed - model."""
+    out = np.empty(len(jd))
+    for k in range(len(jd)):
+        m = F.T @ satellite_position(o, jd[k], F)
+        q = F.T @ obs[k]
+        out[k] = math.atan2(q[1], q[0]) - math.atan2(m[1], m[0])
+    return (out + np.pi) % (2 * np.pi) - np.pi
+
+
+def _fit_plane(o, F, jd, obs, pole):
+    """Fit inclination and a linearly precessing node so every sample lies in the orbit plane."""
+    h, tmid = pole
+    i_obs = math.degrees(math.acos(max(-1.0, min(1.0, h[2]))))
+    node_obs = math.degrees(math.atan2(h[0], -h[1]))
+    q = (F.T @ obs.T).T
+    q /= np.linalg.norm(q, axis=1)[:, None]
+    dt = jd - tmid
+    si, ci = math.sin(math.radians(i_obs)), math.cos(math.radians(i_obs))
+    best = None
+    for rates in np.array_split(np.arange(-1.0, 1.0, 2.0e-5), 50):
+        node = np.radians(node_obs + rates[:, None] * dt[None, :])
+        dots = si * np.sin(node) * q[None, :, 0] - si * np.cos(node) * q[None, :, 1] + ci * q[None, :, 2]
+        cost = (dots * dots).sum(axis=1)
+        k = int(np.argmin(cost))
+        if best is None or cost[k] < best[0]:
+            best = (float(cost[k]), float(rates[k]))
+    rate = best[1]
+    return i_obs, node_obs - rate * (tmid - o["epochJd"]), rate
+
+
+def _fit_one(o, F, jd, obs, node_sign, lambda_mode, pole, plane=None):
+    o["fit"] = {"dM": 0.0, "dn": 0.0, "dn2": 0.0, "nodeSign": node_sign, "lambdaMode": lambda_mode, "dNode": 0.0, "di": 0.0}
+    if plane is not None:
+        i_fit, node0, rate = plane
+        o["fit"].update({"di": i_fit - o["i"], "dNode": node0 - o["node"], "nodeRate": rate})
+    elif pole is not None:
+        h, tmid = pole
+        i_obs = math.degrees(math.acos(max(-1.0, min(1.0, h[2]))))
+        o["fit"]["di"] = i_obs - o["i"]
+        if math.sin(math.radians(i_obs)) > math.sin(math.radians(0.3)):
+            node_obs = math.degrees(math.atan2(h[0], -h[1]))
+            retro = -1 if math.cos(math.radians(o["i"])) < 0 else 1
+            node_rate = -node_sign * retro * 360 / (o["Pnode"] * 365.25) if o.get("Pnode") else 0.0
+            node_model = o["node"] + node_rate * (tmid - o["epochJd"])
+            o["fit"]["dNode"] = (node_obs - node_model + 180) % 360 - 180
+    t = jd - o["epochJd"]
+    dense = np.abs(jd - 2461192.5) < 400  # the 2025-2027 series
+    for it in range(3):
+        phi = _phase_residuals(o, F, jd, obs)
+        # Frequency search (robust to wrapping and aliasing): maximise |sum exp(i(phi - w t))|.
+        # First pass on the dense series (wide range, coarse), then all data (narrow range, fine).
+        use = dense if (it == 0 and dense.sum() > 50) else np.ones_like(dense)
+        tt = t[use]
+        span_i = max(tt.max() - tt.min(), 1.0)
+        half = 3.0 if it == 0 else 0.05
+        step = math.radians(8.0) / span_i
+        grid = np.arange(-math.radians(half), math.radians(half), step)
+        best_w, best_s = 0.0, -1.0
+        for g in np.array_split(grid, max(1, len(grid) // 2000)):
+            z = np.abs(np.exp(1j * (phi[use][None, :] - g[:, None] * tt[None, :])).sum(axis=1))
+            k = int(np.argmax(z))
+            if z[k] > best_s:
+                best_s, best_w = float(z[k]), float(g[k])
+        c0 = float(np.angle(np.exp(1j * (phi[use] - best_w * tt)).sum()))
+        r = (phi - c0 - best_w * t + np.pi) % (2 * np.pi) - np.pi
+        A = np.stack([np.ones_like(t), t, t * t], 1)
+        c, *_ = np.linalg.lstsq(A, r, rcond=None)
+        f = o["fit"]
+        f["dM"] += math.degrees(c0 + c[0])
+        f["dn"] += math.degrees(best_w + c[1])
+        f["dn2"] += math.degrees(c[2])
+    # Optional single libration term (e.g. Mimas-Tethys resonance), from a periodogram of the residuals
+    r = np.degrees(_phase_residuals(o, F, jd, obs))
+    rms0 = float(np.sqrt(np.mean(r * r)))
+    best = None
+    for period in np.geomspace(300, 60000, 1500):
+        X = np.stack([np.sin(2 * np.pi * t / period), np.cos(2 * np.pi * t / period), np.ones_like(t)], 1)
+        c, *_ = np.linalg.lstsq(X, r, rcond=None)
+        rr = r - X @ c
+        rms = float(np.sqrt(np.mean(rr * rr)))
+        if best is None or rms < best[0]:
+            best = (rms, period, c)
+    if best and best[0] < 0.6 * rms0 and math.hypot(best[2][0], best[2][1]) > 1.0:
+        _, period, c = best
+        amp = math.hypot(c[0], c[1])
+        o["fit"].update({"libAmp": amp, "libPeriod": float(period), "libPhase": math.atan2(c[1], c[0])})
+        o["fit"]["dM"] += float(c[2])
+    ang = [math.degrees(math.acos(max(-1.0, min(1.0, satellite_position(o, jd[k], F) @ obs[k]
+            / np.linalg.norm(satellite_position(o, jd[k], F)) / np.linalg.norm(obs[k]))))) for k in range(len(jd))]
+    return float(np.sqrt(np.mean(np.square(ang)))), float(max(ang)), dict(o["fit"])
+
+
+def _osculating_table(target: int, center: int):
+    cache = RAW / "horizons_osc.json"
+    have = json.loads(cache.read_text()) if cache.exists() else {}
+    if str(target) not in have:
+        from fetch_horizons_moons import fetch_elements
+        d = fetch_elements(target, center)
+        if not d:
+            return None
+        have[str(target)] = d["rows"]
+        cache.write_text(json.dumps(have))
+    return have[str(target)]
+
+
+def osculating_position(rows, jd: float) -> np.ndarray:
+    """Two-body propagation from the nearest osculating epoch. Must match SolarSystem.ts."""
+    k = min(range(len(rows)), key=lambda i: abs(rows[i][0] - jd))
+    _, q, e, inc, node, peri, tp, n = rows[k]
+    M = math.radians(n * (jd - tp))
+    if e < 1:
+        a = q / (1 - e)
+        M = (M + math.pi) % (2 * math.pi) - math.pi
+        E = M
+        for _ in range(60):
+            E -= (E - e * math.sin(E) - M) / (1 - e * math.cos(E))
+        p = np.array([a * (math.cos(E) - e), a * math.sqrt(1 - e * e) * math.sin(E), 0.0])
+    else:
+        return np.array([q, 0.0, 0.0])
+    cO, sO = math.cos(math.radians(node)), math.sin(math.radians(node))
+    ci, si = math.cos(math.radians(inc)), math.sin(math.radians(inc))
+    cw, sw = math.cos(math.radians(peri)), math.sin(math.radians(peri))
+    Rm = np.array([[cO * cw - sO * sw * ci, -cO * sw - sO * cw * ci, sO * si],
+                   [sO * cw + cO * sw * ci, -sO * sw + cO * cw * ci, -cO * si],
+                   [sw * si, cw * si, ci]])
+    return Rm @ p
+
+
+def calibrate_moons(bodies: list[dict]) -> None:
+    path = RAW / "horizons_moons.json"
+    if not path.exists():
+        print("  (no Horizons moon vectors; run fetch_horizons_moons.py)")
+        return
+    hz = json.loads(path.read_text())
+    by_id = {b["id"]: b for b in bodies}
+    report = []
+    for key, d in hz.items():
+        b = by_id.get(int(key))
+        if not b or b["ephem"]["kind"] != "satellite":
+            continue
+        o = b["ephem"]["orbit"]
+        F = satellite_frame(o, by_id[b["parent"]])
+        jd_all = np.array(d["jd"])
+        obs_all = np.array(d["km"])
+        window = "1950-2100"
+        pole = _observed_pole(o, F, jd_all, obs_all)
+        # Candidate models: JPL node rate (either sign) with/without the 2026 pole correction,
+        # and, for inclined orbits, a plane fitted to all samples. Keep the best.
+        def candidates(jd_s, obs_s):
+            out = []
+            for m in (0, 1):
+                for sgn in (1, -1):
+                    out.append(_fit_one(o, F, jd_s, obs_s, sgn, m, None))
+                    if pole is not None:
+                        out.append(_fit_one(o, F, jd_s, obs_s, sgn, m, pole))
+                if pole is not None and math.degrees(math.acos(min(1.0, abs(pole[0][2])))) > 1.0:
+                    out.append(_fit_one(o, F, jd_s, obs_s, 1, m, pole, _fit_plane(o, F, jd_s, obs_s, pole)))
+            return out
+        rms, mx, fit = min(candidates(jd_all, obs_all), key=lambda x: x[0])
+        if rms > 10:
+            # Strongly Sun-perturbed irregular moons: optimise the present era instead.
+            sel = (jd_all > 2451545.0) & (jd_all < 2473459.0)
+            rms, mx, fit = min(candidates(jd_all[sel], obs_all[sel]), key=lambda x: x[0])
+            window = "2000-2060"
+        fit.update({"rmsDeg": round(rms, 3), "maxDeg": round(mx, 3), "samples": len(d["jd"]),
+                    "source": f"JPL Horizons ({d.get('source', '')}), fitted {window}"})
+        report.append((b["name"], rms, mx))
+        if rms > 1 and o["a"] > 3e5:
+            # Distant / strongly perturbed moons: try piecewise osculating elements from Horizons.
+            osc = _osculating_table(int(key), b["parent"])
+            if osc:
+                ang = []
+                for k in range(len(jd_all)):
+                    pnt = osculating_position(osc, jd_all[k])
+                    ang.append(math.degrees(math.acos(max(-1.0, min(1.0, pnt @ obs_all[k] / np.linalg.norm(pnt) / np.linalg.norm(obs_all[k]))))))
+                orms = float(np.sqrt(np.mean(np.square(ang))))
+                if orms < rms:
+                    b["ephem"]["osculating"] = {"rows": osc, "rmsDeg": round(orms, 3), "maxDeg": round(float(max(ang)), 3),
+                                                "layout": ["jd", "q_km", "e", "i", "node", "peri", "tp_jd", "n_deg_day"],
+                                                "frame": "ICRF equator, planet-centred",
+                                                "source": "JPL Horizons osculating elements, every 91.3 d, 1950-2100"}
+                    report[-1] = (b["name"] + " (osculating)", orms, float(max(ang)))
+        for k in ("dM", "libPhase", "dNode", "di", "nodeRate"):
+            if k in fit:
+                fit[k] = round(fit[k], 7)
+        o["fit"] = fit
+    report.sort(key=lambda x: -x[1])
+    print(f"  calibrated {len(report)} moons against Horizons; worst rms: " + ", ".join(f"{n} {r:.2f}°" for n, r, _ in report[:6]))
+    print("  median rms %.3f°" % float(np.median([r for _, r, _ in report])))
+
+
 # ----------------------------------------------------------------------------- main
 def main() -> None:
     DEST.mkdir(parents=True, exist_ok=True)
@@ -237,6 +512,9 @@ def main() -> None:
                  spectralType=r["spec_T"] or r["spec_B"],
                  texture=SMALL_BODY_TEXTURES.get(r["pdes"])))
         n_big += 1
+
+    # ---- calibrate moon mean longitudes against JPL Horizons (see fetch_horizons_moons.py)
+    calibrate_moons(bodies)
 
     # ---- leap seconds
     da = lsk["DELTA_AT"]

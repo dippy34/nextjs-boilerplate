@@ -11,10 +11,17 @@ interface SatOrbit {
   frame: 'ecliptic' | 'equatorial' | 'laplace';
   epochJd: number; a: number; e: number; w: number; M: number; i: number; node: number; P: number;
   Pw?: number; Pnode?: number; poleRa?: number; poleDec?: number; ephemeris?: string;
+  /** mean-longitude calibration against JPL Horizons (pipeline/build_solar_system.py) */
+  fit?: {
+    dM: number; dn: number; dn2: number; nodeSign?: number; lambdaMode?: number; dNode?: number; di?: number; nodeRate?: number;
+    libAmp?: number; libPeriod?: number; libPhase?: number; rmsDeg?: number; source?: string;
+  };
 }
 interface KeplerEphem { kind: 'kepler'; frame: 'ecliptic'; center: number; epochJd: number; a: number; e: number; i: number; node: number; w: number; M: number }
 interface SpkEphem { kind: 'spk'; chain: [number, number][]; barycenter?: number }
-interface SatEphem { kind: 'satellite'; orbit: SatOrbit }
+/** Piecewise osculating elements from JPL Horizons: [jd, q_km, e, i, node, peri, tp_jd, n_deg_day] (ICRF, planet-centred). */
+interface OsculatingTable { rows: number[][]; rmsDeg: number; source: string }
+interface SatEphem { kind: 'satellite'; orbit: SatOrbit; osculating?: OsculatingTable }
 
 interface BodyJson {
   id: number; name: string; fullName?: string; type: BodyType; parent: number | null;
@@ -31,6 +38,7 @@ export interface SystemJson {
   bodies: BodyJson[];
 }
 
+const IDENTITY3 = new Matrix3();
 const APPROX_NAME: Record<number, string> = { 199: 'Mercury', 299: 'Venus', 499: 'Mars', 599: 'Jupiter', 699: 'Saturn', 799: 'Uranus', 899: 'Neptune' };
 
 /** Cheap deterministic hash in [0, 1). */
@@ -106,7 +114,8 @@ export class SolarSystem {
         if (o.frame === 'laplace' && o.poleRa !== undefined && o.poleDec !== undefined) frame = poleFrame(o.poleRa, o.poleDec);
         else if (o.frame === 'equatorial' && b.parent?.rotation) {
           const pr = b.parent.rotation;
-          frame = poleFrame(pr.ra[0], pr.dec[0]);
+          // Retrograde rotators (Uranus): satellite elements use the angular-momentum pole.
+          frame = pr.pm[1] < 0 ? poleFrame((pr.ra[0] + 180) % 360, -pr.dec[0]) : poleFrame(pr.ra[0], pr.dec[0]);
         } else {
           // ecliptic J2000 -> ICRF
           const c = Math.cos(OBLIQUITY_J2000), s = Math.sin(OBLIQUITY_J2000);
@@ -131,21 +140,42 @@ export class SolarSystem {
   satelliteElements(b: Body, jd: number): { el: OrbitalElements; frame: Matrix3 } | null {
     const e = this.ephemOf.get(b);
     if (!e || e.kind !== 'satellite' || !b.parent) return null;
+    if (e.osculating) {
+      // Nearest-epoch osculating elements (Horizons), propagated as a two-body orbit.
+      const rows = e.osculating.rows;
+      const t0 = rows[0][0], step = rows.length > 1 ? rows[1][0] - rows[0][0] : 1;
+      const k = Math.max(0, Math.min(rows.length - 1, Math.round((jd - t0) / step)));
+      const [, q, ecc, inc, node, peri, tp, n] = rows[k];
+      const nRad = (n * Math.PI) / 180 / DAY;
+      const a = (q * 1e3) / (1 - ecc);
+      return { el: { q: q * 1e3, e: ecc, i: inc, node, peri, tp, mu: nRad * nRad * a * a * a }, frame: IDENTITY3 };
+    }
+    // Mean elements (JPL SSD) with secular precession, calibrated against Horizons
+    // (pipeline/build_solar_system.py: satellite_position must stay identical to this).
     const o = e.orbit;
     const dt = jd - o.epochJd;
-    const years = dt / 365.25;
+    const fit = o.fit;
     const retro = Math.cos((o.i * Math.PI) / 180) < 0 ? -1 : 1;
-    const w = o.w + (o.Pw ? (360 * years) / o.Pw : 0);
-    const node = o.node - (o.Pnode ? (retro * 360 * years) / o.Pnode : 0);
-    const M = o.M + (360 * dt) / o.P;
+    let nodeRate = o.Pnode ? (-(fit?.nodeSign ?? 1) * retro * 360) / (o.Pnode * 365.25) : 0;
+    if (fit?.nodeRate !== undefined) nodeRate = fit.nodeRate;
+    const periRate = o.Pw ? 360 / (o.Pw * 365.25) : 0;
+    const inc = o.i + (fit?.di ?? 0);
+    const node = o.node + (fit?.dNode ?? 0) + nodeRate * dt;
+    const w = o.w + periRate * dt;
+    let M = o.M + (360 * dt) / o.P;
+    if (fit) {
+      if (fit.lambdaMode === 1) M -= (periRate + nodeRate) * dt;
+      M += fit.dM + fit.dn * dt + fit.dn2 * dt * dt;
+      if (fit.libAmp && fit.libPeriod) M += fit.libAmp * Math.sin((2 * Math.PI * dt) / fit.libPeriod + (fit.libPhase ?? 0));
+    }
     const mu = (b.parent.gm || b.parent.systemGm) + b.gm;
-    // Derive mu-consistent elements from the tabulated period to keep the mean motion exact.
+    // Mean motion from the tabulated period (mu-consistent elements keep the period exact).
     const n = (2 * Math.PI) / (o.P * DAY);
     const a = o.a * 1e3;
-    const muEff = n * n * a * a * a;
-    const el = elementsFromMeanAnomaly(a, o.e, o.i, node, w, M, jd, muEff || mu);
+    const el = elementsFromMeanAnomaly(a, o.e, inc, node, w, M, jd, n * n * a * a * a || mu);
     return { el, frame: this.satFrames.get(b)! };
   }
+
 
   heliocentricElements(b: Body): OrbitalElements | null {
     return this.keplerEl.get(b) ?? null;

@@ -111,11 +111,9 @@ export function keplerState(el: OrbitalElements, jd: number, pos: Vector3, vel?:
     x = q * (1 - s * s);
     y = 2 * q * s;
     if (vel) {
-      const r = q * (1 + s * s);
       const h = Math.sqrt(2 * mu * q);
       vx = (-mu / h) * (2 * s / (1 + s * s));
       vy = (mu / h) * (1 + (1 - s * s) / (1 + s * s));
-      void r;
     }
   }
   const R = perifocalMatrix(el.i, el.node, el.peri);

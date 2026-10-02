@@ -8,7 +8,10 @@ Inputs
   * Gaia DR3 100 pc subset from fetch_gaia.py - adds faint nearby stars missing
     from Tycho-2 (de-duplicated against AT-HYG by Gaia source_id).
 
-Output (public/data/stars/)
+Output: two separately licensed datasets with the same layout
+  public/data/stars/       AT-HYG (+HYG photometry)       CC BY-SA 4.0
+  public/data/stars-gaia/  Gaia DR3 100 pc supplement     CC BY-NC 3.0 IGO (non-commercial)
+Each contains:
   * index.json      - octree nodes
   * n/<id>.bin      - per-node render data, stars sorted brightest first
                       u16 nodes: 3 x uint16 position (normalised in node cube) + uint8 absMag + uint8 Teff  (8 B)
@@ -36,7 +39,6 @@ from common import OUT, RAW, download, write_json
 
 ATHYG_URL = "https://codeberg.org/astronexus/athyg/media/branch/main/data/athyg_40.csv.gz"
 HYG_URL = "https://codeberg.org/astronexus/hyg/media/branch/main/data/hyg/CURRENT/hyg_v44.csv.gz"
-DEST = OUT / "stars"
 NODE_CAP = 8192
 MAX_DEPTH = 18
 MAX_DIST_PC = 20000.0  # larger AT-HYG distances come from poor parallaxes
@@ -176,19 +178,11 @@ def main() -> None:
     teff_gs = np.where(np.isfinite(tg), tg, tfit)
     sid_g = sid[keep]
 
-    # ------------------------------------------------------------------ merge
-    pos = np.concatenate([pos_a, pos_g])
-    absmag = np.concatenate([absmag_a, absmag_g])
-    teff = np.concatenate([teff_a, teff_gs])
-    N = len(pos)
-    n_g = len(sid_g)
-    print(f"  total {N} stars")
-
-    # ------------------------------------------------------------------ names / designation codes
+    # ------------------------------------------------------------------ designation codes (AT-HYG)
     named = []           # notable stars (search, labels)
-    code = np.zeros(N, dtype=np.uint32)
-    extra = []           # Gaia source ids for stars without classical designation
-    notable_idx = np.full(N, -1, dtype=np.int64)
+    code = np.zeros(n_a, dtype=np.uint32)
+    extra = []           # designations for stars without classical / HIP / HD / TYC ids
+    notable_idx = np.full(n_a, -1, dtype=np.int64)
     for i in range(n_a):
         proper, bayer, flam, con = rows["proper"][i], rows["bayer"][i], rows["flam"][i], rows["con"][i]
         hr, gl, hip, hd = rows["hr"][i], rows["gl"][i], rows["hip"][i], rows["hd"][i]
@@ -221,12 +215,8 @@ def main() -> None:
         elif rows["tyc"][i]:
             t1, t2, t3 = (int(x) for x in rows["tyc"][i].split("-"))
             code[i] = (3 << 30) | (t1 << 16) | (t2 << 2) | (t3 - 1)
-        elif rows["gaia"][i]:
-            code[i] = 0  # filled below once the notable count is known
-            extra.append(rows["gaia"][i])
-            notable_idx[i] = -2 - (len(extra) - 1)
         else:
-            extra.append(f"AT-HYG {rows['id'][i]}")
+            extra.append(rows["gaia"][i] if rows["gaia"][i] else f"AT-HYG {rows['id'][i]}")
             notable_idx[i] = -2 - (len(extra) - 1)
     n_named = len(named)
     for i in range(n_a):
@@ -234,20 +224,42 @@ def main() -> None:
             code[i] = notable_idx[i]
         elif notable_idx[i] <= -2:
             code[i] = n_named + (-2 - notable_idx[i])
-    for k in range(n_g):
-        code[n_a + k] = n_named + len(extra)
-        extra.append(str(sid_g[k]))
-    assert n_named + len(extra) < (1 << 30)
-    print(f"  {n_named} notable stars, {len(extra)} extra (Gaia/AT-HYG id) designations")
+    print(f"  {n_named} notable stars, {len(extra)} extra designations")
 
-    # ------------------------------------------------------------------ octree
+    # ------------------------------------------------------------------ dataset 1: AT-HYG (+HYG photometry), CC BY-SA 4.0
+    star_node, star_slot = write_octree(
+        OUT / "stars", pos_a, absmag_a, teff_a, code, n_named, extra,
+        source="AT-HYG v4.0 (Augmented Tycho-HYG) with HYG v4.4 photometry",
+        license="CC BY-SA 4.0 (AT-HYG and HYG by David Nash / astronexus)")
+    out = []
+    for e in named:
+        i = e["i"]
+        p = pos_a[i]
+        out.append([e["names"], round(float(p[0]), 10), round(float(p[1]), 10), round(float(p[2]), 10),
+                    round(float(absmag_a[i]), 2), int(round(teff_a[i])), e["spect"], int(star_node[i]), int(star_slot[i]),
+                    1 if e["proper"] else 0])
+    write_json(OUT / "stars" / "named.json", {"layout": ["names", "x_pc", "y_pc", "z_pc", "absMag", "teff", "spect", "node", "slot", "proper"],
+                                              "license": "CC BY-SA 4.0", "stars": out})
+
+    # ------------------------------------------------------------------ dataset 2: Gaia DR3 100 pc supplement, CC BY-NC 3.0 IGO
+    # Kept in its own files because the licences differ (Gaia data are non-commercial).
+    write_octree(
+        OUT / "stars-gaia", pos_g, absmag_g, teff_gs, np.arange(len(sid_g), dtype=np.uint32), 0, [str(x) for x in sid_g],
+        source="Gaia DR3 (ESA/Gaia/DPAC): parallax > 10 mas, parallax_over_error > 10, RUWE < 1.4, not in AT-HYG",
+        license="CC BY-NC 3.0 IGO (ESA/Gaia/DPAC)")
+
+
+def write_octree(dest: Path, pos, absmag, teff, code, n_named: int, extra: list[str], source: str, license: str):
+    """Write a brightest-first octree of stars. Returns (node index, slot) per input star."""
+    pos = pos.copy()
+    N = len(pos)
     order = np.argsort(absmag, kind="stable")  # brightest first
     nodes = []
     star_node = np.full(N, -1, dtype=np.int64)
     star_slot = np.full(N, -1, dtype=np.int64)
-    DEST.mkdir(parents=True, exist_ok=True)
-    (DEST / "n").mkdir(exist_ok=True)
-    for old in (DEST / "n").glob("*"):
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "n").mkdir(exist_ok=True)
+    for old in (dest / "n").glob("*"):
         old.unlink()
 
     def build(idx: np.ndarray, center: np.ndarray, half: float, depth: int, parent: int) -> int:
@@ -274,7 +286,6 @@ def main() -> None:
                 off = np.array([1 if o & 1 else -1, 1 if o & 2 else -1, 1 if o & 4 else -1], dtype=np.float64)
                 cid = build(sub, center + off * half / 2, half / 2, depth + 1, nid)
                 node["children"].append(cid)
-        # subtree brightest magnitude (equals own brightest when the node has stars)
         return nid
 
     in_root = np.all(np.abs(pos[order]) < ROOT_HALF, axis=1)
@@ -305,11 +316,10 @@ def main() -> None:
         rec["t"] = tq
         pos[mine] = deq  # keep catalogue positions identical to what the engine renders
         node["enc"] = enc
-        (DEST / "n" / f"{node['id']}.bin").write_bytes(rec.tobytes())
-        (DEST / "n" / f"{node['id']}.ids").write_bytes(code[mine].astype("<u4").tobytes())
+        (dest / "n" / f"{node['id']}.bin").write_bytes(rec.tobytes())
+        (dest / "n" / f"{node['id']}.ids").write_bytes(code[mine].astype("<u4").tobytes())
         total_bytes += rec.nbytes + 4 * len(mine)
 
-    # subtree max brightness (min absmag) for LOD early-out
     for node in reversed(nodes):
         sub = node["mag"][0]
         for cid in node["children"]:
@@ -317,7 +327,7 @@ def main() -> None:
         node["subMag"] = sub
 
     index = {
-        "source": "AT-HYG v4.0 (CC BY-SA 4.0) + Gaia DR3 (parallax > 10 mas, parallax_over_error > 10, RUWE < 1.4)",
+        "source": source, "license": license,
         "units": "parsec, ICRS equatorial, heliocentric",
         "nodeCapacity": NODE_CAP, "rootHalf": ROOT_HALF,
         "absMag": {"min": ABSMAG_MIN, "step": ABSMAG_STEP},
@@ -330,21 +340,11 @@ def main() -> None:
                   for nd in nodes],
         "nodeLayout": ["id", "parent", "depth", "cx", "cy", "cz", "half", "count", "magMin", "magMax", "subtreeMagMin", "enc", "children"],
     }
-    write_json(DEST / "index.json", index)
-
-    # notable stars: positions are the de-quantised ones the engine renders
-    out = []
-    for e in named:
-        i = e["i"]
-        p = pos[i]
-        out.append([e["names"], round(float(p[0]), 6), round(float(p[1]), 6), round(float(p[2]), 6),
-                    round(float(absmag[i]), 2), int(round(teff[i])), e["spect"], int(star_node[i]), int(star_slot[i]),
-                    1 if e["proper"] else 0])
-    write_json(DEST / "named.json", {"layout": ["names", "x_pc", "y_pc", "z_pc", "absMag", "teff", "spect", "node", "slot", "proper"],
-                                     "stars": out})
-    (DEST / "extra_ids.txt").write_text("\n".join(extra) + "\n")
-    print(f"  {len(nodes)} nodes, {index['stars']} stars, {total_bytes/1e6:.1f} MB tiles, "
+    write_json(dest / "index.json", index)
+    (dest / "extra_ids.txt").write_text("\n".join(extra) + "\n")
+    print(f"  {dest.name}: {len(nodes)} nodes, {index['stars']} stars, {total_bytes/1e6:.1f} MB tiles, "
           f"{sum(1 for n in nodes if n['enc'] == 'f')} float nodes")
+    return star_node, star_slot
 
 
 if __name__ == "__main__":

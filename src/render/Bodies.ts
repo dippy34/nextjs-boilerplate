@@ -75,7 +75,7 @@ void main() {
   if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
   gl_Position = projectionMatrix * (viewMatrix * vec4(position, 1.0));
   #include <logdepthbuf_vertex>
-  gl_PointSize = 2.0 * radius;
+  gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy; vColor = aColor;
 }`;
 const SPRITE_FRAG = /* glsl */ `
@@ -117,12 +117,14 @@ export class BodiesLayer {
   private ringTex: Texture | null = null;
   private time = 0;
   readonly maxSprites: number;
+  /** exposure for resolved surfaces (point sprites use the shared PSF exposure) */
+  readonly surfaceExposure = { value: 1 };
 
   constructor(
     private system: SolarSystem,
     private manifest: TextureManifest,
     private texBase: string,
-    private psf: Record<string, { value: number }>,
+    psf: Record<string, { value: number }>,
     private rings_: Record<string, { innerKm: number; outerKm: number; texture: string }>,
   ) {
     this.group.name = 'bodies';
@@ -197,7 +199,7 @@ export class BodiesLayer {
         uSunDir: { value: new Vector3(1, 0, 0) },
         uSunIrr: { value: Math.PI },
         uSunColor: { value: new Vector3(...this.sunColor) },
-        uExposure: this.psf.uExposure,
+        uExposure: this.surfaceExposure,
         uBodyToWorld: { value: new Matrix3() },
         uBodyCenter: { value: new Vector3() },
         uHasRings: { value: 0 }, uRingTex: { value: null }, uRingRadii: { value: new Vector3() },
@@ -260,7 +262,7 @@ export class BodiesLayer {
       uniforms: {
         uRingTex: { value: this.ringTex }, uRingRadii: { value: new Vector3(inner, outer, 0) },
         uColor: { value: new Vector3(...b.color) }, uSunDirBF: { value: new Vector3() }, uViewDirBF: { value: new Vector3() },
-        uSunIrr: { value: Math.PI }, uExposure: this.psf.uExposure, uPlanetRadius: { value: 1 }, uPolar: { value: b.radii[2] / b.radii[0] },
+        uSunIrr: { value: Math.PI }, uExposure: this.surfaceExposure, uPlanetRadius: { value: 1 }, uPolar: { value: b.radii[2] / b.radii[0] },
       },
       transparent: true, depthWrite: false, side: DoubleSide,
       blending: CustomBlending, blendSrc: OneFactor, blendDst: OneMinusSrcAlphaFactor,
@@ -368,11 +370,6 @@ export class BodiesLayer {
     (this.sprites.geometry.attributes.aIrr as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aColor as BufferAttribute).needsUpdate = true;
   }
-
-  /** Extra point light sources drawn with the body sprites (e.g. nearby catalogue stars). */
-  get spriteBuffers() {
-    return { pos: this.spritePos, irr: this.spriteIrr, col: this.spriteCol };
-  }
 }
 
 function smoothstep(a: number, b: number, x: number): number {
@@ -394,11 +391,13 @@ function meanLinearLuminance(img: HTMLImageElement | ImageBitmap): number {
       for (let x = 0; x < 64; x++) {
         const i = (y * 64 + x) * 4;
         const lin = (v: number) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
-        sum += w * (0.2126 * lin(d[i]) + 0.7152 * lin(d[i + 1]) + 0.0722 * lin(d[i + 2]));
+        const l = 0.2126 * lin(d[i]) + 0.7152 * lin(d[i + 1]) + 0.0722 * lin(d[i + 2]);
+        if (l < 0.002) continue; // unimaged (no-data) areas, e.g. Pluto's southern hemisphere
+        sum += w * l;
         wsum += w;
       }
     }
-    return sum / wsum;
+    return wsum > 0 ? sum / wsum : 0.3;
   } catch {
     return 0.3;
   }
