@@ -1,6 +1,8 @@
 /** HTML labels with greedy overlap rejection. */
 export interface LabelCandidate {
   key: string;
+  /** camera-relative position (m), used by the VR label renderer */
+  rel?: import('three').Vector3;
   text: string;
   x: number; // CSS px
   y: number;

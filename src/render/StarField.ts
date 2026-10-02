@@ -5,10 +5,12 @@ import {
 import { buildStarColorLut } from '../astro/photometry';
 import type { StarCatalog, StarNode } from '../universe/StarCatalog';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
+import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
 ${PSF_UNIFORMS}
 attribute vec3 aPos;
 attribute float aMT;
@@ -35,8 +37,9 @@ void main() {
     gl_PointSize = 0.0;
     return;
   }
-  gl_Position = projectionMatrix * (viewMatrix * vec4(rel * PC, 1.0));
+  gl_Position = projectView(viewMatrix * vec4(rel * PC, 1.0));
   #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius;
   vEnergy = energy;
@@ -53,6 +56,7 @@ varying float vRadius;
 ${PSF_FRAGMENT}
 void main() {
   gl_FragColor = vec4(psfShade(gl_PointCoord, vRadius, vEnergy, vColor), 1.0);
+${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
@@ -72,6 +76,7 @@ export class StarFieldLayer {
     uPointGain: { value: 2.5 },
     uDpr: { value: 1 },
     uMaxEnergy: { value: 2500 },
+    uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
   };
 
   constructor(private catalog: StarCatalog, sharedPsf?: Record<string, { value: number }>) {

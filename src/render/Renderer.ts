@@ -1,6 +1,7 @@
 import {
-  DepthTexture, FloatType, HalfFloatType, LinearFilter, Mesh, NoBlending, OrthographicCamera, PerspectiveCamera,
-  PlaneGeometry, RGBAFormat, Scene, ShaderMaterial, Vector2, WebGLRenderer, WebGLRenderTarget,
+  ACESFilmicToneMapping, DepthTexture, FloatType, Group, HalfFloatType, LinearFilter, Mesh, NoBlending, NoToneMapping,
+  OrthographicCamera, PerspectiveCamera, PlaneGeometry, Quaternion, RGBAFormat, Scene, ShaderMaterial, Vector2,
+  Vector3, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 
 /**
@@ -11,7 +12,26 @@ import {
  * fall back to a logarithmic depth buffer where the extension is missing.
  * All objects are positioned relative to the camera (floating origin), so the
  * camera itself always sits at (0,0,0) and only carries a rotation.
+ *
+ * WebXR: on devices that support immersive VR the renderer uses logarithmic
+ * depth (the XR framebuffer's depth format is chosen by the runtime) and, while
+ * presenting, draws straight into the headset framebuffer with ACES applied in
+ * each material (no bloom pass). The camera hangs off `rig`, a dolly carrying
+ * the explorer's orientation; the headset pose is applied on top of it.
  */
+export interface ViewInfo {
+  /** world orientation of the (left-eye) view */
+  quat: Quaternion;
+  fovY: number; // degrees
+  aspect: number;
+  width: number; // pixels of one view
+  height: number;
+  pixelAngle: number; // radians per pixel
+  pixelRatio: number;
+  /** far plane of the active projection (Infinity if none) */
+  far: number;
+  xr: boolean;
+}
 export type DepthMode = 'reversed-z' | 'logarithmic';
 
 const FULLSCREEN_VERT = /* glsl */ `
@@ -44,12 +64,15 @@ export class Renderer {
   height = 1;
   pixelRatio = 1;
 
-  constructor(readonly canvas: HTMLCanvasElement) {
-    const reversed = Renderer.supportsClipControl();
+  /** dolly carrying the camera (and VR controllers); its orientation is the explorer's orientation */
+  readonly rig = new Group();
+
+  constructor(readonly canvas: HTMLCanvasElement, readonly xrCapable = false) {
+    const reversed = !xrCapable && Renderer.supportsClipControl();
     this.depthMode = reversed ? 'reversed-z' : 'logarithmic';
     this.gl = new WebGLRenderer({
       canvas,
-      antialias: false,
+      antialias: xrCapable, // MSAA for the headset framebuffer; desktop uses its own MSAA target
       alpha: false,
       powerPreference: 'high-performance',
       reversedDepthBuffer: reversed,
@@ -57,8 +80,13 @@ export class Renderer {
       preserveDrawingBuffer: true, // screenshots
     });
     this.gl.autoClear = false;
-    this.camera = new PerspectiveCamera(50, 1, 0.5, 1e30);
+    this.gl.toneMapping = NoToneMapping;
+    this.gl.xr.enabled = xrCapable;
+    this.gl.xr.setReferenceSpaceType('local');
+    this.camera = new PerspectiveCamera(50, 1, 0.05, 1e30);
     this.camera.matrixAutoUpdate = true;
+    this.rig.add(this.camera);
+    this.scene.add(this.rig);
     this.hdr = this.makeHdrTarget(1, 1);
 
     this.downMat = new ShaderMaterial({
@@ -148,6 +176,7 @@ export class Renderer {
   }
 
   setSize(cssWidth: number, cssHeight: number, dpr: number): void {
+    if (this.presenting) return; // the headset owns the framebuffer size
     this.pixelRatio = dpr;
     this.gl.setPixelRatio(dpr);
     this.gl.setSize(cssWidth, cssHeight, false);
@@ -182,8 +211,50 @@ export class Renderer {
     return (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / this.height;
   }
 
+  get presenting(): boolean {
+    return this.gl.xr.enabled && this.gl.xr.isPresenting;
+  }
+
+  /** Tone mapping inside materials while presenting to a headset. */
+  setXrMode(on: boolean): void {
+    this.gl.toneMapping = on ? ACESFilmicToneMapping : NoToneMapping;
+    this.gl.toneMappingExposure = 1;
+  }
+
+  private viewQuat = new Quaternion();
+  /** Geometry of the current view: desktop camera, or the left eye while presenting. */
+  viewInfo(): ViewInfo {
+    if (this.presenting) {
+      const xrCam = this.gl.xr.getCamera();
+      const eye = xrCam.cameras[0] ?? xrCam;
+      const P = eye.projectionMatrix.elements;
+      const vp = (eye as PerspectiveCamera & { viewport?: { z: number; w: number } }).viewport;
+      const width = vp && vp.z > 0 ? vp.z : 1440;
+      const height = vp && vp.w > 0 ? vp.w : 1600;
+      const fovY = (2 * Math.atan(1 / P[5]) * 180) / Math.PI;
+      const far = P[10] + 1 !== 0 ? P[14] / (P[10] + 1) : Infinity;
+      // eye pose in the dolly's frame, carried by the dolly's current orientation
+      eye.matrix.decompose(this._p, this.viewQuat, this._s);
+      this.viewQuat.premultiply(this.rig.quaternion);
+      return { quat: this.viewQuat, fovY, aspect: width / height, width, height, pixelAngle: 2 / (P[5] * height),
+        pixelRatio: 1, far: far > 0 ? far : Infinity, xr: true };
+    }
+    this.camera.getWorldQuaternion(this.viewQuat);
+    return { quat: this.viewQuat, fovY: this.camera.fov, aspect: this.camera.aspect, width: this.width / this.pixelRatio,
+      height: this.height / this.pixelRatio, pixelAngle: this.pixelAngle(), pixelRatio: this.pixelRatio, far: Infinity, xr: false };
+  }
+  private _p = new Vector3();
+  private _s = new Vector3();
+
   render(): void {
     const gl = this.gl;
+    if (this.presenting) {
+      gl.setRenderTarget(null);
+      gl.setClearColor(0x000000, 1);
+      gl.clear(true, true, true);
+      gl.render(this.scene, this.camera);
+      return;
+    }
     gl.setRenderTarget(this.hdr);
     gl.setClearColor(0x000000, 1);
     gl.clear(true, true, true);

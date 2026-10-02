@@ -8,10 +8,12 @@ import { UPos } from '../core/upos';
 import type { SpaceObject } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
+import { FIX_LOGDEPTH, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const ASTEROID_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
 ${PSF_UNIFORMS}
 attribute vec4 aOrb0;   // a (AU), e, i (deg), node (deg)
 attribute vec4 aOrb1;   // peri (deg), M at reference epoch (deg), H, class
@@ -51,8 +53,9 @@ void main() {
   float boost = mix(1.0, uBoost, smoothstep(0.05, 0.5, delta));
   float radius = psfSetup(magToIrradiance(V) * boost, energy);
   if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
-  gl_Position = projectionMatrix * (viewMatrix * vec4(rel, 1.0));
+  gl_Position = projectView(viewMatrix * vec4(rel, 1.0));
   #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy;
   vColor = aOrb1.w > 9.5 ? vec3(0.95, 0.9, 1.0) : vec3(1.0, 0.93, 0.82);
@@ -61,6 +64,7 @@ void main() {
 const COMET_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
 ${PSF_UNIFORMS}
 attribute float aMag;
 uniform vec3 uSunRel;
@@ -73,8 +77,9 @@ void main() {
   float energy;
   float radius = aMag > 90.0 ? 0.0 : psfSetup(magToIrradiance(aMag) * uBoost, energy);
   if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
-  gl_Position = projectionMatrix * (viewMatrix * vec4(rel, 1.0));
+  gl_Position = projectView(viewMatrix * vec4(rel, 1.0));
   #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy; vColor = vec3(0.75, 0.95, 1.0);
 }`;
@@ -87,6 +92,7 @@ varying vec3 vColor; varying float vEnergy; varying float vRadius;
 ${PSF_FRAGMENT}
 void main() {
   gl_FragColor = vec4(psfShade(gl_PointCoord, vRadius, vEnergy, vColor), 1.0);
+${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 

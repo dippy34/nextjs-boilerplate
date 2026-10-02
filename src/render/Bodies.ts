@@ -10,6 +10,7 @@ import type { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
 import { BODY_FRAG, BODY_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
+import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 interface TextureManifest {
   maps: Record<string, { file: string; channels: string; lonLeft: number; credit: string }>;
@@ -62,6 +63,7 @@ function makeRing(inner: number, outer: number, seg = 256): BufferGeometry {
 const SPRITE_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
 ${PSF_UNIFORMS}
 attribute float aIrr;     // irradiance at the observer (photometric units)
 attribute vec3 aColor;
@@ -73,8 +75,9 @@ void main() {
   float energy;
   float radius = psfSetup(aIrr, energy);
   if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
-  gl_Position = projectionMatrix * (viewMatrix * vec4(position, 1.0));
+  gl_Position = projectView(viewMatrix * vec4(position, 1.0));
   #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy; vColor = aColor;
 }`;
@@ -86,6 +89,7 @@ varying vec3 vColor; varying float vEnergy; varying float vRadius;
 ${PSF_FRAGMENT}
 void main() {
   gl_FragColor = vec4(psfShade(gl_PointCoord, vRadius, vEnergy, vColor), 1.0);
+${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
@@ -204,6 +208,7 @@ export class BodiesLayer {
         uBodyCenter: { value: new Vector3() },
         uHasRings: { value: 0 }, uRingTex: { value: null }, uRingRadii: { value: new Vector3() },
         uRadiance: { value: 1 }, uTime: { value: 0 },
+        uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       side: FrontSide,
     });
@@ -263,6 +268,7 @@ export class BodiesLayer {
         uRingTex: { value: this.ringTex }, uRingRadii: { value: new Vector3(inner, outer, 0) },
         uColor: { value: new Vector3(...b.color) }, uSunDirBF: { value: new Vector3() }, uViewDirBF: { value: new Vector3() },
         uSunIrr: { value: Math.PI }, uExposure: this.surfaceExposure, uPlanetRadius: { value: 1 }, uPolar: { value: b.radii[2] / b.radii[0] },
+        uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       transparent: true, depthWrite: false, side: DoubleSide,
       blending: CustomBlending, blendSrc: OneFactor, blendDst: OneMinusSrcAlphaFactor,

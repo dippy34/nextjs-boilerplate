@@ -6,7 +6,8 @@ import { BodiesLayer } from '../render/Bodies';
 import { Labels, type LabelCandidate } from '../render/Labels';
 import { NearStarsLayer } from '../render/NearStars';
 import { OrbitsLayer } from '../render/Orbits';
-import { Renderer } from '../render/Renderer';
+import { Renderer, type ViewInfo } from '../render/Renderer';
+import { GLOBALS, depthK } from '../render/shaders/xr';
 import { Comet, SmallBodiesLayer } from '../render/SmallBodies';
 import { StarFieldLayer } from '../render/StarField';
 import { Hud } from '../ui/Hud';
@@ -16,6 +17,7 @@ import { StarCatalog } from '../universe/StarCatalog';
 import { CatalogStar, NamedStars } from '../universe/Stars';
 import { CameraRig } from './CameraRig';
 import { Input } from './Input';
+import { VRSupport } from './VR';
 
 const DATA = `${import.meta.env.BASE_URL}data`;
 /** catalogue stars closer than this (pc) are drawn individually by the near-star layer */
@@ -45,6 +47,9 @@ export class App {
   private starCache = new Map<string, CatalogStar>();
   private camPc = new Vector3();
   private invQuat = new Quaternion();
+  /** geometry of the current view (desktop camera or the headset's left eye) */
+  view: ViewInfo = { quat: new Quaternion(), fovY: 50, aspect: 1, width: 1, height: 1, pixelAngle: 1e-3, pixelRatio: 1, far: Infinity, xr: false };
+  vr!: VRSupport;
   private cssW = 1;
   private cssH = 1;
   private rateIndex = 0;
@@ -73,7 +78,8 @@ export class App {
   }
 
   static async create(canvas: HTMLCanvasElement, hudRoot: HTMLElement, labelRoot: HTMLElement): Promise<App> {
-    const renderer = new Renderer(canvas);
+    const xrCapable = await VRSupport.detect();
+    const renderer = new Renderer(canvas, xrCapable);
     const useGaia = new URLSearchParams(location.search).get('gaia') !== '0';
     const [system, catalog, gaia, named, manifest, rings] = await Promise.all([
       SolarSystem.load(DATA),
@@ -94,6 +100,7 @@ export class App {
     renderer.scene.add(bodies.group, orbits.group, small.group, near.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
+    app.vr = new VRSupport(app, xrCapable);
     app.applyUrl();
     app.bindKeys();
     app.resize();
@@ -176,13 +183,12 @@ export class App {
     };
     this.input.onKey = (e) => {
       if (this.hud.searchOpen) return;
-      const c = this.clock;
       switch (e.code) {
-        case 'Space': c.paused = !c.paused; e.preventDefault(); break;
-        case 'BracketRight': this.rateIndex = Math.min(RATE_STEPS.length - 1, this.rateIndex + 1); c.rate = this.rateSign * RATE_STEPS[this.rateIndex]; c.paused = false; break;
-        case 'BracketLeft': this.rateIndex = Math.max(0, this.rateIndex - 1); c.rate = this.rateSign * RATE_STEPS[this.rateIndex]; break;
-        case 'Backslash': this.rateSign *= -1; c.rate = this.rateSign * RATE_STEPS[this.rateIndex]; this.hud.toast(this.rateSign < 0 ? 'Time reversed' : 'Time forward'); break;
-        case 'Backspace': c.setUtcNow(); this.rateIndex = 0; this.rateSign = 1; c.rate = 1; c.paused = false; this.hud.toast('Real time'); e.preventDefault(); break;
+        case 'Space': this.togglePause(); e.preventDefault(); break;
+        case 'BracketRight': this.timeFaster(); break;
+        case 'BracketLeft': this.timeSlower(); break;
+        case 'Backslash': this.timeReverse(); break;
+        case 'Backspace': this.realTime(); e.preventDefault(); break;
         case 'KeyG': if (this.selection) this.goTo(this.selection); break;
         case 'KeyC': if (this.selection) this.center(this.selection); break;
         case 'KeyL': this.labels.enabled = !this.labels.enabled; this.hud.toast(`Labels ${this.labels.enabled ? 'on' : 'off'}`); break;
@@ -193,9 +199,7 @@ export class App {
         case 'Enter': case 'Slash': this.hud.openSearch(); e.preventDefault(); break;
         case 'Equal': case 'NumpadAdd': this.rig.speedFactor *= 2; break;
         case 'Minus': case 'NumpadSubtract': this.rig.speedFactor /= 2; break;
-        case 'Escape':
-          if (this.rig.autopilot) this.rig.cancelGoto(); else this.select(null);
-          break;
+        case 'Escape': this.cancelOrDeselect(); break;
         default:
           if (/^Digit\d$/.test(e.code)) {
             const ids = [10, 199, 299, 399, 499, 599, 699, 799, 899, 999];
@@ -207,6 +211,43 @@ export class App {
   }
 
   // ------------------------------------------------------------------ actions
+  togglePause(): void {
+    this.clock.paused = !this.clock.paused;
+  }
+  timeFaster(): void {
+    this.rateIndex = Math.min(RATE_STEPS.length - 1, this.rateIndex + 1);
+    this.clock.rate = this.rateSign * RATE_STEPS[this.rateIndex];
+    this.clock.paused = false;
+  }
+  timeSlower(): void {
+    this.rateIndex = Math.max(0, this.rateIndex - 1);
+    this.clock.rate = this.rateSign * RATE_STEPS[this.rateIndex];
+  }
+  timeReverse(): void {
+    this.rateSign *= -1;
+    this.clock.rate = this.rateSign * RATE_STEPS[this.rateIndex];
+    this.hud.toast(this.rateSign < 0 ? 'Time reversed' : 'Time forward');
+  }
+  realTime(): void {
+    this.clock.setUtcNow();
+    this.rateIndex = 0;
+    this.rateSign = 1;
+    this.clock.rate = 1;
+    this.clock.paused = false;
+    this.hud.toast('Real time');
+  }
+  cancelOrDeselect(): void {
+    if (this.rig.autopilot) this.rig.cancelGoto();
+    else this.select(null);
+  }
+  /** Human-readable time rate. */
+  rateText(): string {
+    const r = Math.abs(this.clock.rate);
+    const t = r === 1 ? 'real time' : r < 60 ? `${r}×` : r < 3600 ? `${(r / 60).toFixed(0)} min/s` : r < DAY ? `${(r / 3600).toFixed(0)} h/s`
+      : r < 365.25 * DAY ? `${(r / DAY).toFixed(r < 7 * DAY ? 0 : 1)} d/s` : `${(r / (365.25 * DAY)).toFixed(0)} yr/s`;
+    return `${this.clock.rate < 0 ? '◀ ' : ''}${t}`;
+  }
+
   select(obj: SpaceObject | null): void {
     this.selection = obj;
     this.rig.target = obj;
@@ -291,11 +332,11 @@ export class App {
   project(rel: Vector3): { x: number; y: number } | null {
     const v = rel.clone().applyQuaternion(this.invQuat);
     if (v.z >= 0) return null;
-    const t = Math.tan((this.renderer.camera.fov * Math.PI) / 360);
-    const aspect = this.cssW / this.cssH;
+    const t = Math.tan((this.view.fovY * Math.PI) / 360);
+    const aspect = this.view.aspect;
     const nx = v.x / -v.z / (t * aspect);
     const ny = v.y / -v.z / t;
-    return { x: (nx * 0.5 + 0.5) * this.cssW, y: (-ny * 0.5 + 0.5) * this.cssH };
+    return { x: (nx * 0.5 + 0.5) * this.view.width, y: (-ny * 0.5 + 0.5) * this.view.height };
   }
 
   private chooseAnchor(): void {
@@ -383,17 +424,17 @@ export class App {
   }
 
   private updateExposure(dt: number): { xStar: number; xSurf: number; mLim: number } {
-    const pixSA = this.renderer.pixelSolidAngle() * this.renderer.pixelRatio ** 2; // per CSS pixel
+    const pixSA = (this.view.pixelAngle * this.view.pixelRatio) ** 2; // per CSS pixel
     const xDark = (0.01 * pixSA) / magToIrradiance(this.starMagLimit);
     let wBest = 0;
     let lBest = 1;
-    const screen = this.cssW * this.cssH;
+    const screen = this.view.width * this.view.height;
     for (const v of this.bodies.views.values()) {
       if (!v.resolved || v.pixelRadius < 2) continue;
       const p = this.project(v.rel);
       if (!p) continue;
-      const pr = v.pixelRadius / this.renderer.pixelRatio;
-      if (p.x < -pr || p.y < -pr || p.x > this.cssW + pr || p.y > this.cssH + pr) continue;
+      const pr = v.pixelRadius / this.view.pixelRatio;
+      if (p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
       const coverage = Math.min(1, (Math.PI * pr * pr) / screen);
       const w = smoothstep(0.0015, 0.08, coverage);
       if (w <= wBest) continue;
@@ -407,7 +448,7 @@ export class App {
     for (const s of this.near.stars) {
       const rel = s.upos.sub(this.rig.upos, new Vector3());
       const d = rel.length();
-      const pr = Math.asin(Math.min(1, s.radius / d)) / this.renderer.pixelAngle() / this.renderer.pixelRatio;
+      const pr = Math.asin(Math.min(1, s.radius / d)) / this.view.pixelAngle / this.view.pixelRatio;
       const coverage = Math.min(1, (Math.PI * pr * pr) / screen);
       const w = smoothstep(0.0015, 0.08, coverage);
       if (w > wBest && this.project(rel)) {
@@ -424,7 +465,7 @@ export class App {
     const margin = 40;
     const onScreen = (rel: Vector3) => {
       const p = this.project(rel);
-      return !!p && p.x > -margin && p.y > -margin && p.x < this.cssW + margin && p.y < this.cssH + margin;
+      return !!p && p.x > -margin && p.y > -margin && p.x < this.view.width + margin && p.y < this.view.height + margin;
     };
     for (const v of this.bodies.views.values()) {
       if (!v.resolved || v.pixelRadius <= 1.5 || !onScreen(v.rel)) continue;
@@ -437,7 +478,7 @@ export class App {
       const rel = s.upos.sub(this.rig.upos, new Vector3());
       if (!onScreen(rel)) continue;
       const d = rel.length();
-      const pr = Math.asin(Math.min(1, s.radius / d)) / this.renderer.pixelAngle();
+      const pr = Math.asin(Math.min(1, s.radius / d)) / this.view.pixelAngle;
       if (pr <= 1.5) continue;
       const E = magToIrradiance(s.absMag + 5 * Math.log10(d / PC) - 5);
       lightCap = Math.min(lightCap, 2.5 / ((E * d * d) / (Math.PI * s.radius * s.radius)));
@@ -468,7 +509,7 @@ export class App {
     const mLim = this.lastMLim;
     for (const v of this.bodies.views.values()) {
       if (!v.resolved && v.apparentMag > mLim + 1.5) continue;
-      consider(v.body, this.project(v.rel), v.pixelRadius / this.renderer.pixelRatio, v.resolved ? -6 : -3);
+      consider(v.body, this.project(v.rel), v.pixelRadius / this.view.pixelRatio, v.resolved ? -6 : -3);
     }
     const rel = new Vector3();
     for (const c of this.small.cometObjects) {
@@ -502,6 +543,61 @@ export class App {
   }
   private lastMLim = 6;
 
+  /**
+   * Pick along a ray (VR controller). `origin` and `dir` are camera-relative,
+   * world-oriented. Objects within ~1.5° of the ray (or under it) qualify.
+   */
+  pickRay(origin: Vector3, dir: Vector3): SpaceObject | null {
+    const d = dir.clone().normalize();
+    const tol = (1.5 * Math.PI) / 180;
+    let best: SpaceObject | null = null;
+    let bestScore = Infinity;
+    const tmp = new Vector3();
+    const angleTo = (rel: Vector3) => {
+      tmp.copy(rel).sub(origin);
+      const len = tmp.length();
+      return { ang: Math.acos(Math.max(-1, Math.min(1, tmp.dot(d) / len))), len };
+    };
+    const consider = (obj: SpaceObject, rel: Vector3, radius: number, bias: number) => {
+      const { ang, len } = angleTo(rel);
+      const size = Math.asin(Math.min(1, radius / Math.max(len, radius * 1.0001)));
+      if (ang > Math.max(tol, size)) return;
+      const score = ang / tol + bias;
+      if (score < bestScore) { bestScore = score; best = obj; }
+    };
+    const mLim = this.lastMLim;
+    for (const v of this.bodies.views.values()) {
+      if (!v.resolved && v.apparentMag > mLim + 1.5) continue;
+      consider(v.body, v.rel, v.body.radius, v.resolved ? -1 : -0.3);
+    }
+    const rel = new Vector3();
+    for (const c of this.small.cometObjects) {
+      if (c.apparentMag > mLim) continue;
+      consider(c, c.upos.sub(this.rig.upos, rel).clone(), c.radius, 0);
+    }
+    for (const st of this.near.stars) consider(st, st.upos.sub(this.rig.upos, rel).clone(), st.radius, -0.2);
+    if (best) return best;
+    let bestRef: { cat: StarCatalog; node: number; slot: number } | null = null;
+    const cam = this.camPc;
+    const dpc = new Vector3();
+    for (const cat of this.catalogs) for (const n of cat.needed) {
+      const pos = cat.cpuPositions(n);
+      if (!pos || !n.absMag) continue;
+      for (let i = 0; i < n.drawCount; i++) {
+        dpc.set(pos[i * 3] - cam.x, pos[i * 3 + 1] - cam.y, pos[i * 3 + 2] - cam.z);
+        const dist = dpc.length();
+        if (dist < NEAR_STAR_RADIUS) continue;
+        const ang = Math.acos(Math.max(-1, Math.min(1, dpc.dot(d) / dist)));
+        if (ang > tol) continue;
+        const m = n.absMag[i] + 5 * Math.log10(dist) - 5;
+        if (m > mLim) continue;
+        const score = ang / tol + 0.08 * m;
+        if (score < bestScore) { bestScore = score; bestRef = { cat, node: n.id, slot: i }; }
+      }
+    }
+    return bestRef ? this.getStar(bestRef.cat, bestRef.node, bestRef.slot) : null;
+  }
+
   /** true if the segment camera -> rel is blocked by a resolved body (other than `self`). */
   private occluded(rel: Vector3, self: SpaceObject | null): boolean {
     const dist = rel.length();
@@ -526,7 +622,7 @@ export class App {
     }
     const mLim = this.lastMLim;
     const sel = this.selection;
-    const dpr = this.renderer.pixelRatio;
+    const dpr = this.view.pixelRatio;
     for (const v of this.bodies.views.values()) {
       const b = v.body;
       const isSel = b === sel;
@@ -537,7 +633,7 @@ export class App {
       else if (b.kind === 'dwarf') { show = show || v.apparentMag < mLim || v.resolved; prio = 380 - v.apparentMag; }
       else if (b.kind === 'moon') {
         const parentView = b.parent ? this.bodies.views.get(b.parent) : undefined;
-        const sep = parentView ? b.pos.distanceTo(b.parent!.pos) / v.dist / this.renderer.pixelAngle() / dpr : 0;
+        const sep = parentView ? b.pos.distanceTo(b.parent!.pos) / v.dist / this.view.pixelAngle / dpr : 0;
         show = show || ((v.apparentMag < mLim + 1 || v.resolved) && sep > 18 && (!b.radiusEstimated || v.resolved));
         prio = 300 - v.apparentMag + (b.radiusEstimated ? -50 : 0);
       } else {
@@ -547,14 +643,14 @@ export class App {
       if (!show) continue;
       const p = this.project(v.rel);
       if (!p || this.occluded(v.rel, b)) continue;
-      out.push({ key: b.key, text: b.name, x: p.x, y: p.y, radius: v.pixelRadius / dpr, priority: isSel ? 1e4 : prio, cls: isSel ? 'selected' : b.kind });
+      out.push({ rel: v.rel.clone(), key: b.key, text: b.name, x: p.x, y: p.y, radius: v.pixelRadius / dpr, priority: isSel ? 1e4 : prio, cls: isSel ? 'selected' : b.kind });
     }
     const rel = new Vector3();
     for (const c of this.small.cometObjects) {
       if (c.apparentMag > Math.min(mLim, 10) && c !== sel) continue;
       c.upos.sub(this.rig.upos, rel);
       const p = this.project(rel);
-      if (p && !this.occluded(rel, null)) out.push({ key: c.key, text: c.name, x: p.x, y: p.y, radius: 2, priority: c === sel ? 1e4 : 250 - c.apparentMag, cls: c === sel ? 'selected' : 'comet' });
+      if (p && !this.occluded(rel, null)) out.push({ rel: rel.clone(), key: c.key, text: c.name, x: p.x, y: p.y, radius: 2, priority: c === sel ? 1e4 : 250 - c.apparentMag, cls: c === sel ? 'selected' : 'comet' });
     }
     const cam = this.camPc;
     for (const s of this.named.list) {
@@ -565,26 +661,23 @@ export class App {
       if (m > Math.min(mLim - 4, 2.6)) continue;
       rel.copy(s.pos).sub(cam).multiplyScalar(PC);
       const p = this.project(rel);
-      if (p && !this.occluded(rel, null)) out.push({ key: `named:${s.index}`, text: s.names[0], x: p.x, y: p.y, radius: 3, priority: 100 - m, cls: 'star' });
+      if (p && !this.occluded(rel, null)) out.push({ rel: rel.clone(), key: `named:${s.index}`, text: s.names[0], x: p.x, y: p.y, radius: 3, priority: 100 - m, cls: 'star' });
     }
     for (const s of this.near.stars) {
       const p = this.project(s.upos.sub(this.rig.upos, rel));
-      if (p) out.push({ key: s.key, text: s.name, x: p.x, y: p.y, radius: 4, priority: s === sel ? 1e4 : 450, cls: s === sel ? 'selected' : 'star' });
+      if (p) out.push({ rel: rel.clone(), key: s.key, text: s.name, x: p.x, y: p.y, radius: 4, priority: s === sel ? 1e4 : 450, cls: s === sel ? 'selected' : 'star' });
     }
     if (sel instanceof CatalogStar && !this.near.stars.includes(sel)) {
       const p = this.project(sel.upos.sub(this.rig.upos, rel));
-      if (p) out.push({ key: sel.key, text: sel.name, x: p.x, y: p.y, radius: 3, priority: 1e4, cls: 'selected' });
+      if (p) out.push({ rel: rel.clone(), key: sel.key, text: sel.name, x: p.x, y: p.y, radius: 3, priority: 1e4, cls: 'selected' });
     }
     return out;
   }
 
   // ------------------------------------------------------------------ main loop
   start(): void {
-    const loop = () => {
-      this.frame();
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
+    // setAnimationLoop follows the display's refresh, or the headset's while presenting.
+    this.renderer.gl.setAnimationLoop(() => this.frame());
   }
 
   frame(): void {
@@ -614,25 +707,33 @@ export class App {
       this.nearTimer = 10;
     }
     this.rig.altitude = this.computeAltitude();
+    if (this.vr.active) this.vr.updateInput(dt);
     this.rig.update(dt, this.input);
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
 
+    // The dolly carries the explorer's orientation; a headset pose is applied on top of it.
+    this.renderer.rig.quaternion.copy(this.rig.quat);
+    this.renderer.rig.updateMatrixWorld(true);
     const cam = this.renderer.camera;
-    cam.quaternion.copy(this.rig.quat);
     cam.fov = this.rig.fov;
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld(true);
-    this.invQuat.copy(this.rig.quat).invert();
+    this.view = this.renderer.viewInfo();
+    this.invQuat.copy(this.view.quat).invert();
+    // Headset runtimes may clamp the far plane: pull distant geometry inside it, and fit log depth to it.
+    const finiteFar = this.view.xr && Number.isFinite(this.view.far);
+    GLOBALS.uPullIn.value = finiteFar ? this.view.far * 0.5 : 0;
+    GLOBALS.uDepthK.value = finiteFar ? depthK(this.renderer.camera.far) : 1;
 
     // 3. exposure and level of detail
-    const pixelAngle = this.renderer.pixelAngle();
+    const pixelAngle = this.view.pixelAngle;
     this.bodies.update(this.rig.upos, pixelAngle, dt);
     const { xStar, xSurf, mLim } = this.updateExposure(dt);
     this.lastMLim = mLim;
     const psf = this.starFields[0].psf;
     psf.uExposure.value = xStar;
-    const dpr = this.renderer.pixelRatio;
-    psf.uPixelSA.value = this.renderer.pixelSolidAngle() * dpr * dpr;
+    const dpr = this.view.pixelRatio;
+    psf.uPixelSA.value = (this.view.pixelAngle * dpr) ** 2;
     psf.uDpr.value = dpr;
     this.bodies.surfaceExposure.value = xSurf;
     for (const c of this.catalogs) c.update(this.camPc, mLim);
@@ -646,7 +747,12 @@ export class App {
     this.renderer.render();
 
     // 5. overlays
-    this.labels.update(this.labelCandidates(), this.cssW, this.cssH);
+    if (this.vr.active) {
+      this.labels.update([], this.cssW, this.cssH);
+      this.vr.updateOverlays(this.labelCandidates(), dt);
+    } else {
+      this.labels.update(this.labelCandidates(), this.view.width, this.view.height);
+    }
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) {
       this.hudTimer = 0.1;
@@ -656,8 +762,6 @@ export class App {
 
   private updateHud(): void {
     const c = this.clock;
-    const r = Math.abs(c.rate);
-    const rateStr = r === 1 ? 'real time' : r < 60 ? `${r}× ` : r < 3600 ? `${(r / 60).toFixed(0)} min/s` : r < DAY ? `${(r / 3600).toFixed(0)} h/s` : r < 365.25 * DAY ? `${(r / DAY).toFixed(r < 7 * DAY ? 0 : 1)} d/s` : `${(r / (365.25 * DAY)).toFixed(0)} yr/s`;
     let selection = null;
     if (this.selection) {
       const d = this.selection.upos.sub(this.rig.upos, new Vector3()).length();
@@ -669,7 +773,7 @@ export class App {
     const pending = this.catalogs.reduce((a, c) => a + c.pending, 0);
     this.hud.update({
       date: formatUtc(c.jdTdb),
-      rate: `${c.rate < 0 ? '◀ ' : ''}${rateStr}`,
+      rate: this.rateText(),
       paused: c.paused,
       fps: this.fps,
       speed: formatSpeed(this.rig.speed),

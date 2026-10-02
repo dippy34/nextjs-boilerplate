@@ -7,7 +7,9 @@ deterministic procedural generation to come for everything the catalogues don't 
 
 ### ▶ Live: **https://dippy34.github.io/nextjs-boilerplate/**
 
-Desktop browser with WebGL 2 recommended (keyboard + mouse); press **H** for controls.
+Desktop browser with WebGL 2 (keyboard + mouse; press **H** for controls) — or a **VR headset**: open
+the link in the headset's browser (Meta Quest Browser, or Chrome/Edge on a PC with a Link/SteamVR
+headset) and press **ENTER VR**.
 
 ![Earth](docs/img/01-earth.jpg)
 
@@ -51,10 +53,33 @@ Deploy to GitHub Pages: `bash scripts/deploy-pages.sh` (builds and force-pushes 
 | L · O · M | Labels · orbits · minor-body orbits |
 | P · H · Esc | Screenshot · help · stop autopilot / deselect |
 
+### VR (WebXR)
+
+The **ENTER VR** button appears whenever the browser reports an immersive-VR capable headset.
+
+| Controller | Action |
+|---|---|
+| Left stick | Fly where the left controller points (speed scales with altitude) · left grip: ×10 |
+| Right stick | Snap-turn 30° (left/right) · flight speed (up/down) |
+| Right grip + right stick | Orbit around (left/right) / zoom to (up/down) the selection |
+| Right trigger | Select what the ray points at · **A** go to it · **B** stop autopilot / deselect |
+| Left trigger · X / Y · left stick click | Pause · slower / faster time · real time now |
+| Right stick click | Labels on/off |
+
+Hand tracking (no controllers) and gaze-and-pinch: pinch to select, pinch the selection again to fly
+there, pinch empty sky to stop. A wrist panel on the left hand shows the date, time rate, selection and
+speed; names float in the sky as 3D labels.
+
+In VR the frame is rendered straight into the headset's stereo framebuffer: tone mapping runs inside
+every material (no bloom pass), depth is logarithmic, and should a runtime clamp the far plane, distant
+geometry is pulled inside it along each eye's line of sight with depth still ordered by true distance.
+Tested with Meta's IWER WebXR emulator (Quest 3 profile, stereo, controllers and hands —
+`npm run verify:vr`); not yet profiled on headset hardware.
+
 URL parameters (also used by the automated tests): `time=2026-10-01T20:00:00Z`, `rate=86400`,
 `paused=1`, `target=Saturn&dist=6&az=40&el=20` (distance in radii), `look=Betelgeuse`,
 `campc=x,y,z` (camera position in parsecs), `fov=60`, `starlimit=7.5`, `gaia=0` (skip the
-non-commercial Gaia dataset), `depth=log` (force logarithmic depth).
+non-commercial Gaia dataset), `depth=log` (force logarithmic depth), `xr=0` (never offer VR).
 
 ## Why Three.js (WebGL2) + TypeScript + Vite
 
@@ -77,7 +102,7 @@ src/
   universe/  Solar System (planets, 459 moons, minor bodies), streaming star catalogue, named stars
   render/    HDR renderer (bloom + ACES), star field, bodies (planets, rings, Sun), orbits,
              GPU asteroids, comets (Web Worker), near-star renderer, labels
-  app/       main loop, camera rig (free fly / orbit / autopilot), input
+  app/       main loop, camera rig (free fly / orbit / autopilot), input, WebXR (VR.ts)
   workers/   comet propagation (double precision, off the main thread)
 pipeline/    Python: download → validate → convert raw catalogues into public/data/
 tests/       unit tests incl. comparison against JPL Horizons reference vectors
@@ -105,7 +130,7 @@ matching functions.
 
 ### Phase 1 — engine core ✅ (this commit)
 
-Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`):
+Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`, `npm run verify:vr`):
 
 * Seamless scale from metres above a planet to kiloparsecs, floating origin, reversed-Z depth.
 * 2,751,164 real stars streamed from two separately-licensed octrees (AT-HYG+HYG; Gaia DR3 100 pc
@@ -122,6 +147,8 @@ Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`):
 * Free flight with altitude-scaled speed (metres/s to parsecs/s), orbit mode, logarithmic go-to
   autopilot, time control (pause, ×1 … 100 years/s, reverse), labels, orbit lines, search, info panel,
   screenshots.
+* Immersive VR (WebXR): stereo rendering at astronomical scale, controller and hand-tracking flight,
+  ray selection, go-to, time control, wrist panel and 3D labels.
 
 Known limitations (planned for later phases unless noted):
 
@@ -136,6 +163,8 @@ Known limitations (planned for later phases unless noted):
 * Comets are points (no coma/tail yet); the asteroid-belt brightness boost for distant asteroids is
   artistic (physical within 0.05 AU).
 * Pluto has no ephemeris outside 1849–2150; no eclipses or body-on-body shadows yet (Phase 6).
+* VR has no bloom or lens glare, no in-headset search box (select by pointing; desktop search still
+  works while the headset is on) and runs at a lower star magnitude limit (6.8) to protect frame rate.
 * Performance has been verified only under software rendering (≈20–30 fps at 720p; ~3–5 ms JS per
   frame). GPU profiling and quality presets come in Phase 6.
 

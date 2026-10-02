@@ -66,6 +66,7 @@ carry restrictions on commercial use — check the caption of each PIA image bef
 ## Algorithms and code
 
 * [three.js](https://threejs.org/) (MIT), [Vite](https://vite.dev/) (MIT), [jplephem](https://github.com/brandon-rhodes/python-jplephem) (MIT, pipeline), NumPy, Pillow, Requests.
+* Testing only (not shipped): [IWER](https://github.com/meta-quest/immersive-web-emulation-runtime) — Meta's WebXR emulator (MIT), [Playwright](https://playwright.dev/) (Apache-2.0), [Vitest](https://vitest.dev/) (MIT).
 * ACES filmic curve fit: Stephen Hill, BakingLab (MIT).
 * Bloom downsampling filter: J. Jimenez, *Next Generation Post Processing in Call of Duty: Advanced Warfare*, SIGGRAPH 2014.
 * CIE 1931 colour-matching function fit: Wyman, Sloan & Shirley, *JCGT* 2(2), 2013.

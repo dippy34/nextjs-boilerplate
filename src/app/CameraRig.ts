@@ -79,12 +79,38 @@ export class CameraRig {
     this.setAnchor(target);
   }
 
+  /**
+   * External inputs for the current frame (VR controllers). `move` is a world-space
+   * direction with length 0..1; orbit/zoom are in "drag pixels" / "wheel ticks" per second.
+   * Cleared after every update.
+   */
+  readonly ext = { move: new Vector3(), boost: 1, orbitX: 0, orbitY: 0, zoom: 0 };
+
+  private clearExt(): void {
+    this.ext.move.set(0, 0, 0);
+    this.ext.boost = 1;
+    this.ext.orbitX = this.ext.orbitY = this.ext.zoom = 0;
+  }
+
+  /** Rotate the view about its own vertical axis (VR snap turn). */
+  turn(angleRad: number): void {
+    this.quat.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), angleRad));
+  }
+
   cancelGoto(): void {
     this.goto = null;
   }
 
   update(dt: number, input: Input): void {
-    const { left, right, wheel } = input.consume();
+    this.step(dt, input);
+    this.clearExt();
+  }
+
+  private step(dt: number, input: Input): void {
+    const consumed = input.consume();
+    const { left } = consumed;
+    const right = { dx: consumed.right.dx + this.ext.orbitX * 400 * dt, dy: consumed.right.dy + this.ext.orbitY * 400 * dt };
+    const wheel = consumed.wheel + this.ext.zoom * 6 * dt;
     const k = input.keys;
     const rotSpeed = (this.fov / 50) * 0.0025;
 
@@ -147,7 +173,8 @@ export class CameraRig {
     if (k.has('ShiftLeft') || k.has('ShiftRight')) mult *= 10;
     if (k.has('ControlLeft') || k.has('ControlRight')) mult *= 0.1;
     const base = Math.max(this.altitude, 1) * 0.8 * mult;
-    const wantVel = move.lengthSq() > 0 ? move.normalize().applyQuaternion(this.quat).multiplyScalar(base) : new Vector3();
+    let wantVel = move.lengthSq() > 0 ? move.normalize().applyQuaternion(this.quat).multiplyScalar(base) : new Vector3();
+    if (this.ext.move.lengthSq() > 1e-6) wantVel = this.ext.move.clone().multiplyScalar(base * this.ext.boost);
     // Smooth acceleration
     const a = 1 - Math.exp(-dt * 6);
     this.velocity.lerp(wantVel, a);

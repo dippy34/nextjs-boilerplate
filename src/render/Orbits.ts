@@ -5,13 +5,16 @@ import { AU } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
+import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
 void main() {
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectView(modelViewMatrix * vec4(position, 1.0));
   #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
 }`;
 const FRAG = /* glsl */ `
 #include <common>
@@ -20,6 +23,7 @@ uniform vec3 uColor;
 uniform float uAlpha;
 void main() {
   gl_FragColor = vec4(uColor, uAlpha);
+${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
@@ -69,7 +73,7 @@ export class OrbitsLayer {
     geo.setAttribute('position', new BufferAttribute(positions, 3).setUsage(DynamicDrawUsage));
     const mat = new ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { uColor: { value: new Vector3(...(COLORS[b.kind] ?? COLORS.asteroid)) }, uAlpha: { value: 0.5 } },
+      uniforms: { uColor: { value: new Vector3(...(COLORS[b.kind] ?? COLORS.asteroid)) }, uAlpha: { value: 0.5 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
       transparent: true, depthWrite: false, depthTest: true,
     });
     const line = new Line(geo, mat);

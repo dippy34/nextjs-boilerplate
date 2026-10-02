@@ -5,10 +5,12 @@ import type { UPos } from '../core/upos';
 import type { CatalogStar } from '../universe/Stars';
 import { BODY_VERT, STAR_FRAG } from './shaders/body';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
+import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const SPRITE_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
 ${PSF_UNIFORMS}
 attribute float aIrr;
 attribute vec3 aColor;
@@ -18,8 +20,9 @@ void main() {
   float energy;
   float radius = psfSetup(aIrr, energy);
   if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
-  gl_Position = projectionMatrix * (viewMatrix * vec4(position, 1.0));
+  gl_Position = projectView(viewMatrix * vec4(position, 1.0));
   #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy; vColor = aColor;
 }`;
@@ -31,6 +34,7 @@ varying vec3 vColor; varying float vEnergy; varying float vRadius;
 ${PSF_FRAGMENT}
 void main() {
   gl_FragColor = vec4(psfShade(gl_PointCoord, vRadius, vEnergy, vColor), 1.0);
+${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
@@ -68,7 +72,7 @@ export class NearStarsLayer {
     while (this.meshes.length <= i) {
       const m = new Mesh(this.sphere, new ShaderMaterial({
         vertexShader: BODY_VERT, fragmentShader: STAR_FRAG,
-        uniforms: { uColor: { value: new Vector3() }, uRadiance: { value: 1 }, uExposure: this.surfaceExposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() } },
+        uniforms: { uColor: { value: new Vector3() }, uRadiance: { value: 1 }, uExposure: this.surfaceExposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
       }));
       m.matrixAutoUpdate = false;
       m.frustumCulled = false;

@@ -1,8 +1,10 @@
+import { FIX_LOGDEPTH, OUTPUT_FRAGMENT, PROJECT_PARS } from './xr';
 /** Shaders for resolved Solar System bodies (Phase 1: textured ellipsoids). */
 
 export const BODY_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
 varying vec3 vNormalBF;   // body-fixed unit normal
 varying vec3 vPosView;    // camera-relative world position (m)
 varying vec2 vUv;
@@ -11,8 +13,9 @@ void main() {
   vUv = uv;
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vPosView = wp.xyz;
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  gl_Position = projectView(viewMatrix * wp);
   #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
 }`;
 
 export const BODY_FRAG = /* glsl */ `
@@ -111,6 +114,7 @@ void main() {
     radiance += lights * lights * vec3(1.0, 0.8, 0.55) * 0.02 * night * (1.0 - cloud);
   }
   gl_FragColor = vec4(min(radiance * uExposure, vec3(6.0e4)), 1.0);
+${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
@@ -140,20 +144,23 @@ void main() {
   float gran = 0.92 + 0.16 * n3(vNormalBF * 180.0 + uTime * 0.02);
   vec3 c = uColor * uRadiance * ld * gran;
   gl_FragColor = vec4(min(c * uExposure, vec3(6.0e4)), 1.0);
+${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
 export const RING_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
 varying vec3 vLocal;   // ring-plane coordinates in body radius units
 varying vec3 vPosView;
 void main() {
   vLocal = position;
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vPosView = wp.xyz;
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  gl_Position = projectView(viewMatrix * wp);
   #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
 }`;
 
 export const RING_FRAG = /* glsl */ `
@@ -194,5 +201,6 @@ void main() {
   vec3 radiance = uColor * 0.5 * (uSunIrr / 3.14159265) * max(bright, 0.0);
   // Premultiplied alpha output
   gl_FragColor = vec4(min(radiance * uExposure, vec3(6.0e4)), alpha);
+${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
