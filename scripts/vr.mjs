@@ -14,11 +14,22 @@ const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(String(e)));
+page.on('console', (m) => { if (m.type() === 'warning' && /XR render target/.test(m.text())) errors.push(m.text()); });
+// Mean brightness of what the headset shows (IWER composites the eye images into the page canvas).
+const headsetBrightness = () => page.evaluate(() => {
+  const src = document.querySelector('canvas');
+  const c = document.createElement('canvas'); c.width = 96; c.height = 54;
+  const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0, c.width, c.height);
+  const d = ctx.getImageData(0, 0, c.width, c.height).data; let sum = 0, lit = 0;
+  for (let i = 0; i < d.length; i += 4) { const l = (d[i] + d[i + 1] + d[i + 2]) / 3; sum += l; if (l > 40) lit++; }
+  return { mean: sum / (d.length / 4), litFraction: lit / (d.length / 4) };
+});
 await page.addInitScript({ path: 'node_modules/iwer/build/iwer.min.js' });
 await page.addInitScript(() => {
   const d = new IWER.XRDevice(IWER.metaQuest3);
   d.stereoEnabled = true; // two eyes, as on a real headset
-  d.installRuntime({ forceInstall: true });
+  // Projection layers, like the Quest Browser: three then renders into layer textures, not the canvas.
+  d.installRuntime({ forceInstall: true, polyfillLayers: true });
   window.__xrDevice = d;
 });
 const results = [];
@@ -58,6 +69,19 @@ let st = await page.evaluate(() => {
   return { xr: v.xr, fov: v.fovY, w: v.width, h: v.height, labels: a.vr.labelsGroup.children.filter((s) => s.visible).length, button: document.querySelector('#vr-button').textContent };
 });
 check('immersive session renders frames', true, `10 frames in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+// Every VR draw must go into three's XR render target (the headset's framebuffer / projection
+// layer), never the page canvas: on a real Quest the canvas is not what the user sees.
+const xrDraw = await page.evaluate(async () => {
+  const gl = window.app.renderer.gl; const orig = gl.render.bind(gl); const seen = [];
+  gl.render = (sc, cam) => { const t = gl.getRenderTarget(); seen.push(!!t && t.isXRRenderTarget === true); return orig(sc, cam); };
+  await new Promise((res) => { const s = window.app.frameCount; const t = setInterval(() => { if (window.app.frameCount >= s + 3) { clearInterval(t); res(); } }, 10); });
+  gl.render = orig;
+  const sess = gl.xr.getSession();
+  return { draws: seen.length, intoXR: seen.filter(Boolean).length, layers: !!sess.renderState.layers?.length };
+});
+check('VR frames are drawn into the headset framebuffer', xrDraw.draws > 0 && xrDraw.intoXR === xrDraw.draws, JSON.stringify(xrDraw));
+const lum = await headsetBrightness();
+check('the headset image is not black', lum.litFraction > 0.02, JSON.stringify(lum));
 check('view comes from the headset eye', st.xr && st.fov > 60 && st.fov < 120, `fovY=${st.fov.toFixed(1)}° ${st.w}×${st.h}`);
 check('3D labels placed in the scene', st.labels > 0, `${st.labels} labels`);
 check('button switches to EXIT VR', st.button === 'EXIT VR');

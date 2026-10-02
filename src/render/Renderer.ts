@@ -243,13 +243,20 @@ export class Renderer {
     return { quat: this.viewQuat, fovY: this.camera.fov, aspect: this.camera.aspect, width: this.width / this.pixelRatio,
       height: this.height / this.pixelRatio, pixelAngle: this.pixelAngle(), pixelRatio: this.pixelRatio, far: Infinity, xr: false };
   }
+  private warnedXrTarget = false;
   private _p = new Vector3();
   private _s = new Vector3();
 
   render(): void {
     const gl = this.gl;
     if (this.presenting) {
-      gl.setRenderTarget(null);
+      // three binds the headset's framebuffer (an XR render target backed by the session's
+      // projection layer) before every XR frame: draw into that, never into the page canvas.
+      const target = gl.getRenderTarget();
+      if (!target || !(target as WebGLRenderTarget & { isXRRenderTarget?: boolean }).isXRRenderTarget) {
+        if (!this.warnedXrTarget) console.warn('XR frame without the XR render target bound', target);
+        this.warnedXrTarget = true;
+      }
       gl.setClearColor(0x000000, 1);
       gl.clear(true, true, true);
       gl.render(this.scene, this.camera);
