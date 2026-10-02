@@ -55,6 +55,8 @@ Deploy to GitHub Pages: `bash scripts/deploy-pages.sh` (builds and force-pushes 
 
 ### VR (WebXR) — built for the headset
 
+![VR menu, Io, the Moon, the Milky Way, Earth and Saturn](docs/img/vr-and-visuals.jpg)
+
 Open the link in the headset's browser (Meta Quest Browser, or Chrome/Edge on a PC with a Link /
 SteamVR headset) and press **ENTER VR**. The view fades in and the **menu** opens in front of you.
 
