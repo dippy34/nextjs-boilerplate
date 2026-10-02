@@ -28,7 +28,9 @@ export const scenarios = [
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || undefined,
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
+    // Optional: trust one extra CA by public-key hash (e.g. a TLS-intercepting corporate/sandbox proxy).
+    ...(process.env.TRUSTED_SPKI ? [`--ignore-certificate-errors-spki-list=${process.env.TRUSTED_SPKI}`] : [])],
 });
 let failed = false;
 for (const sc of scenarios) {

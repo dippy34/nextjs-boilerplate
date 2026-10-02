@@ -12,7 +12,8 @@
     "test": "vitest run",
     "data": "bash pipeline/run_all.sh",
     "verify": "node scripts/verify.mjs http://127.0.0.1:5173/ screenshots",
-    "verify:interact": "node scripts/interact.mjs http://127.0.0.1:5173/ screenshots"
+    "verify:interact": "node scripts/interact.mjs http://127.0.0.1:5173/ screenshots",
+    "deploy": "bash scripts/deploy-pages.sh"
   },
   "license": "MIT",
   "dependencies": {

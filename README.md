@@ -5,6 +5,10 @@ SpaceEngine-style desktop experience built on **real astronomical data** (JPL ep
 HYG / Gaia DR3 stars, JPL satellite and small-body catalogues, NASA/USGS planetary maps) with
 deterministic procedural generation to come for everything the catalogues don't cover.
 
+### ▶ Live: **https://dippy34.github.io/nextjs-boilerplate/**
+
+Desktop browser with WebGL 2 recommended (keyboard + mouse); press **H** for controls.
+
 ![Earth](docs/img/01-earth.jpg)
 
 | | |
@@ -28,6 +32,7 @@ pipeline. To rebuild every data file from the original sources, see [`pipeline/`
 (`npm run data`, needs Python 3.10+ and ~0.5 GB of downloads).
 
 Production build: `npm run build && npm run preview`.
+Deploy to GitHub Pages: `bash scripts/deploy-pages.sh` (builds and force-pushes the `gh-pages` branch).
 
 ### Controls
 
