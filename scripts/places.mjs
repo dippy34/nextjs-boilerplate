@@ -241,7 +241,7 @@ await page.evaluate(() => {
   const a = window.app;
   const o = a.findByName('Orion Nebula');
   const d = o.upos.sub(a.rig.upos).normalize();
-  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 6);
+  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 12);
 });
 await frames(5);
 st = await volume();

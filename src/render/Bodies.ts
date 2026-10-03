@@ -335,6 +335,7 @@ export class BodiesLayer {
     }
     if (this.glare) out.push(this.glare);
     if (this.sunCorona) out.push(this.sunCorona.mesh);
+    if (this.ringParticles) out.push(this.ringParticles.mesh, this.ringParticles.slab);
     return out;
   }
 
@@ -549,7 +550,7 @@ export class BodiesLayer {
     if (!this.ringParticles) {
       this.ringParticles = new RingParticles(`${this.texBase}/${ring.texture}`, ring.innerKm * 1e3, ring.outerKm * 1e3, [0.75, 0.68, 0.58], this.surfaceExposure);
       this.ringParticlesBody = b;
-      this.group.add(this.ringParticles.mesh);
+      this.group.add(this.ringParticles.mesh, this.ringParticles.slab);
     }
   }
 
@@ -653,6 +654,8 @@ export class BodiesLayer {
         }
         if (this.ringParticles && b === this.ringParticlesBody) {
           this.ringParticles.update(view.rel, ringFrame(b.orientation), b.radius, u.uSunDir.value as Vector3, u.uSunIrr.value as number);
+          // within reach of the ring layer the slab draws the whole ring (as a medium)
+          if (ring && this.ringParticles.slabActive) ring.visible = false;
         }
       } else if (mesh) {
         mesh.visible = false;
