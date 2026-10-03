@@ -41,6 +41,16 @@
    "sea": 0,
    "credit": "NOAA NCEI, ETOPO 2022 60 arc-second Global Relief Model (surface), DOI 10.25921/fd45-gt74",
    "source": "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif"
+  },
+  "ceres": {
+   "file": "ceres.png",
+   "width": 2048,
+   "height": 1024,
+   "lonLeft": 0,
+   "offset": -7437.3544921875,
+   "scale": 1.0,
+   "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA, Dawn FC HAMO DTM (DLR) 60 ppd, via USGS Astrogeology",
+   "source": "https://planetarymaps.usgs.gov/mosaic/Ceres_Dawn_FC_HAMO_DTM_DLR_Global_60ppd_Oct2016.tif"
   }
  },
  "patches": [
