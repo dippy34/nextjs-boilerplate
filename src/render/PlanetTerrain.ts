@@ -98,6 +98,8 @@ class Node {
   split = false;
   /** frame it was last visited */
   used = 0;
+  /** bumped each time the tile is (re)built (for the ground-under-explorer change signal) */
+  build = 0;
   /** drawn this frame */
   drawn = false;
   readonly dir = new Vector3();
@@ -157,19 +159,22 @@ export class PlanetTerrain {
   /** the view (App.view): direction and pixel size, for refinement */
   view: { quat: Quaternion; pixelAngle: number; pixelRatio?: number; fovY?: number; aspect?: number } | null = null;
   /** pixels per grid cell before a tile splits (desktop, headset) */
-  pixPerCell = 14;
-  pixPerCellVr = 22;
-  /** tiles each worker may build at once (desktop, headset) */
-  perWorker = 6;
-  perWorkerVr = 3;
+  pixPerCell = 18;
+  pixPerCellVr = 24;
+  /** tiles in flight (and so finished + uploaded) per frame: bounds the per-frame refinement cost */
+  inFlight = 8;
+  inFlightVr = 4;
+  /** most tiles drawn at once: bounds the draw count (and so the per-frame cost) at any altitude */
+  drawCap = 120;
+  drawCapVr = 70;
   /** most tiles kept (desktop, headset) */
-  maxTiles = 900;
-  maxTilesVr = 400;
+  maxTiles = 420;
+  maxTilesVr = 200;
   /** milliseconds of tile building per frame on the main thread (only without workers) */
   budgetMs = 4;
   budgetVrMs = 2;
   /** finest vertex spacing (m) */
-  minSpacing = 0.4;
+  minSpacing = 1.5;
   /** statistics of the last frame */
   stats = { drawn: 0, tiles: 0, pending: 0, built: 0, level: 0 };
 
@@ -183,10 +188,7 @@ export class PlanetTerrain {
   private jobs = new Map<number, { node: Node; world: World; worker: number; serialAtStart: number }>();
   private jobSeq = 0;
   private frame = 0;
-  private queue: Node[] = [];
-  private queueHead = 0;
-  private queueSun = new Vector3();
-  private queueLon = -180;
+  private groundKey = '';
   private drawn: Node[] = [];
   private lastT = performance.now();
   private anchor = { ground: null as Ground | null, pos: new Vector3(), e: new Vector3(1, 0, 0), n: new Vector3(0, 1, 0), up: new Vector3(0, 0, 1) };
@@ -382,6 +384,7 @@ export class PlanetTerrain {
     const tmp = new Vector3();
     const frame = this.frame;
     const minSp = this.minSpacing * (this.vr ? 1.6 : 1);
+    const drawCap = this.vr ? this.drawCapVr : this.drawCap;
     let ready = true;
     // beyond the horizon of a sphere that lies under all ground near the eye (horizon culling)
     const visible = (n: Node) => D <= rOcc
@@ -404,7 +407,7 @@ export class PlanetTerrain {
       if (n.stale && !n.job) want.push({ n, p: 0.5 });
       const { sse, inView } = errorOf(n);
       const lim = (inView ? P : P * 3) * (n.split ? 0.8 : 1);
-      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24;
+      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && sel.length < drawCap;
       const wantSplit = !merging && canSplit && sse > lim;
       if (wantSplit) {
         if (!n.kids) n.kids = [0, 1, 2, 3].map((q) => new Node(n.face, n.level + 1, n.x * 2 + (q & 1), n.y * 2 + (q >> 1), n));
@@ -436,7 +439,9 @@ export class PlanetTerrain {
       r.used = frame;
       if (!r.data) { ready = false; if (!r.job) want.push({ n: r, p: 1e9 }); }
     }
-    if (ready) for (const r of w.roots) walk(r, false);
+    // walk the face under the explorer first, so the detail budget (drawCap) goes to what is nearest
+    const order = [...w.roots].sort((a, b) => a.dir.angleTo(up) - b.dir.angleTo(up));
+    if (ready) for (const r of order) walk(r, false);
     // the star has moved since a tile's shadows were made: rebuild it (near the terminator only)
     if (ready) {
       for (const n of sel) {
@@ -527,6 +532,11 @@ export class PlanetTerrain {
     (mat.uniforms.uTanN.value as Vector3).copy(an.n);
     const dO = O.clone().sub(an.pos);
     (mat.uniforms.uMatO.value as Vector3).set(dO.dot(an.e), dO.dot(an.n), dO.dot(an.up));
+    // things scattered on the ground (render/Rocks.ts) re-place when the ground under the explorer
+    // changes: a different leaf tile, or that tile rebuilt — not on every distant tile this frame
+    const lf = this.leafAt(up);
+    const key = lf ? `${lf.face}:${lf.level}:${lf.x}:${lf.y}:${lf.build}` : '';
+    if (key !== this.groundKey) { this.groundKey = key; this.serial++; }
     this.evict(w);
     return true;
   }
@@ -578,11 +588,14 @@ export class PlanetTerrain {
     };
   }
 
-  /** This frame's wanted tiles become the build queue (most important first); then keep workers fed. */
+  /**
+   * Send this frame's most-wanted tiles to the workers, bounded by how many may be in flight at
+   * once (also the cap on tiles finished — and uploaded — per frame, so a frame never hitches on a
+   * flood of new geometry). Accepted immediately as each worker reports back, so a built tile is
+   * never re-requested while it waits in a queue.
+   */
   private dispatch(w: World, nodes: Node[], c: TerrainCandidate, sunBF: Vector3): void {
     const spec = (w as World & { spec: HeightSpec | null }).spec;
-    this.queueSun.copy(sunBF);
-    this.queueLon = c.lonLeft;
     if (!this.workers.length || !spec) {
       // no workers: build a few tiles on the main thread within a small time budget
       const t0 = performance.now();
@@ -594,48 +607,32 @@ export class PlanetTerrain {
       }
       return;
     }
-    this.queue = nodes;
-    this.queueHead = 0;
-    this.pump(w, spec);
-  }
-
-  /** Send queued tiles to every free worker slot (called each frame and whenever a worker finishes). */
-  private pump(w: World, _spec: HeightSpec): void {
-    const perWorker = this.vr ? this.perWorkerVr : this.perWorker;
-    for (;;) {
+    const cap = this.vr ? this.inFlightVr : this.inFlight;
+    let free = cap - this.jobs.size;
+    for (const n of nodes) {
+      if (free <= 0) break;
+      if (n.job || (n.data && !n.stale)) continue;
       let k = -1;
-      for (let i = 0; i < this.workers.length; i++) if (this.busy[i] < perWorker && (k < 0 || this.busy[i] < this.busy[k])) k = i;
-      if (k < 0) break;
-      let n: Node | null = null;
-      while (this.queueHead < this.queue.length) {
-        const cand = this.queue[this.queueHead++];
-        if (cand.used >= this.frame - 1 && !cand.job && (cand.stale || !cand.data)) { n = cand; break; }
-      }
-      if (!n) break;
+      for (let i = 0; i < this.workers.length; i++) if (k < 0 || this.busy[i] < this.busy[k]) k = i;
       const job = ++this.jobSeq;
       n.job = job;
-      n.sunBF.copy(this.queueSun);
+      n.sunBF.copy(sunBF);
       this.busy[k]++;
+      free--;
       this.jobs.set(job, { node: n, world: w, worker: k, serialAtStart: 0 });
-      this.workers[k].postMessage({ type: 'tile', job, id: w.id, req: this.reqOf(w, n, this.queueSun, this.queueLon) });
+      this.workers[k].postMessage({ type: 'tile', job, id: w.id, req: this.reqOf(w, n, sunBF, c.lonLeft) });
     }
   }
 
   private receive(worker: number, msg: { job: number; data: TileData | null }): void {
     this.busy[worker] = Math.max(0, this.busy[worker] - 1);
     const j = this.jobs.get(msg.job);
-    if (j) {
-      this.jobs.delete(msg.job);
-      const n = j.node;
-      if (n.job === msg.job) {
-        n.job = 0;
-        if (msg.data && j.world === this.world) this.accept(j.world, n, msg.data);
-      }
-    }
-    // keep the worker fed from this frame's queue without waiting for the next frame
-    const w = this.world;
-    const spec = w ? (w as World & { spec: HeightSpec | null }).spec : null;
-    if (w && spec) this.pump(w, spec);
+    if (!j) return;
+    this.jobs.delete(msg.job);
+    const n = j.node;
+    if (n.job !== msg.job) return;
+    n.job = 0;
+    if (msg.data && j.world === this.world) this.accept(j.world, n, msg.data);
   }
 
   private accept(w: World, n: Node, data: TileData): void {
@@ -646,11 +643,7 @@ export class PlanetTerrain {
     for (let i = 0; i < data.sun.length; i++) if (data.sun[i] < SUN_CLEAR) { shaded = true; break; }
     n.shaded = shaded;
     if (n.mesh) {
-      const old = n.mesh.geometry;
-      const g = this.geometry(data);
-      n.mesh.geometry = g;
-      if (n.haze) n.haze.geometry = g;
-      old.dispose();
+      this.fill(n.mesh.geometry, data);
     } else {
       const mesh = new Mesh(this.geometry(data));
       mesh.matrixAutoUpdate = false;
@@ -671,9 +664,8 @@ export class PlanetTerrain {
       this.group.add(mesh);
     }
     if (fresh) w.tiles.add(n);
+    n.build++;
     this.stats.built++;
-    // the ground near the explorer changed
-    this.serial++;
   }
 
   private geometry(d: TileData): BufferGeometry {
@@ -688,6 +680,19 @@ export class PlanetTerrain {
     g.setAttribute('aSun', new BufferAttribute(d.sun, 1));
     g.boundingSphere = new Sphere(new Vector3(), d.bound);
     return g;
+  }
+
+  /** Copy a built tile into an existing geometry's attributes in place (no buffer reallocation). */
+  private fill(g: BufferGeometry, d: TileData): void {
+    const set = (name: string, src: Float32Array) => {
+      const a = g.attributes[name] as BufferAttribute;
+      (a.array as Float32Array).set(src);
+      a.needsUpdate = true;
+    };
+    set('position', d.pos); set('aMorph', d.morph); set('aN', d.n); set('aTN', d.tn);
+    set('aTNc', d.tnc); set('aUv', d.uv); set('aSun', d.sun);
+    (g.boundingSphere ??= new Sphere()).radius = d.bound;
+    g.boundingSphere.center.set(0, 0, 0);
   }
 
   private freeNode(n: Node): void {

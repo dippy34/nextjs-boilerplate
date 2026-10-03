@@ -10,7 +10,7 @@ import { Vector3 } from 'three';
  * 2 / 2^L of each parameter; its grid has TILE_N segments per side, with the vertices uniform in
  * the parameters, so a child's even vertices are exactly its parent's.
  */
-export const TILE_N = 32;
+export const TILE_N = 64;
 export const TILE_V = TILE_N + 1;
 /** grid vertices, then the skirt (four edges of TILE_V vertices, hanging below the edges) */
 export const TILE_VERTS = TILE_V * TILE_V + 4 * TILE_V;
