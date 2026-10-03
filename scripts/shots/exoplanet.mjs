@@ -58,10 +58,22 @@ for (const n0 of names) {
       const up = Math.abs(ts.z) < 0.9 ? ts.clone().set(0, 0, 1) : ts.clone().set(1, 0, 0);
       const sd = ts.clone().cross(up).normalize();
       if (k === 'g') {
+        // the star 20 degrees up, on land if the planet has any (the landing ground's heights)
         const el = (20 * Math.PI) / 180;
-        const u = ts.clone().multiplyScalar(Math.sin(el)).addScaledVector(sd, Math.cos(el)).normalize();
-        a.rig.upos.copy(o.upos).addVec(u, o.radius + 2500);
+        const ground = a.exo.draws?.get(o)?.ground;
+        const sd2 = ts.clone().cross(sd).normalize();
+        let u = ts.clone().multiplyScalar(Math.sin(el)).addScaledVector(sd, Math.cos(el)).normalize();
+        let gh = 0;
+        for (let i = 0; i < 72 && ground; i++) {
+          const az = (i / 72) * Math.PI * 2;
+          const c = ts.clone().multiplyScalar(Math.sin(el)).addScaledVector(sd, Math.cos(el) * Math.cos(az)).addScaledVector(sd2, Math.cos(el) * Math.sin(az)).normalize();
+          const m = new (c.constructor)(); m.copy(c).applyMatrix4(a.exo.draws.get(o).orient.clone().invert());
+          const hh = ground.height(m, 100);
+          if (hh > 300) { u = c; gh = hh; break; }
+        }
+        a.rig.upos.copy(o.upos).addVec(u, o.radius + gh + 2500);
         const fwd = sd.clone().cross(u).normalize();
+        if (fwd.lengthSq() < 0.5) fwd.copy(sd2);
         a.rig.lookAt(fwd.multiplyScalar(Math.cos(0.1)).addScaledVector(u, -Math.sin(0.1)).normalize(), u);
       } else {
         const th = (sunAng * Math.PI) / 180;
@@ -79,7 +91,10 @@ for (const n0 of names) {
     await frames(15);
     info = await place();
     if (info === 'not found') { console.log('not found', name); break; }
-    if (k === 'g') await page.waitForFunction(() => window.app.terrain.owner === window.app.selection, null, { timeout: 120000 }).catch(() => undefined);
+    if (k === 'g') {
+      await page.waitForFunction(() => window.app.terrain.owner === window.app.selection && window.app.terrain.hScale > 0.99, null, { timeout: 180000 }).catch(() => undefined);
+      info += ' ' + await page.evaluate(() => `hScale=${window.app.terrain.hScale.toFixed(2)} alt=${Math.round(window.app.rig.altitude)}`);
+    }
     await frames(k === 'g' ? 12 : 6);
     // let the eye adapt (the exposure follows the view at a few frames per second here)
     for (let i = 0, last = 0; i < 40; i++) {

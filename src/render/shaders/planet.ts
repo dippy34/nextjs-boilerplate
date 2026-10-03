@@ -214,6 +214,20 @@ float edgeDist(vec3 p, bool lite) {
 }
 float hh(float k, float j) { return ph(vec3(uSeed * 1.37 + 3.1, k * 7.13 + 1.9, j * 3.71 + 0.7)); }
 float n1d(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(ph(vec3(i, uSeed, 5.0)), ph(vec3(i + 1.0, uSeed, 5.0)), f); }
+// round (slightly east-west elongated) spots on a grid of cells, 'n' cells round the planet
+float blobs(vec2 u, float n, float dens, float s) {
+  vec2 i = floor(u), f = u - i;
+  float m = 0.0;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 g = vec2(float(x), float(y));
+    vec3 hc = vec3(mod(i.x + g.x, n), i.y + g.y, s);
+    if (ph(hc) > dens) continue;
+    vec2 o = g + 0.1 + 0.8 * vec2(ph(hc + 3.1), ph(hc + 7.7)) - f;
+    float rr = 0.12 + 0.2 * ph(hc + 11.3);
+    m = max(m, smoothstep(rr, rr * 0.4, length(o * vec2(0.6, 1.0))));
+  }
+  return m;
+}
 vec3 rotAbout(vec3 p, vec3 c, float a) { float ca = cos(a), sa = sin(a); return p * ca + cross(c, p) * sa + c * dot(c, p) * (1.0 - ca); }
 vec3 rotZ(vec3 p, float a) { float ca = cos(a), sa = sin(a); return vec3(ca * p.x - sa * p.y, sa * p.x + ca * p.y, p.z); }
 vec3 dirLL(float la, float lo) { return vec3(cos(la) * cos(lo), cos(la) * sin(lo), sin(la)); }
@@ -285,7 +299,7 @@ vec3 biome(float h, float sea, float low, float lat, float slope, vec3 nB, float
   // far from the sea it is drier
   float inland = smoothstep(0.0, 0.11, 0.7 * low * 1.31 + 0.05 - sea);
   float mn = fbmN(nB * 5.0 + uSeed * 2.1, lite ? 2 : 4) - 0.5;
-  float moist = clamp(zonal * 0.9 + 0.3 - 0.35 * inland + 1.1 * mn + windward - uDry * 0.4, 0.0, 1.0);
+  float moist = clamp(zonal * 0.9 + 0.38 - 0.25 * inland + 1.1 * mn + windward - uDry * 0.4, 0.0, 1.0);
   float warm = smoothstep(272.0, 292.0, T);
   float tropic = smoothstep(290.0, 300.0, T);
   float scorch = smoothstep(318.0, 340.0, T);
@@ -377,9 +391,11 @@ vec3 giant(vec3 nB, out float streakOut) {
   col *= 1.0 - 0.3 * smoothstep(0.58, 0.78, 1.0 - streak) * (1.0 - b) * uTurb;
   col *= 0.86 + 0.28 * fine * (0.4 + uTurb);
   // small bright plumes and dark barges inside the belts
-  float spots = lite ? 0.5 : pn(vec3(ring * 26.0, lw * 80.0) + uSeed * 3.1);
-  col = mix(col, uC3, smoothstep(0.86, 0.94, spots) * (1.0 - b) * 0.6 * uTurb);
-  col = mix(col, uC1 * 0.6, smoothstep(0.14, 0.06, spots) * (1.0 - b) * 0.5 * uTurb);
+  if (!lite && uType >= 8) {
+    vec2 u = vec2(lon, lw) * (48.0 / 6.2832) + vec2(eddy * 0.6, 0.0);
+    col = mix(col, uC3, blobs(u, 48.0, 0.12, uSeed + 1.0) * (1.0 - b) * 0.45 * uTurb);
+    col = mix(col, uC1 * 0.6, blobs(u * 0.75, 36.0, 0.1, uSeed + 2.0) * (1.0 - b) * 0.45 * uTurb);
+  }
   // festoons and dark barges along the band edges
   col = mix(col, uC1 * vec3(0.7, 0.75, 0.85), edge * smoothstep(0.12, 0.3, eddy + (fine - 0.5) * 0.5) * 0.55 * uTurb);
   // vortices: a big oval (chromophore red; a dark spot on ice giants), smaller white ovals
@@ -390,8 +406,8 @@ vec3 giant(vec3 nB, out float streakOut) {
   if (darkSpots) col = mix(col, uC3 * 1.1, comp * 0.8);
   // chains of small white ovals on one latitude
   float chainLat = 0.35 + 0.3 * hh(1.0, 18.0);
-  float ov = pn(vec3(ring * 16.0, 0.0) + uSeed * 5.0);
-  col = mix(col, uC3, smoothstep(0.8, 0.88, ov) * (1.0 - smoothstep(0.0, 0.02, abs(abs(la) - chainLat))) * 0.7 * step(1.0, uStorms));
+  float ov = blobs(vec2(lon * (24.0 / 6.2832), (abs(la) - chainLat) * (24.0 / 6.2832) + 0.5), 24.0, 0.6, uSeed + 5.0);
+  col = mix(col, uC3, ov * (1.0 - smoothstep(0.02, 0.04, abs(abs(la) - chainLat))) * 0.7 * step(1.0, uStorms));
   // polar regions: the bands break up into mottled, darker, bluer haze
   float pole = smoothstep(1.0, 1.3, abs(la) + 0.15 * wave);
   float mott = fbmN(p * 9.0 + uSeed, lite ? 2 : 4);
@@ -464,7 +480,7 @@ void main() {
       float densS[3] = float[3](0.5, 0.5, 0.4);
       float depS[3] = float[3](0.04, 0.06, 0.18);
       for (int i = 0; i < 3; i++) {
-        if (lite && i == 2) break;
+        if (lite && (i == 2 || (i == 1 && uRadius >= 1.5e6))) break;   // headset: one scale
         if (cellS[i] * 0.15 < pxm || (i == 0 && uRadius < 1.5e6)) continue;
         vec4 cr = craters(pm, cellS[i], uCSeed + 100 * i, densS[i] * uCraters, depS[i], fresh);
         float fade = smoothstep(pxm, pxm * 4.0, cellS[i] * 0.15);
@@ -637,7 +653,7 @@ void main() {
   // atmosphere: bright limb on the day side
   float mu = max(dot(nW, V), 0.0);
   float rim = pow(1.0 - mu, 3.0);
-  radiance += uAtmoColor * sunL * uAtmo * rim * smoothstep(-0.25, 0.3, mu0) * 0.9;
+  radiance += uAtmoColor * sunL * uAtmo * rim * smoothstep(-0.25, 0.3, mu0) * 0.9 * (1.0 - uTerrain);   // (the sphere's limb only)
   // thermal glow (night side mostly)
   // (scaled to the starlight so it shows at the exposure the lit planet sets)
   radiance += emitColor * emit * luminance(sunL) * (0.012 + 0.4 * smoothstep(0.2, -0.2, mu0));

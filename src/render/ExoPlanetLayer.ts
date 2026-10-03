@@ -274,7 +274,8 @@ export class ExoPlanetLayer {
     orbit.renderOrder = 5;
     this.group.add(orbit);
     const type = TYPE_ID[p.spec.type];
-    const ground = ROCKY_TYPES.has(type) ? new ExoGround(p, type, p.spec.seed % 97, Number(pal.uSeaLevel ?? 0), Number(pal.uCraters ?? 0)) : null;
+    const ground = ROCKY_TYPES.has(type)
+      ? new ExoGround(p, type, p.spec.seed % 97, Number(pal.uSeaLevel ?? 0), Number(pal.uCraters ?? 0), Number(pal.uHMid), Number(pal.uHSpan)) : null;
     // temperate and ocean worlds get an Earth-like atmosphere (pressure varies from planet to planet)
     let air: AtmosphereSpec | null = null;
     if (type === 3 || type === 4) {

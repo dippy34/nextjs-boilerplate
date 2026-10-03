@@ -127,7 +127,9 @@ export class ExoGround implements Ground {
   private readonly seedN: number;
 
   /** `craters`: crater density (EXO_FRAG uCraters; 0 = none) */
-  constructor(readonly owner: ExoPlanet, private type: number, private seed: number, private seaLevel: number, private craters = 0) {
+  /** `hMid`, `hSpan`: median and 10-90 % spread of the terrain function (EXO_FRAG uHMid, uHSpan) */
+  constructor(readonly owner: ExoPlanet, private type: number, private seed: number, private seaLevel: number, private craters = 0,
+    private hMid = 0.4, private hSpan = 0.15) {
     this.name = owner.name;
     this.radius = owner.radius;
     this.radii = [owner.radius, owner.radius, owner.radius];
@@ -148,10 +150,16 @@ export class ExoGround implements Ground {
     const R = this.radius;
     const px = n.x * R, py = n.y * R, pz = n.z * R;
     const minL = Math.max(spacing * 2.5, 6);
-    // the colour noise's finest octave is about R / 300 across: generated hills below that
+    // the colour noise's finest octave is about R / 300 across: generated relief below that, as
+    // EXO_FRAG's detail(): ridged crests in rough country (mountains, highlands), gentle rolling
+    // ground on plains and lowlands
+    const rough = seas ? 0.25 + 0.75 * smooth(this.seaLevel + 0.01, this.seaLevel + 0.2, t) : 0.35 + 0.65 * smooth(-0.2, 0.45, (t - this.hMid) / this.hSpan);
+    const amp = (0.008 + 0.03 * rough * rough) * 2 * land;
     let o = 0;
     for (let L = R / 300; L > minL && o < 16; L *= 0.5, o++) {
-      h += (vnoise(px / L, py / L, pz / L, this.seedN + o * 7) - 0.5) * 2 * 0.012 * L * land;
+      const v = vnoise(px / L, py / L, pz / L, this.seedN + o * 7);
+      const r = 1 - Math.abs(2 * v - 1);
+      h += ((r * r - 0.45) * rough + (v - 0.5) * (1 - rough)) * amp * L;
     }
     // crater fields (airless and thin-aired worlds): the large ones are also drawn from orbit
     if (this.craters > 0) {
