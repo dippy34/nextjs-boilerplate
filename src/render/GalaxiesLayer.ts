@@ -505,7 +505,10 @@ class GalaxyModel {
       if (t > t0 && t < t1) {
         const r = Math.hypot(od.x + dd.x * t, od.y + dd.y * t);
         const sig = (c.old * Math.exp(-r / l.hr) + c.thick * Math.exp(-r / (1.3 * l.hr)) + (c.young + 1.5 * c.knots) * Math.exp(-r / (1.5 * l.hr))) * (1 - smooth(l.trunc * 0.8, l.trunc, r));
-        L += sig / Math.max(Math.abs(dd.z), 0.04);
+        // seen at a grazing angle the dust hides all but a column of about one optical depth
+        const tau = l.dust * Math.exp(-r / l.dustHr) * smooth(0.02, 0.1, r) * 0.8;
+        const slant = 1 / Math.max(Math.abs(dd.z), 0.01);
+        L += tau > 1e-3 ? (sig * (1 - Math.exp(-tau * slant))) / tau : sig * Math.min(slant, 25);
       }
     }
     return L;

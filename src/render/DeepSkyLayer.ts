@@ -213,32 +213,34 @@ void planetary(vec3 p, float lod, out vec3 e) {
       dens += knot * 2.5;
     }
   } else if (uShape < 1.5) {
-    // bipolar: two filled lobes pinched by a dense waist (the Dumbbell's apple core)
-    vec3 c1 = uAxis * 0.36;
-    float d1 = length((p - c1) * vec3(1.0, 1.0, 1.0)), d2 = length(p + c1);
-    float lobes = smoothstep(0.48, 0.3, d1 + wob) + smoothstep(0.48, 0.3, d2 + wob);
-    lobes += exp(-sq((d1 - 0.42 - wob) / 0.06)) + exp(-sq((d2 - 0.42 - wob) / 0.06));
-    float waist = exp(-sq((rp - 0.3) / 0.08) - ca * ca / 0.01);
-    float halo = 0.18 * smoothstep(0.95, 0.6, length(vec2(rp / 0.8, ca)));
-    dens = lobes * 0.9 + waist * 1.5 + halo;
-    re = min(d1, d2) + 0.2;
+    // bipolar: an hourglass, its walls brightest, pinched by a dense waist, inside a fainter
+    // ellipsoid of gas (the Dumbbell's apple core and its 'ears')
+    float wHg = 0.14 + 0.75 * abs(ca);                 // radius of the hourglass at height ca
+    float inside = smoothstep(0.85, 0.65, length(vec2(rp / 0.8, ca / 0.9)) + wob);
+    float lobes = (smoothstep(wHg + 0.05, wHg - 0.1, rp + wob) * 0.6 + exp(-sq((rp - wHg - wob) / 0.07))) * inside;
+    float waist = exp(-sq((rp - 0.22) / 0.07) - ca * ca / 0.008);
+    float halo = 0.25 * smoothstep(0.98, 0.7, length(vec2(rp / 0.85, ca / 0.95)));
+    dens = lobes + waist * 1.2 + halo;
+    re = length(vec2(rp, ca * 0.6)) + 0.1;
   } else if (uShape < 2.5) {
     // round shell with two dark cavities (the Owl)
+    // (the eyes: two cylinders along our line of sight, the ends of a barrel seen nearly end-on)
     re = r;
-    vec3 side = normalize(cross(uAxis, vec3(0.31, 0.95, 0.12)));
-    float e1 = smoothstep(0.1, 0.2, length(p - side * 0.2)), e2 = smoothstep(0.1, 0.2, length(p + side * 0.2));
-    dens = smoothstep(0.75, 0.55, r + wob) * (0.6 + 0.4 * n1.g) * e1 * e2;
+    vec3 side = normalize(cross(vec3(0.0, 0.0, 1.0), vec3(0.95, 0.31, 0.12)));
+    vec3 q1 = p - side * 0.24, q2 = p + side * 0.24;
+    float e1 = smoothstep(0.1, 0.17, length(q1.xy)), e2 = smoothstep(0.1, 0.17, length(q2.xy));
+    dens = smoothstep(0.78, 0.6, r + wob) * (0.6 + 0.4 * n1.g) * (0.12 + 0.88 * e1 * e2);
   } else {
     // Cat's Eye: two tilted elliptical bubbles inside, rings of a faint halo outside
     vec3 a1 = normalize(uAxis + vec3(0.3, 0.0, 0.0)), a2 = normalize(uAxis - vec3(0.25, 0.15, 0.0));
     float b1 = length(vec2(length(p - a1 * dot(p, a1)) / 0.2, dot(p, a1) / 0.36));
     float b2 = length(vec2(length(p - a2 * dot(p, a2)) / 0.24, dot(p, a2) / 0.3));
-    dens = exp(-sq((b1 - 1.0 - wob * 3.0) / 0.12)) * 1.4 + exp(-sq((b2 - 1.0 - wob * 3.0) / 0.12)) * 1.2;
-    dens += 0.06 * (0.5 + 0.5 * cos(r * 70.0 + n1.b * 2.0)) * smoothstep(0.3, 0.45, r) * (1.0 - smoothstep(0.75, 1.0, r));
+    dens = exp(-sq((b1 - 1.0 - wob * 2.0) / 0.07)) * 1.6 + exp(-sq((b2 - 1.0 - wob * 2.0) / 0.07)) * 1.3;
+    dens += 0.15 * pow(0.5 + 0.5 * cos(r * 60.0 + n1.b * 1.5), 4.0) * smoothstep(0.32, 0.45, r) * (1.0 - smoothstep(0.75, 1.0, r));
     re = r * 0.9;
   }
   // knots and radial spokes
-  float spokes = 0.6 + 0.8 * pow(nz(u * 13.0 + sd, lod + log2(13.0 / max(r, 0.1))).g, 3.0);
+  float spokes = 0.8 + 0.4 * pow(nz(u * 8.0 + sd, lod + log2(8.0 / max(r, 0.1)) + 0.5).g, 2.0);
   float knots = 0.65 + 0.9 * smoothstep(0.5, 0.85, n2.r);
   dens *= spokes * knots;
   vec3 tint = mix(vec3(0.25, 0.95, 0.85), vec3(1.0, 0.22, 0.3), smoothstep(0.38, 0.6, re));
@@ -267,17 +269,17 @@ void remnant(vec3 p, float lod, out vec3 e) {
     e = fil * web * body * 4.0 + sync * 0.9;
   } else if (uShape < 1.5) {
     // the Veil: a thin, wispy shell, bright only along some arcs
-    float shell = exp(-sq((r - 0.88 - 0.1 * (n0.r - 0.5)) / 0.06));
-    float arcs = smoothstep(0.35, 0.7, nz(p / max(r, 1e-3) * 0.6 + sd, lod).g);
+    float shell = exp(-sq((r - 0.88 - 0.1 * (n0.r - 0.5)) / 0.035));
+    float arcs = smoothstep(0.5, 0.8, nz(p / max(r, 1e-3) * 0.5 + sd, lod).g);
     float web = pow(ridge(n1.b), 9.0) + (hi ? 0.8 * pow(ridge(n2.g), 12.0) : 0.0);
     vec3 col = mix(vec3(1.0, 0.25, 0.3), vec3(0.3, 0.75, 1.0), smoothstep(0.35, 0.65, n0.b));
     e = col * shell * (0.1 + arcs) * web * 5.0;
   } else {
     // Cassiopeia A: a shell of bright knots of ejecta (sulphur, oxygen, neon) and a faint shock outside
-    float shell = exp(-sq((r - 0.7 - 0.12 * (n0.r - 0.5)) / 0.12));
-    float kn = smoothstep(0.62, 0.88, hi ? n2.r : n1.r) * (0.4 + pow(ridge(n1.b), 3.0));
+    float shell = exp(-sq((r - 0.72 - 0.1 * (n0.r - 0.5)) / 0.08));
+    float kn = smoothstep(0.72, 0.92, hi ? n2.r : n1.r) * (0.3 + pow(ridge(n1.b), 3.0)) * smoothstep(0.35, 0.6, n0.a);
     vec3 col = mix(mix(vec3(0.45, 1.0, 0.55), vec3(1.0, 0.3, 0.25), smoothstep(0.3, 0.6, n1.g)), vec3(0.5, 0.6, 1.0), smoothstep(0.7, 0.9, n0.g));
-    e = col * shell * kn * 5.0 + vec3(0.45, 0.6, 1.0) * exp(-sq((r - 0.95) / 0.04)) * 0.25 * (0.5 + n1.a);
+    e = col * shell * kn * 9.0 + vec3(0.45, 0.6, 1.0) * exp(-sq((r - 0.95) / 0.04)) * 0.25 * (0.5 + n1.a);
   }
 }
 
