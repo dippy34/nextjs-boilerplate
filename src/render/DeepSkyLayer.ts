@@ -203,8 +203,8 @@ void planetary(vec3 p, float lod, out vec3 e) {
   if (uShape < 0.5 || (uShape > 2.5 && uShape < 3.5)) {
     // barrel (a ring when seen end-on): prolate, open towards its axis
     re = length(vec2(rp, ca / 1.5));
-    dens = exp(-sq((re - 0.48 - wob) / 0.1)) * smoothstep(0.1, 0.6, rp / max(re, 1e-3)) * 1.6;
-    dens += 0.18 * smoothstep(0.5, 0.15, re);                     // fainter gas filling it
+    dens = exp(-sq((re - 0.48 - wob) / 0.065)) * smoothstep(0.1, 0.6, rp / max(re, 1e-3)) * 2.2;
+    dens += 0.12 * smoothstep(0.5, 0.25, re) * smoothstep(0.05, 0.3, re);   // fainter gas filling it
     if (uShape > 2.5) {
       // Helix: a second, tilted ring and cometary knots with tails pointing away from the star
       vec3 ax2 = normalize(uAxis + vec3(0.5, 0.2, 0.0));
@@ -246,7 +246,7 @@ void planetary(vec3 p, float lod, out vec3 e) {
   float spokes = 0.8 + 0.4 * pow(nz(u * 8.0 + sd, lod + log2(8.0 / max(r, 0.1)) + 0.5).g, 2.0);
   float knots = 0.65 + 0.9 * thr(n2.r, 0.5, 0.85, lod + 2.32);
   dens *= spokes * knots;
-  vec3 tint = mix(vec3(0.25, 0.95, 0.85), vec3(1.0, 0.22, 0.3), smoothstep(0.38, 0.6, re));
+  vec3 tint = mix(vec3(0.25, 0.95, 0.85), vec3(1.0, 0.22, 0.3), smoothstep(0.42, 0.56, re));
   float halo = 0.08 * exp(-sq((r - 0.86) / 0.08)) * (0.3 + 1.4 * ridge(n1.a));
   e = (tint * dens + vec3(1.0, 0.3, 0.35) * halo) * 1.4;
 }
@@ -261,15 +261,18 @@ void remnant(vec3 p, float lod, out vec3 e) {
     // the Crab: an ellipsoid filled with a web of filaments, glowing blue inside (synchrotron light
     // of the pulsar wind)
     float ca = dot(p, uAxis);
-    vec3 pq = p - uAxis * ca * 0.35;               // an ellipsoid stretched along the axis
+    vec3 pq = p - uAxis * ca * 0.45;               // an ellipsoid stretched along the axis
     float rq = length(pq);
     float body = smoothstep(0.95, 0.7, rq + 0.15 * (n0.a - 0.5));
     // a cage of filaments, densest in the outer half
-    float web = pow(ridge(n1.b), 10.0) * smoothstep(0.75, 0.3, abs(n0.g - 0.5) * 2.0) + (hi ? 0.5 * pow(ridge(n2.g), 12.0) : 0.0);
-    web *= smoothstep(0.2, 0.7, rq);
-    vec3 fil = mix(vec3(1.0, 0.3, 0.16), vec3(1.0, 0.72, 0.38), smoothstep(0.35, 0.75, n0.r));
+    // filaments: sheets a few hundredths of a radius thick (resolved by the steps), brightest
+    // where seen edge-on; two scales
+    float web = smoothstep(0.72, 0.95, ridge(n1.b)) * (0.15 + 1.1 * smoothstep(0.4, 0.75, n0.g))
+      + (hi ? 0.6 * smoothstep(0.78, 0.97, ridge(n2.g)) : 0.0);
+    web *= smoothstep(0.15, 0.6, rq);
+    vec3 fil = mix(vec3(1.0, 0.28, 0.14), vec3(1.0, 0.7, 0.35), smoothstep(0.35, 0.75, n0.r));
     vec3 sync = vec3(0.48, 0.64, 1.0) * smoothstep(0.85, 0.05, rq) * (0.5 + 0.6 * n1.a);
-    e = fil * web * body * 4.0 + sync * 0.9;
+    e = fil * web * body * 5.0 + sync * 0.75;
   } else if (uShape < 1.5) {
     // the Veil: a thin, wispy shell, bright only along some arcs
     float shell = exp(-sq((r - 0.88 - 0.1 * (n0.r - 0.5)) / 0.035));
@@ -297,14 +300,15 @@ void main() {
   float t0 = max(-b - sq_, 0.0), t1 = -b + sq_;
   if (t1 <= t0) discard;
   hi = uLite < 0.5;
-  int N = hi ? 64 : 24;
+  // (thin shells and filaments of planetary nebulae and remnants get more steps)
+  int N = hi ? (uType > 0.5 ? 96 : 64) : 24;
   float dt = (t1 - t0) / float(N);
   // interleaved gradient noise: an even jitter of the samples (no banding, no blotches)
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   sd = vec3(uSeed * 17.31, uSeed * 29.17, uSeed * 7.73);
   vec3 col = vec3(0.0);
   float T = 1.0;
-  for (int i = 0; i < 64; i++) {
+  for (int i = 0; i < 96; i++) {
     if (i >= N || T < 0.01) break;
     float t = t0 + (float(i) + jit) * dt;
     vec3 p = oc + dir * t;
@@ -334,7 +338,7 @@ void main() {
     float ts = dot(-oc, dir);
     if (ts > 0.0) {
       float d = length(oc + dir * ts) / max(ts, 1e-3);
-      col += vec3(0.8, 0.88, 1.0) * (exp(-sq(d / 0.002)) * 8.0 + 0.03 / (1.0 + sq(d / 0.01)));
+      col += vec3(0.8, 0.88, 1.0) * (exp(-sq(d / max(0.0015, uPixAng * 0.8))) * 25.0 + 0.04 / (1.0 + sq(d / 0.008)));
     }
   }
   gl_FragColor = vec4(col * 0.7 * uGain * uBright, 1.0);
