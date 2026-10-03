@@ -24,3 +24,4 @@ python3 build_galaxies.py          # SIMBAD nearby galaxies -> public/data/galax
 python3 build_deepsky.py           # SIMBAD + Sharpless/RCW nebulae and clusters -> public/data/deepsky.json
 python3 build_terrain.py           # LOLA / MOLA / MESSENGER global heights -> public/data/terrain
 python3 build_terrain_patches.py   # sharper LOLA 128 ppd / MOLA patches around landmarks (range requests)
+python3 build_elevation.py         # LOLA / MOLA / ETOPO 15" / MESSENGER / Dawn cube-face height pyramids -> public/data/elevation
