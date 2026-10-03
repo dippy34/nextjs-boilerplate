@@ -5,7 +5,8 @@ import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/un
 import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
-import { TerrainPatch } from '../render/TerrainPatch';
+import { PlanetTerrain } from '../render/PlanetTerrain';
+import type { TerrainPatch } from '../render/TerrainPatch';
 import { RingSpot } from '../universe/RingSpot';
 import { Landmark, LANDMARKS } from '../universe/Landmarks';
 import { CometTails } from '../render/CometTails';
@@ -25,6 +26,7 @@ import { TileDetail } from '../render/TileDetail';
 import { type CraftView, SpacecraftLayer } from '../render/SpacecraftLayer';
 import { loadMaterials } from '../render/Materials';
 import { Rocks } from '../render/Rocks';
+import { MilkyWayVolume } from '../render/MilkyWayVolume';
 import { GalaxiesLayer } from '../render/GalaxiesLayer';
 import { DeepSkyLayer } from '../render/DeepSkyLayer';
 import { DeepSkyObject, loadDeepSky } from '../universe/DeepSky';
@@ -46,6 +48,7 @@ import { Station } from '../game/Station';
 import { Input } from './Input';
 import { Systems } from './Systems';
 import { VRSupport } from './VR';
+import { Walk } from './Walk';
 
 /** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
 const STAR_KEY = 0.62;
@@ -101,6 +104,8 @@ export class App {
   exo!: ExoPlanetLayer;
   /** game mode: ship, cockpit, warp, traffic, missions */
   game!: Game;
+  /** walking on the ground (src/app/Walk.ts) */
+  walk!: Walk;
   /** other galaxies (SIMBAD) */
   galaxies!: GalaxiesLayer;
   /** nebulae and star clusters (SIMBAD) */
@@ -112,7 +117,9 @@ export class App {
   private photoMode = false;
   private labelsBeforePhoto = true;
   /** real 3D ground under the explorer near solid worlds */
-  readonly terrain = new TerrainPatch();
+  readonly terrain = new PlanetTerrain();
+  /** the Milky Way drawn per pixel from outside it */
+  readonly mwVolume = new MilkyWayVolume();
   /** rocks on the ground around the explorer (on the landing terrain) */
   rocks!: Rocks;
   /** comas and tails of the active comets */
@@ -202,7 +209,8 @@ export class App {
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
     // scanned ground materials for close-up surfaces (loaded in the background)
     void loadMaterials(DATA, xrCapable).catch((e) => console.warn('materials', e));
-    app.rocks = new Rocks(app.terrain, xrCapable);
+    app.rocks = new Rocks(app.terrain as unknown as TerrainPatch, xrCapable);
+    app.terrain.source = bodies.terrainSource;
     app.cometTails = new CometTails(bodies.surfaceExposure);
     const earthBody = system.byId.get(399)!;
     const craft = await loadSpacecraft(DATA, system.sun, earthBody).catch((e) => { console.warn('spacecraft', e); return [] as Spacecraft[]; });
@@ -217,11 +225,12 @@ export class App {
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.rocks.group, app.cometTails.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.rocks.group, app.mwVolume.mesh, app.cometTails.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
     app.game = new Game(app);
+    app.walk = new Walk(app); // walking hook
     bodies.uploader = (t) => renderer.gl.initTexture(t);
     app.warmupPending = true;
     app.applyUrl();
@@ -312,6 +321,7 @@ export class App {
 
   private bindKeys(): void {
     this.input.onClick = (x, y) => {
+      if (this.walk.onClick()) return; // walking: the click grabs the mouse
       const hit = this.pick(x, y);
       this.select(hit);
     };
@@ -328,6 +338,7 @@ export class App {
     this.input.onKey = (e) => {
       if (this.game?.active) this.game.audio.start();
       if (this.hud.searchOpen) return;
+      if (this.walk.onKey(e)) return; // walking: B, Space jumps, ...
       switch (e.code) {
         case 'Space': this.togglePause(); e.preventDefault(); break;
         case 'BracketRight': this.timeFaster(); break;
@@ -405,6 +416,7 @@ export class App {
       { label: 'Olympus Mons', detail: 'Mars · the tallest volcano known (real elevation data)', id: `lm:${lm('Olympus Mons')}` },
       { label: 'Valles Marineris', detail: 'Mars · a canyon 4,000 km long', id: `lm:${lm('Valles Marineris')}` },
       { label: 'Apollo 11 landing site', detail: 'the Moon · fly down and walk', id: `lm:${lm('Apollo 11 landing site')}` },
+      { label: 'Walk on the Moon at Apollo 17', detail: 'land in the Taurus-Littrow valley and walk (B: walk / fly)', id: 'tour:walk17' },
       { label: 'Shackleton crater', detail: 'the Moon\'s south pole · long shadows', id: `lm:${lm('Shackleton (lunar south pole)')}` },
       { label: 'A moon\'s shadow on Jupiter', detail: 'jumps to the next shadow transit', id: 'tour:shadow' },
       { label: 'Total lunar eclipse', detail: '3 March 2026 · the Moon in Earth\'s shadow', id: 'tour:eclipse' },
@@ -420,6 +432,7 @@ export class App {
 
   /** Tour destinations that need more than a fly-to (a time jump, a search): desktop flies there. */
   private tourAction(what: string): void {
+    if (what === 'walk17') { this.walk.walkAt(this.landmarks.find((l) => l.name === 'Apollo 17 landing site')!); return; }
     const o = this.prepareTour(what);
     if (o) { this.select(o); this.goTo(o); }
   }
@@ -514,7 +527,7 @@ export class App {
     const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
     const air = this.atmospheres.warmupObjects()[0];
     if (air) terrain.push(this.terrain.warmupHaze(air.material as ShaderMaterial));
-    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects()];
+    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
@@ -980,7 +993,7 @@ export class App {
   private ringRadiance(): number {
     const rp = this.bodies.ringParticles;
     const sat = this.system.bodies.find((b) => b.name === 'Saturn');
-    if (!rp?.mesh.visible || !sat) return 0;
+    if (!(rp?.mesh.visible || rp?.slabActive) || !sat) return 0;
     return (0.6 * sunIrradianceAt(Math.max(sat.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI;
   }
 
@@ -991,6 +1004,11 @@ export class App {
     const th = rel.angleTo(new Vector3(0, 0, -1).applyQuaternion(this.view.quat));
     const hv = (this.view.fovY * Math.PI) / 360;
     return Math.max(0, Math.min(1, (ar + hv - th) / (2 * hv)));
+  }
+
+  /** A body's albedo for the exposure: near its ground, the eye adapts to the ground around (TerrainPatch.exposureAlbedo). */
+  private surfaceAlbedo(b: Body): number {
+    return this.terrain.owner === b ? this.terrain.exposureAlbedo(b.albedo) : b.albedo;
   }
 
   private updateExposure(dt: number): { xStar: number; xSurf: number; mLim: number; xDark: number } {
@@ -1017,7 +1035,7 @@ export class App {
       const b = v.body;
       const L = b.kind === 'star'
         ? (AU / SUN_RADIUS) ** 2
-        : ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
+        : ((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
       wBest = w;
       lBest = L;
       keyBest = b.kind === 'star' ? STAR_KEY : 0.45;
@@ -1094,7 +1112,7 @@ export class App {
       if (!v.resolved || v.pixelRadius <= 1.5 || (!onScreen(v.rel) && this.bigCoverage(v.rel, v.body.radius) < 0.02)) continue;
       const b = v.body;
       if (b.kind === 'star') lightCap = Math.min(lightCap, 1.8 / (AU / SUN_RADIUS) ** 2);
-      else diskCap = Math.min(diskCap, 1.6 / (((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1)));
+      else diskCap = Math.min(diskCap, 1.6 / (((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1)));
     }
     for (const cv of this.craft.views) {
       if (cv.pixelRadius <= 1.5 || !onScreen(cv.rel)) continue;
@@ -1592,9 +1610,12 @@ export class App {
     this.rig.altitude = this.computeAltitude();
     if (this.vr.active) this.vr.updateInput(dt);
     this.rig.braking = this.input.keys.has('KeyX');
-    this.rig.update(dt, this.input);
-    this.keepOutsideHorizons();
-    this.keepAboveGround(dt);
+    // walking (src/app/Walk.ts) owns the camera while on foot; otherwise free flight
+    if (!this.walk.update(dt)) {
+      this.rig.update(dt, this.input);
+      this.keepOutsideHorizons();
+      this.keepAboveGround(dt);
+    }
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
 
     // The dolly carries the explorer's orientation; a headset pose is applied on top of it.
@@ -1631,8 +1652,9 @@ export class App {
       const c = cands[0] ?? null;
       if (c) c.air = this.atmospheres.material(c.ground.owner);
       this.terrain.vr = this.vr.active;
+      this.terrain.view = this.view;
       this.terrain.update(c);
-      this.rocks.update(this.rig.upos);
+      this.rocks.update(this.rig.upos, this.renderer.gl);
     }
     this.craft.update(this.rig.upos, pixelAngle, jd, this.system.sun, this.system.byId.get(399)!);
     this.holes.vr = this.vr.active;
@@ -1645,6 +1667,7 @@ export class App {
     // one face per frame while travelling; all at once if we find ourselves far out with no map yet
     if (sunDistPc > 60) this.galaxy.update(this.renderer.gl, this.camGal, !this.galaxy.ready && sunDistPc > 150 ? 6 : 1);
     this.sky.updateWith(xStar / xDark, sunDistPc, this.galaxy.ready ? this.galaxy.target.texture : null, this.camGal);
+    this.mwVolume.update(this.rig.upos, this.camGal, this.sky.modelK, SkyLayer.MODEL_REF, this.sky.modelExp);
     this.galaxies.update(this.rig.upos, pixelAngle, xStar / xDark, smoothstep(300, 1500, sunDistPc), this.view.quat);
     this.deepSky.update(this.rig.upos, this.camPc, pixelAngle, xStar / xDark);
     this.cometTails.gain.value = xStar / xDark;

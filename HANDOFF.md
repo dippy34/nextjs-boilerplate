@@ -109,6 +109,26 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     normal + height); `groundDetail` in the terrain shaders blends flat/steep/snow materials at three
     scales by slope and height, as detail around the world's own colour. `render/Rocks.ts` scatters
     rocks per body-fixed cell on the drawn ground (`TerrainPatch.groundRadius`).
+  - Display curve (`shaders/tone.ts`): the ACES fit applied to luminance only, so hues and
+    saturation survive (per-channel ACES bleached mid-tones: Saturn came out off-white); highlights
+    above ~60% of white blend towards white. Same curve in the headset via `CustomToneMapping`.
+  - Comet tails (`CometTails`, TAIL_FRAG): a box in the comet's frame (x away from the Sun, y in the
+    orbit plane behind the motion from the orbital elements, z the orbit normal), in coma radii;
+    1/b coma integrated analytically, ion tube with plasma rays and curved, striated dust fan
+    ray-marched with steps that shrink near the tube's axis and the fan's plane.
+  - Saturn's rings: `shaders/rings.ts` (per-ring particle colour, ringlets below the profile's
+    resolution, backscattering phase function with opposition surge, penumbra, Saturnshine). Within
+    3 km of the plane `RingParticles.slab` draws the whole ring as a medium (Gaussian layer, σ 4.5 m,
+    measured optical depth, sunlight dimmed by the layer, self-gravity wakes) on a sphere around the
+    eye; the ice chunks are shaded and fogged by the same layer (`LAYER_GLSL`).
+  - Star surfaces: `shaders/star.ts` (arithmetic hash: `sin` of large arguments lined the granules
+    up on a grid; granules ~1000 km on the Sun; bright points; mesogranulation); the corona glow
+    fades close to a star (`StarCorona`).
+  - Milky Way from outside: `MilkyWayVolume` ray-marches the galaxy model per pixel (with H II knots,
+    OB associations, dust lanes on the arms' inner edges, feathers) and takes over from the glow cube
+    a few kpc outside the disc.
+  - Point sources fade in over the last ~1.3 mag above the cut-off (`psf.ts`).
+  - Shot scripts for visual review: `scripts/shots/{comet,rings,solar}.mjs`.
   - Spacecraft models (`SpacecraftLayer.parts`): ISS (Sun-tracking arrays), Hubble, JWST, Voyager,
     New Horizons built from parts, baked per finish (`bake`); HULL_FRAG adds cells/foil/quilting/truss
     lattice from the part-local position (`aLoc`).
@@ -116,6 +136,37 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     atmosphere over terrain, 14 checks),
     `scripts/places.mjs` (rings, comet, lunar eclipse, Jupiter moon shadow, landmarks, inside the
     Orion Nebula).
+
+## Global elevation pyramids (elevation worker)
+
+`pipeline/build_elevation.py` (sources and resumable downloads in `pipeline/elevation_sources.py`,
+raw files and int16 work grids in `data-raw/elevation/`, ~25 GB while building) ->
+`public/data/elevation/<body>/<level>/<face>-<x>-<y>.png` + `manifest.json`, and `index.json`.
+Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/elevation.test.ts`
+(fixture `tests/fixtures/elevation_points.json` is written by the build).
+
+* Cube: faces 0..5 = +X,-X,+Y,-Y,+Z,-Z of the body-fixed frame (+X = 0 deg E, +Z = north); image
+  right/down axes +X:(+Y,-Z) -X:(-Y,-Z) +Y:(-X,-Z) -Y:(+X,-Z) +Z:(+Y,+X) -Z:(+Y,-X); equi-angular
+  (`normalize(N + tan((2u-1)pi/4) U + tan((2v-1)pi/4) V)`). Level L: 2^L x 2^L tiles a face, 256
+  intervals a tile, 257 vertex-registered samples + a 1-sample apron = 259 x 259 16-bit greyscale
+  PNG; height = manifest `offset` + `step` (1 m) x value.
+* Bodies, MB, finest level: Moon 115 MB (all to 1.3 km, half to 666 m, landmarks 333 m), Mars 105
+  (all to 2.6 km, most to 1.3 km, 650/325 m at the volcanoes, canyons and landing sites), Earth 80
+  (sea floor to 9.8 km; land to 4.9 km, mountains to 1.2 km/611 m, landmarks 305 m), Mercury 25
+  (1.9 km), Ceres 7.6, Vesta 7.0: 340 MB in all. Deep tiles are chosen greedily by the RMS detail
+  they add over the parent x 2^(-level/2) under a per-body byte budget (`BODIES` in the script).
+* API: `Elevation.configure({ base, maxBytes })` (absolute base inside a worker), `load(body)`,
+  `levels(body)`, `request(body, face, level, x, y)`, `prefetch(body, dir, metresPerSample, ring)`,
+  `sample(body, dirBF, metresPerSample)` (sync bicubic, metres above the reference, null when
+  nothing loaded covers the point; blends adjacent levels; `lastMetresPerSample`/`lastLevel` say
+  what it used), `maxLevelAt(body, dir)`, `exists`, `loaded`, `version(body)`; helpers
+  `faceToDir`, `dirToFace`, `tileOf`, `decodePng16` (own PNG decoder over `DecompressionStream`,
+  so heights stay exact 16-bit). LRU cache, 96 MB default, levels 0-1 never evicted.
+* Regenerate: `cd pipeline && python3 build_elevation.py [body ...]` (downloads ~14 GB once).
+* Known: Mercury in the older `public/data/terrain/mercury.png` is twice too tall (the GeoTIFF's 0.5 m
+  scale was not applied there); the pyramids are right. Mars/Earth heights are relative to the
+  areoid/geoid but the engine adds them to the ellipsoid (as before: the difference is a smooth,
+  very long-wavelength undulation, kilometre-scale on Mars, ~100 m on Earth). Earth land below sea level (Dead Sea, Caspian) is stored as ocean in the fine levels.
 
 ## Next
 

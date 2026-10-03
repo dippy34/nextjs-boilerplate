@@ -8,11 +8,11 @@ import type { UPos } from '../core/upos';
 import { type ExoPlanet, hashKey, type PlanetarySystem, type PlanetType, rng } from '../universe/Planets';
 import { SPRITE_FRAG, SPRITE_VERT } from './NearStars';
 import { BODY_VERT } from './shaders/body';
-import { EXO_FRAG } from './shaders/planet';
+import { EXO_FRAG, RING_GLSL } from './shaders/planet';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import { ExoPlanet as ExoPlanetClass, PlanetarySystem as SystemClass } from '../universe/Planets';
 import { CatalogStar } from '../universe/Stars';
-import { ExoGround, exoQuantile, ROCKY_TYPES } from '../universe/ExoTerrain';
+import { ExoGround, exoCraterSeed, exoQuantile, exoQuantiles, ROCKY_TYPES } from '../universe/ExoTerrain';
 import { MATERIALS } from './Materials';
 import { earthLikeAtmosphere, type AtmosphereSpec, type ExoAtmosphere } from './Atmospheres';
 import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
@@ -20,48 +20,112 @@ import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
 const TYPE_ID: Record<PlanetType, number> = { lava: 0, hot: 1, desert: 2, terran: 3, ocean: 4, ice: 5, subneptune: 6, icegiant: 7, giant: 8, hotgiant: 9 };
 type V3 = [number, number, number];
 
-/** A planet's palette and surface parameters, varied by its seed within its type. */
+const lum = (c: V3) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+
+/**
+ * A planet's palette and surface parameters, varied by its seed within its type and chosen by its
+ * temperature where that changes what it is made of. Colours are linear albedos (what fraction of
+ * the starlight the surface reflects), so `albedo` (the disk's mean, for the eye's adaptation)
+ * follows from them: lava and hot Jupiters are dark, ice worlds and water-cloud giants bright.
+ */
 function paletteFor(p: ExoPlanet): Record<string, number | V3> {
   const t = p.spec.type;
+  const T = p.spec.teqK;
   const r = rng(hashKey(p.key + '/look'));
-  const jit = (c: V3, k = 0.18): V3 => [c[0] * (1 + k * (r() - 0.5)), c[1] * (1 + k * (r() - 0.5)), c[2] * (1 + k * (r() - 0.5))];
+  const jit = (c: V3, k = 0.14): V3 => { const m = 1 + k * (r() - 0.5); return [c[0] * m * (1 + 0.5 * k * (r() - 0.5)), c[1] * m * (1 + 0.5 * k * (r() - 0.5)), c[2] * m * (1 + 0.5 * k * (r() - 0.5))]; };
   const pick = <T,>(a: T[]): T => a[Math.floor(r() * a.length)];
-  const base = { uSeaLevel: 0, uIceLat: 1.2, uClouds: 0, uAtmo: 0, uBands: 10, uTurb: 0.6, uGlow: 0, uSea: [0.02, 0.06, 0.15] as V3, uAtmoColor: [0.4, 0.6, 1.0] as V3 };
+  const base = {
+    uSeaLevel: 0, uIceLat: 1.2, uClouds: 0, uAtmo: 0, uBands: 10, uTurb: 0.6, uStorms: 0, uGlow: 0, uCraters: 0,
+    uSea: [0.02, 0.06, 0.15] as V3, uAtmoColor: [0.4, 0.6, 1.0] as V3, uC4: [0.5, 0.5, 0.5] as V3,
+  };
+  const giantLook = (pal: V3[], o: Record<string, number | V3>) => {
+    const [c1, c2, c3, c4] = pal.map((c) => jit(c));
+    return { ...base, uC1: c1, uC2: c2, uC3: c3, uC4: c4, albedo: 0.5 * (lum(c1) + lum(c2)), ...o };
+  };
   switch (t) {
-    case 'lava': return { ...base, uC1: jit([0.06, 0.05, 0.05]), uC2: jit([0.2, 0.15, 0.12]), uC3: [0.3, 0.25, 0.2], uGlow: 0.7 + 0.6 * r() };
-    case 'hot': return { ...base, uC1: jit([0.3, 0.27, 0.25]), uC2: jit([0.5, 0.45, 0.4]), uC3: jit([0.7, 0.65, 0.6]), uAtmo: r() < 0.3 ? 0.5 : 0, uAtmoColor: [1, 0.8, 0.5] };
-    case 'desert': {
-      const c = pick<V3>([[0.6, 0.38, 0.2], [0.7, 0.55, 0.35], [0.55, 0.3, 0.22], [0.75, 0.68, 0.55]]);
-      return { ...base, uC1: jit(c), uC2: jit([c[0] * 1.2, c[1] * 1.2, c[2] * 1.15]), uC3: jit([0.85, 0.78, 0.65]), uAtmo: 0.5, uAtmoColor: [1, 0.8, 0.6], uIceLat: r() < 0.5 ? 0.85 : 1.2 };
+    case 'lava': {
+      const c1 = jit([0.035, 0.03, 0.03]);
+      return { ...base, uC1: c1, uC2: jit([0.08, 0.065, 0.055]), uC3: [0.12, 0.1, 0.09], uC4: [0.2, 0.18, 0.15], uGlow: Math.min(1.6, Math.max(0.4, (T - 700) / 700)) * (0.8 + 0.4 * r()), albedo: 0.06 };
     }
-    case 'terran': case 'ocean': {
-      // vegetation of other worlds needn't be green
-      const veg = pick<V3>([[0.1, 0.24, 0.07], [0.22, 0.25, 0.1], [0.3, 0.15, 0.1], [0.2, 0.1, 0.22], [0.35, 0.3, 0.18]]);
+    case 'hot': {
+      const pal = pick<V3[]>([
+        [[0.07, 0.065, 0.06], [0.12, 0.11, 0.1], [0.16, 0.15, 0.14]],      // grey, Mercury-like
+        [[0.08, 0.06, 0.045], [0.15, 0.12, 0.09], [0.2, 0.17, 0.13]],     // brown
+        [[0.09, 0.05, 0.035], [0.17, 0.1, 0.07], [0.22, 0.15, 0.11]],     // iron-red
+      ]).map((c) => jit(c));
+      return { ...base, uC1: pal[0], uC2: pal[1], uC3: pal[2], uC4: [0.26, 0.25, 0.24], uCraters: 0.6 + 0.4 * r(), uAtmo: r() < 0.2 ? 0.4 : 0, uAtmoColor: [1, 0.8, 0.5], albedo: 0.5 * (lum(pal[0]) + lum(pal[1])) };
+    }
+    case 'desert': {
+      const pal = pick<V3[]>([
+        [[0.1, 0.06, 0.04], [0.33, 0.18, 0.09], [0.25, 0.17, 0.12]],     // rust (Mars-like)
+        [[0.18, 0.14, 0.1], [0.45, 0.36, 0.24], [0.35, 0.3, 0.24]],      // pale sand
+        [[0.15, 0.11, 0.05], [0.42, 0.3, 0.13], [0.3, 0.24, 0.16]],      // ochre
+        [[0.1, 0.09, 0.08], [0.28, 0.24, 0.2], [0.22, 0.2, 0.18]],       // grey-brown
+      ]).map((c) => jit(c));
       return {
-        ...base, uC1: jit(veg), uC2: jit([0.4, 0.33, 0.24]), uC3: jit([0.62, 0.6, 0.58]), uSea: jit([0.015, 0.05, 0.13], 0.4),
-        uSeaLevel: t === 'ocean' ? 0.62 + 0.08 * r() : 0.4 + 0.15 * r(), uIceLat: 0.7 + 0.25 * r(), uClouds: 0.35 + 0.5 * r(),
-        uAtmo: 0.9, uAtmoColor: [0.35, 0.55, 1.0],
+        ...base, uC1: pal[0], uC2: pal[1], uC3: pal[2], uC4: jit([0.5, 0.47, 0.42]), uCraters: 0.3 + 0.5 * r(),
+        uAtmo: 0.35, uAtmoColor: [1, 0.78, 0.6], uIceLat: T < 250 ? 0.8 + 0.12 * r() : 1.2, albedo: 0.65 * lum(pal[1]) + 0.35 * lum(pal[0]),
       };
     }
-    case 'ice': return { ...base, uC1: jit([0.6, 0.65, 0.7]), uC2: jit([0.75, 0.8, 0.86]), uC3: [0.95, 0.97, 1.0], uIceLat: 1.2, uAtmo: r() < 0.3 ? 0.4 : 0 };
+    case 'terran': case 'ocean': {
+      // vegetation of other worlds needn't be green, but it stays dark (it absorbs starlight)
+      const veg = jit(pick<V3>([
+        [0.035, 0.06, 0.025], [0.035, 0.06, 0.025], [0.03, 0.055, 0.025], [0.045, 0.065, 0.03],   // green
+        [0.055, 0.06, 0.03], [0.025, 0.05, 0.04],                                                   // olive, teal
+        [0.06, 0.032, 0.025], [0.05, 0.032, 0.045], [0.07, 0.06, 0.025],                            // red, purple, ochre
+      ]));
+      const soil = jit(pick<V3>([[0.42, 0.31, 0.18], [0.36, 0.3, 0.22], [0.45, 0.26, 0.14], [0.4, 0.36, 0.28]]));
+      const clouds = t === 'ocean' ? 0.55 + 0.35 * r() : 0.4 + 0.4 * r();
+      return {
+        ...base, uC1: veg, uC2: soil, uC3: jit([0.17, 0.15, 0.13]), uC4: [0.6, 0.6, 0.6], uSea: jit(pick<V3>([[0.006, 0.018, 0.045], [0.007, 0.022, 0.04], [0.005, 0.015, 0.05]]), 0.3),
+        uClouds: clouds, uAtmo: 0.9, uAtmoColor: [0.35, 0.55, 1.0], albedo: 0.07 + 0.3 * clouds,
+      };
+    }
+    case 'ice': {
+      const [pal, craters] = pick<[V3[], number]>([
+        [[[0.42, 0.3, 0.2], [0.75, 0.72, 0.66], [0.85, 0.85, 0.85], [0.9, 0.92, 0.95]], 0.1],     // Europa-like
+        [[[0.6, 0.66, 0.72], [0.88, 0.9, 0.92], [0.95, 0.96, 0.97], [0.95, 0.97, 1]], 0.3],     // fresh ice
+        [[[0.12, 0.1, 0.09], [0.35, 0.32, 0.3], [0.55, 0.55, 0.55], [0.7, 0.72, 0.75]], 1],      // old, dirty, cratered
+        [[[0.22, 0.11, 0.06], [0.7, 0.62, 0.52], [0.8, 0.78, 0.75], [0.9, 0.88, 0.85]], 0.3],    // tholins
+      ]);
+      const c = pal.map((x) => jit(x));
+      return { ...base, uC1: c[0], uC2: c[1], uC3: c[2], uC4: c[3], uCraters: craters * (0.6 + 0.6 * r()), uAtmo: r() < 0.3 ? 0.3 : 0, uAtmoColor: [0.6, 0.7, 1], albedo: 0.7 * lum(c[1]) + 0.3 * lum(c[0]) };
+    }
     case 'subneptune': {
-      const c = pick<V3>([[0.45, 0.62, 0.72], [0.55, 0.65, 0.6], [0.6, 0.6, 0.7], [0.5, 0.7, 0.75]]);
-      return { ...base, uC1: jit(c), uC2: jit([c[0] * 1.15, c[1] * 1.12, c[2] * 1.1]), uC3: jit([0.82, 0.88, 0.92]), uBands: 5 + 6 * r(), uTurb: 0.25, uAtmo: 1.0, uAtmoColor: [0.6, 0.8, 1.0] };
+      const pal = T < 250 ? [[0.42, 0.6, 0.68], [0.5, 0.68, 0.74], [0.7, 0.82, 0.86], [0.45, 0.6, 0.7]]
+        : T < 600 ? pick<V3[]>([[[0.5, 0.55, 0.62], [0.62, 0.66, 0.7], [0.8, 0.82, 0.85], [0.55, 0.58, 0.62]], [[0.4, 0.5, 0.6], [0.52, 0.6, 0.68], [0.75, 0.8, 0.84], [0.5, 0.55, 0.6]]])
+        : pick<V3[]>([[[0.45, 0.36, 0.26], [0.58, 0.48, 0.36], [0.72, 0.64, 0.52], [0.55, 0.4, 0.28]], [[0.36, 0.4, 0.34], [0.48, 0.52, 0.45], [0.66, 0.68, 0.62], [0.45, 0.45, 0.38]]]);
+      return giantLook(pal as V3[], { uBands: 4 + 5 * r(), uTurb: 0.15 + 0.15 * r(), uStorms: Math.floor(3 * r()), uAtmo: 0.5, uAtmoColor: [0.6, 0.8, 1.0] });
     }
     case 'icegiant': {
-      const c = pick<V3>([[0.25, 0.45, 0.85], [0.45, 0.75, 0.85], [0.3, 0.55, 0.7]]);
-      return { ...base, uC1: jit(c), uC2: jit([c[0] * 1.2, c[1] * 1.15, c[2] * 1.05]), uC3: jit([0.75, 0.85, 0.95]), uBands: 4 + 5 * r(), uTurb: 0.35, uAtmo: 0.8, uAtmoColor: [0.5, 0.7, 1.0] };
+      const pal = T < 120 ? pick<V3[]>([
+        [[0.1, 0.22, 0.5], [0.16, 0.32, 0.62], [0.7, 0.8, 0.9], [0.12, 0.25, 0.55]],      // Neptune-like
+        [[0.36, 0.56, 0.62], [0.42, 0.64, 0.68], [0.6, 0.78, 0.8], [0.4, 0.6, 0.65]],     // Uranus-like
+      ]) : T < 500 ? [[0.25, 0.4, 0.48], [0.32, 0.48, 0.55], [0.65, 0.75, 0.8], [0.3, 0.42, 0.5]]
+        : [[0.3, 0.28, 0.27], [0.4, 0.38, 0.36], [0.6, 0.58, 0.55], [0.35, 0.3, 0.28]];   // too warm for methane
+      return giantLook(pal as V3[], { uBands: 4 + 4 * r(), uTurb: 0.3 + 0.25 * r(), uStorms: 1 + Math.floor(3 * r()), uAtmo: 0.4, uAtmoColor: [0.5, 0.7, 1.0] });
     }
     case 'giant': {
-      const pal = pick<[V3, V3, V3]>([
-        [[0.55, 0.4, 0.28], [0.85, 0.75, 0.6], [0.95, 0.9, 0.82]], // Jupiter-like
-        [[0.75, 0.62, 0.42], [0.88, 0.8, 0.62], [0.95, 0.9, 0.78]], // Saturn-like
-        [[0.45, 0.42, 0.5], [0.7, 0.68, 0.75], [0.9, 0.88, 0.92]], // cold, pale
-        [[0.6, 0.35, 0.25], [0.8, 0.6, 0.45], [0.9, 0.8, 0.7]],    // ruddy
-      ]);
-      return { ...base, uC1: jit(pal[0]), uC2: jit(pal[1]), uC3: jit(pal[2]), uBands: 8 + 10 * r(), uTurb: 0.5 + 0.7 * r(), uAtmo: 0.5, uAtmoColor: [0.9, 0.85, 0.8] };
+      // ammonia clouds when cold (Jupiter, Saturn), water clouds when temperate (bright white),
+      // cloudless and blue when warmer still
+      const pal = T < 150 ? pick<V3[]>([
+        [[0.36, 0.24, 0.15], [0.66, 0.6, 0.5], [0.8, 0.77, 0.7], [0.6, 0.3, 0.17]],       // Jupiter-like
+        [[0.36, 0.24, 0.15], [0.66, 0.6, 0.5], [0.8, 0.77, 0.7], [0.6, 0.3, 0.17]],
+        [[0.5, 0.4, 0.26], [0.66, 0.57, 0.4], [0.75, 0.68, 0.52], [0.62, 0.48, 0.3]],     // Saturn-like
+        [[0.42, 0.3, 0.24], [0.6, 0.5, 0.42], [0.75, 0.7, 0.62], [0.55, 0.28, 0.2]],      // ruddy
+      ]) : T < 350 ? [[0.6, 0.6, 0.6], [0.78, 0.78, 0.76], [0.88, 0.88, 0.87], [0.7, 0.65, 0.6]]
+        : [[0.12, 0.18, 0.35], [0.18, 0.26, 0.45], [0.35, 0.42, 0.6], [0.2, 0.2, 0.35]];
+      const saturn = pal[0][0] === 0.5;
+      return giantLook(pal as V3[], {
+        uBands: saturn ? 12 + 6 * r() : 7 + 5 * r(), uTurb: saturn ? 0.25 + 0.15 * r() : T < 150 ? 0.6 + 0.5 * r() : 0.3 + 0.3 * r(),
+        uStorms: saturn ? 1 + Math.floor(2 * r()) : 3 + Math.floor(6 * r()), uAtmo: 0.25, uAtmoColor: [0.9, 0.85, 0.8],
+      });
     }
-    case 'hotgiant': return { ...base, uC1: jit([0.06, 0.06, 0.09]), uC2: jit([0.14, 0.12, 0.18]), uC3: jit([0.3, 0.25, 0.3]), uBands: 6 + 6 * r(), uTurb: 0.8, uGlow: 0.6 + 0.5 * r(), uAtmo: 0.4, uAtmoColor: [0.6, 0.5, 0.9] };
+    case 'hotgiant': {
+      const pal = T > 1800 ? [[0.2, 0.17, 0.15], [0.32, 0.28, 0.24], [0.45, 0.4, 0.35], [0.3, 0.18, 0.12]]   // silicate clouds
+        : pick<V3[]>([[[0.03, 0.03, 0.045], [0.06, 0.055, 0.075], [0.12, 0.11, 0.13], [0.1, 0.05, 0.04]], [[0.02, 0.04, 0.09], [0.035, 0.06, 0.13], [0.08, 0.11, 0.2], [0.05, 0.06, 0.12]]]);
+      return giantLook(pal as V3[], { uBands: 5 + 5 * r(), uTurb: 0.6 + 0.4 * r(), uStorms: Math.floor(3 * r()), uGlow: Math.min(1.5, Math.max(0.2, (T - 900) / 800)), uAtmo: 0.04, uAtmoColor: [0.6, 0.5, 0.9] });
+    }
   }
 }
 
@@ -81,22 +145,36 @@ const RING_FRAG = /* glsl */ `
 #include <logdepthbuf_pars_fragment>
 uniform vec3 uColor;
 uniform float uSeed;
+uniform float uIn;
+uniform float uOut;
 uniform float uLight;   // reflected radiance x exposure for a white ring particle
+uniform vec3 uSunL;     // star direction in the ring frame
+uniform vec3 uCamL;     // camera position in the ring frame (planet radii)
 varying vec2 vXY;
-float h1(float n) { return fract(sin(n) * 43758.5453123); }
-float n1(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(h1(i + uSeed), h1(i + 1.0 + uSeed), f); }
+${RING_GLSL}
 void main() {
-  float r = length(vXY);          // 1.4 .. 2.6 planet radii
-  float t = (r - 1.4) / 1.2;
-  float dens = 0.25 + 0.75 * n1(t * 23.0) * (0.6 + 0.4 * n1(t * 90.0 + 3.0));
-  dens *= smoothstep(0.0, 0.05, t) * smoothstep(1.0, 0.9, t);
-  dens *= step(0.06, abs(t - 0.62 - 0.1 * h1(uSeed))); // a gap
-  gl_FragColor = vec4(uColor * uLight * dens, dens * 0.85);
+  float r = length(vXY);
+  float fw = fwidth(r) / (uOut - uIn);
+  float dens = ringDensity(r, uSeed, uIn, uOut, fw);
+  if (dens <= 0.0) discard;
+  float t = (r - uIn) / (uOut - uIn);
+  // colour: a little redder and darker inwards, ringlets of slightly different tint
+  vec3 col = uColor * mix(vec3(0.82, 0.76, 0.7), vec3(1.0), smoothstep(0.0, 0.6, t)) * (0.85 + 0.3 * ringNoise(t * 57.0, uSeed + 21.0));
+  // the planet's shadow (sphere of radius 1 between this point and the star)
+  vec3 P = vec3(vXY, 0.0);
+  float b = dot(P, uSunL);
+  float sh = b < 0.0 ? smoothstep(0.97, 1.03, sqrt(max(dot(P, P) - b * b, 0.0))) : 1.0;
+  // lit face, or light diffusing through to the unlit face
+  float lit = sign(uSunL.z) == sign(uCamL.z) ? 1.0 : 0.25 * (1.0 - dens);
+  float mu0 = abs(uSunL.z);
+  float tau = dens * 1.8;
+  float refl = (1.0 - exp(-tau / max(mu0, 0.05))) * lit;
+  gl_FragColor = vec4(col * uLight * refl * sh, dens * 0.92);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
-interface PlanetDraw { mesh: Mesh; ring: Mesh | null; orbit: Line; orient: Matrix4; ground: ExoGround | null; air: AtmosphereSpec | null }
+interface PlanetDraw { mesh: Mesh; ring: Mesh | null; orbit: Line; orient: Matrix4; ground: ExoGround | null; air: AtmosphereSpec | null; albedo: number }
 
 const G = 6.674e-11;
 
@@ -112,7 +190,7 @@ export class ExoPlanetLayer {
   showOrbits = true;
   private draws = new Map<ExoPlanet, PlanetDraw>();
   private sphere = new SphereGeometry(1, 128, 64);
-  private ringGeo = new RingGeometry(1.4, 2.6, 128, 1);
+  private ringGeo = new RingGeometry(1.15, 3.0, 256, 1);
   private sprites: Points;
   private sp = { pos: new Float32Array(64 * 3), irr: new Float32Array(64), col: new Float32Array(64 * 3) };
 
@@ -141,16 +219,26 @@ export class ExoPlanetLayer {
       const rc = rng(hashKey(p.key + '/climate'));
       const t = p.spec.type;
       if (t === 'terran' || t === 'ocean') pal.uSeaLevel = exoQuantile(seed, t === 'ocean' ? 0.85 + 0.11 * rc() : 0.4 + 0.35 * rc());
+      const [q10, q50, q90] = ROCKY_TYPES.has(TYPE_ID[t]) ? exoQuantiles(seed, [0.1, 0.5, 0.9]) : [0.3, 0.4, 0.5];
+      pal.uHMid = q50;
+      pal.uHSpan = Math.max(0.02, q90 - q10);
       pal.uTeq = p.spec.teqK;
       pal.uDry = t === 'ocean' ? 0.1 * rc() : t === 'terran' ? 0.1 + 0.5 * rc() : 1;
       pal.uRelief = Math.min(20e3, p.radius * 0.002) / p.radius;
+      pal.uRadius = p.radius;
+      pal.uRing = p.spec.rings ? 1 : 0;
+      pal.uRingSeed = p.spec.seed % 13;
+      pal.uRingIn = 1.2 + 0.4 * rc();
+      pal.uRingOut = Math.min(2.95, pal.uRingIn + 0.7 + 0.9 * rc());
     }
+    const albedo = Number(pal.albedo);
+    delete pal.albedo;
     const u: Record<string, { value: unknown }> = {
       uType: { value: TYPE_ID[p.spec.type] }, uSeed: { value: seed }, uLumpy: { value: 0 },
       uSunDir: { value: new Vector3(1, 0, 0) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI },
       uExposure: this.exposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
-      uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK, uLite: LITE.uLite,
-      uTerrain: { value: 0 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
+      uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK, uLite: LITE.uLite, uCSeed: { value: exoCraterSeed(p.name) },
+      uTerrain: { value: 0 }, uHScale: { value: 0 }, uCamAlt: { value: 1e9 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
       ...MATERIALS, uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) },
     };
     for (const [k, v] of Object.entries(pal)) u[k] = { value: Array.isArray(v) ? new Vector3(...v) : v };
@@ -162,10 +250,14 @@ export class ExoPlanetLayer {
     this.group.add(mesh);
     let ring: Mesh | null = null;
     if (p.spec.rings) {
-      const c = (pal.uC3 as V3);
+      // icy rings when cold, dark dusty ones otherwise
+      const icy = p.spec.teqK < 150;
+      const c3 = pal.uC3 as V3;
+      const c: V3 = icy ? [0.62 + 0.15 * c3[0], 0.57 + 0.15 * c3[1], 0.5 + 0.15 * c3[2]] : [0.22, 0.2, 0.19];
       ring = new Mesh(this.ringGeo, new ShaderMaterial({
         name: 'exoplanet-ring', vertexShader: RING_VERT, fragmentShader: RING_FRAG,
-        uniforms: { uColor: { value: new Vector3(c[0] * 0.9, c[1] * 0.88, c[2] * 0.85) }, uSeed: { value: p.spec.seed % 13 }, uLight: { value: 1 },
+        uniforms: { uColor: { value: new Vector3(...c) }, uSeed: { value: pal.uRingSeed }, uIn: { value: pal.uRingIn }, uOut: { value: pal.uRingOut },
+          uLight: { value: 1 }, uSunL: { value: new Vector3(0, 0, 1) }, uCamL: { value: new Vector3(0, 0, 1) },
           uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
         transparent: true, depthWrite: false, side: DoubleSide,
       }));
@@ -182,17 +274,18 @@ export class ExoPlanetLayer {
     orbit.renderOrder = 5;
     this.group.add(orbit);
     const type = TYPE_ID[p.spec.type];
-    const ground = ROCKY_TYPES.has(type) ? new ExoGround(p, type, p.spec.seed % 97, Number(pal.uSeaLevel ?? 0)) : null;
+    const ground = ROCKY_TYPES.has(type)
+      ? new ExoGround(p, type, p.spec.seed % 97, Number(pal.uSeaLevel ?? 0), Number(pal.uCraters ?? 0), Number(pal.uHMid), Number(pal.uHSpan)) : null;
     // temperate and ocean worlds get an Earth-like atmosphere (pressure varies from planet to planet)
     let air: AtmosphereSpec | null = null;
     if (type === 3 || type === 4) {
       const ra = rng(hashKey(p.key + '/air'));
       const g = (G * p.spec.massKg) / (p.radius * p.radius);
-      air = earthLikeAtmosphere(0.4 + 2.2 * ra(), Math.min(400, Math.max(180, p.spec.teqK)), Math.max(2, g));
+      air = earthLikeAtmosphere(0.6 + 1.2 * ra(), Math.min(400, Math.max(180, p.spec.teqK)), Math.max(2, g));
       // the shell draws the limb glow: keep only a little of the surface shader's own haze
       u.uAtmo.value = Number(u.uAtmo.value) * 0.3;
     }
-    d = { mesh, ring, orbit, orient: new Matrix4(), ground, air };
+    d = { mesh, ring, orbit, orient: new Matrix4(), ground, air, albedo };
     this.draws.set(p, d);
     return d;
   }
@@ -277,7 +370,9 @@ export class ExoPlanetLayer {
         toStar.copy(starRel).sub(rel);
         const ds = toStar.length();
         const E = magToIrradiance(host.absMag + 5 * Math.log10(ds / PC) - 5);
-        const radiance = (p.spec.albedo * E) / Math.PI;
+        // the eye adapts to the disk as it is drawn (like Solar System bodies: 1.5 x the mean albedo,
+        // dark worlds kept darker than mid-grey)
+        const radiance = (Math.min(1, 1.5 * Math.max(d.albedo, 0.15)) * E) / Math.PI;
         this.views.push({ planet: p, rel: rel.clone(), dist, pixelRadius: pr, radiance });
         const resolved = pr > 0.8;
         d.mesh.visible = resolved;
@@ -296,6 +391,7 @@ export class ExoPlanetLayer {
           (u.uSunColor.value as Vector3).set(sc[0] / sl, sc[1] / sl, sc[2] / sl);
           u.uSunIrr.value = E;
           u.uTime.value = time;
+          u.uCamAlt.value = dist - p.radius;
           (u.uBodyToWorld.value as Matrix3).setFromMatrix4(d.mesh.matrix.clone().makeRotationFromQuaternion(q));
         } else if (ns < 64) {
           // reflected light as a point: albedo * E * (R / d)^2 * phase
@@ -311,7 +407,11 @@ export class ExoPlanetLayer {
             const qr = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), sys.n);
             d.ring.matrix.compose(rel, qr, new Vector3(p.radius, p.radius, p.radius));
             d.ring.matrixWorldNeedsUpdate = true;
-            (d.ring.material as ShaderMaterial).uniforms.uLight.value = (E / Math.PI) * 0.5 * this.exposure.value;
+            const ru = (d.ring.material as ShaderMaterial).uniforms;
+            ru.uLight.value = (E / Math.PI) * this.exposure.value;
+            const qi = qr.clone().invert();
+            (ru.uSunL.value as Vector3).copy(toStar).divideScalar(ds).applyQuaternion(qi);
+            (ru.uCamL.value as Vector3).copy(rel).negate().divideScalar(p.radius).applyQuaternion(qi);
           }
         }
         // orbit line relative to the camera

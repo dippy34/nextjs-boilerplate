@@ -44,7 +44,10 @@ export class StarCorona {
     const u = this.mat.uniforms;
     (u.uColor.value as Vector3).set(...color);
     // a fixed display-level glow once the disk is bright enough to see (not dimmed by adaptation)
-    u.uIntensity.value = 0.85 * Math.min(1, display * 3);
+    // (close to a star the eye is adapted to the surface filling the view: the corona, a millionth
+    // of its brightness, fades from sight)
+    const near = Math.min(1, Math.max(0, (rel.length() / radius - 1.4) / 4.6));
+    u.uIntensity.value = 0.85 * Math.min(1, display * 3) * (0.12 + 0.88 * near * near * (3 - 2 * near));
     u.uCorona.value = look.corona;
     u.uProm.value = look.prominences;
     u.uSeed.value = look.seed;

@@ -11,11 +11,14 @@ import type { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
 import type { AtmosphereSpec } from './Atmospheres';
 import type { TileDetail } from './TileDetail';
-import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
+import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT } from './shaders/body';
+import { STAR_FRAG } from './shaders/star';
+import { RING_FRAG, RING_VERT } from './shaders/rings';
 import { StarCorona } from './StarCorona';
 import { RingParticles } from './RingParticles';
 import { ringFrame } from '../universe/RingSpot';
-import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
+import { PlanetTerrain } from './PlanetTerrain';
+import type { TerrainCandidate } from './TerrainPatch';
 import { CloudLayer } from './CloudLayer';
 import { TerrainSource } from '../universe/Terrain';
 import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';
@@ -334,6 +337,7 @@ export class BodiesLayer {
     }
     if (this.glare) out.push(this.glare);
     if (this.sunCorona) out.push(this.sunCorona.mesh);
+    if (this.ringParticles) out.push(this.ringParticles.mesh, this.ringParticles.slab);
     return out;
   }
 
@@ -533,6 +537,7 @@ export class BodiesLayer {
         uRingTex: { value: this.ringTex }, uRingRadii: { value: new Vector3(inner, outer, 0) },
         uColor: { value: new Vector3(...b.color) }, uSunDirBF: { value: new Vector3() }, uViewDirBF: { value: new Vector3() },
         uSunIrr: { value: Math.PI }, uExposure: this.surfaceExposure, uPlanetRadius: { value: 1 }, uPolar: { value: b.radii[2] / b.radii[0] },
+        uCamBF: { value: new Vector3() }, uReqKm: { value: req / 1e3 }, uShine: { value: 0.02 },
         uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       transparent: true, depthWrite: false, side: DoubleSide,
@@ -547,7 +552,7 @@ export class BodiesLayer {
     if (!this.ringParticles) {
       this.ringParticles = new RingParticles(`${this.texBase}/${ring.texture}`, ring.innerKm * 1e3, ring.outerKm * 1e3, [0.75, 0.68, 0.58], this.surfaceExposure);
       this.ringParticlesBody = b;
-      this.group.add(this.ringParticles.mesh);
+      this.group.add(this.ringParticles.mesh, this.ringParticles.slab);
     }
   }
 
@@ -646,10 +651,13 @@ export class BodiesLayer {
           const inv = rot3.clone().transpose();
           ru.uSunDirBF.value.copy(u.uSunDir.value).applyMatrix3(inv);
           ru.uViewDirBF.value.copy(view.rel).negate().normalize().applyMatrix3(inv);
+          ru.uCamBF.value.copy(view.rel).negate().applyMatrix3(inv).divideScalar(b.radii[0]);
           ru.uSunIrr.value = u.uSunIrr.value;
         }
         if (this.ringParticles && b === this.ringParticlesBody) {
           this.ringParticles.update(view.rel, ringFrame(b.orientation), b.radius, u.uSunDir.value as Vector3, u.uSunIrr.value as number);
+          // within reach of the ring layer the slab draws the whole ring (as a medium)
+          if (ring && this.ringParticles.slabActive) ring.visible = false;
         }
       } else if (mesh) {
         mesh.visible = false;
@@ -739,7 +747,7 @@ export class BodiesLayer {
     for (const v of this.views.values()) {
       if (!v.resolved) continue;
       const alt = v.dist - v.body.radius;
-      if (alt < bestAlt && alt < TerrainPatch.threshold(v.body) * 1.2 && this.terrainOk(v.body)) { bestAlt = alt; best = v; }
+      if (alt < bestAlt && alt < PlanetTerrain.reach(v.body) && this.terrainOk(v.body)) { bestAlt = alt; best = v; }
     }
     if (!best) return null;
     const b = best.body;

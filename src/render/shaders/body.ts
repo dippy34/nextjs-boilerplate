@@ -1,5 +1,6 @@
 import { CHAPMAN } from './atmosphere';
 import { MATERIAL_GLSL } from '../Materials';
+import { CLOUD_GLSL } from '../CloudLayer';
 import { FIX_LOGDEPTH, OUTPUT_FRAGMENT, PROJECT_PARS } from './xr';
 /** Shaders for resolved Solar System bodies (Phase 1: textured ellipsoids). */
 
@@ -115,6 +116,7 @@ uniform vec4 uMatSel;          // ground materials (render/Materials.ts): flat A
 uniform float uMatMode;        // 0 airless regolith, 1 Earth (from the map's colour), 2 Mars, 3 ice
 ${MATERIAL_GLSL}
 ${CHAPMAN}
+${CLOUD_GLSL}
 vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
 float hash1(float n) { return fract(sin(n) * 43758.5453123); }
@@ -155,7 +157,7 @@ float craters(vec3 p, float freq, float seed, float density, out float fresh) {
     if (d > 1.35) continue;
     float bowl = d < 1.0 ? (d * d - 1.0) * 0.55 : 0.0;
     float rim = 0.22 * exp(-pow((d - 1.0) / 0.22, 2.0));
-    h += (bowl + rim) * rc / freq;
+    h += (bowl + rim) * rc / freq * (1.0 - smoothstep(1.1, 1.35, d));   // (continuous at the cut-off: no dotted rings)
     fresh = max(fresh, bh3(c + 23.0) * (1.0 - smoothstep(0.7, 1.5, d)));
   }
   return h;
@@ -177,8 +179,42 @@ float cratersAt(vec3 ci, vec3 r, float density, out float fresh) {
     if (d > 1.35) continue;
     float bowl = d < 1.0 ? (d * d - 1.0) * 0.55 : 0.0;
     float rim = 0.22 * exp(-pow((d - 1.0) / 0.22, 2.0));
-    h += (bowl + rim) * rc;
+    h += (bowl + rim) * rc * (1.0 - smoothstep(1.1, 1.35, d));
     fresh = max(fresh, bh3(c + 23.0) * (1.0 - smoothstep(0.7, 1.5, d)));
+  }
+  return h;
+}
+// The same, with the analytic gradient (cell units per cell unit) in .yzw: lit by its exact slope,
+// no blocky 2x2-pixel derivative steps along sharp rims.
+vec4 cratersAtG(vec3 ci, vec3 r, float density, out float fresh) {
+  vec3 i = ci + floor(r), f = fract(r);
+  vec3 b = step(0.5, f) - 1.0;
+  vec4 h = vec4(0.0);
+  fresh = 0.0;
+  for (int x = 0; x <= 1; x++) for (int y = 0; y <= 1; y++) for (int z = 0; z <= 1; z++) {
+    vec3 g = b + vec3(float(x), float(y), float(z));
+    vec3 c = i + g;
+    if (bh3(c + 11.0) > density) continue;
+    vec3 o = bh33(mod(c, 4096.0)) * 0.6 + 0.2;
+    float rc = 0.14 + 0.22 * bh3(c + 5.0);
+    vec3 v = g + o - f;
+    float lv = length(v);
+    float d = lv / rc;
+    if (d > 1.35) continue;
+    // bowl with a slightly flattened floor, sharp raised rim, ejecta apron fading outwards
+    // most craters are old: shallower, with low, broad rims (only a few are fresh and sharp)
+    float age = bh3(c + 31.0);
+    float dep = mix(0.42, 0.1, age * age * (3.0 - 2.0 * age));
+    float rw = mix(0.2, 0.42, age);
+    float bowl = d < 1.0 ? (d * d - 1.0) * dep : 0.0;
+    float dbowl = d < 1.0 ? 2.0 * dep * d : 0.0;
+    float e = (d - 1.0) / rw;
+    float rim = mix(0.2, 0.05, age) * exp(-e * e);
+    float drim = rim * (-2.0 * e / rw);
+    float fade = 1.0 - smoothstep(1.1, 1.35, d);
+    h.x += (bowl + rim) * rc * fade;
+    h.yzw -= (dbowl + drim) * fade * v / max(lv, 1e-5);
+    fresh = max(fresh, bh3(c + 23.0) * (1.0 - age) * (1.0 - smoothstep(0.7, 1.5, d)));
   }
   return h;
 }
@@ -287,22 +323,27 @@ void main() {
   // (the terrain is seen at grazing angles all the time: only the very edge-on parts fade)
   float limbFade = uTerrain > 0.5 ? smoothstep(0.0, 0.12, dot(nP, V)) : smoothstep(0.05, 0.4, dot(nP, V));
   float hBump = hProc * uRadiusM * (uProc > 0.5 ? 1.0 : 0.6);
+  // analytic slope (body-fixed, dimensionless) of the small craters on the landing terrain
+  vec3 slopeT = vec3(0.0);
   if (uTerrain > 0.5 && uCraters > 0.05) {
     // landing terrain: small craters below the mesh's resolution, each scale faded in once its
     // craters span several pixels
     float mpp = mppT;
     float fr, frT = 0.0;
-    float d = 0.45 * uCraters;
+    // Mars: wind and dust fill and erase the small craters (fewer, shallower)
+    float d = 0.45 * uCraters * (abs(uMatMode - 2.0) < 0.5 ? 0.45 : 1.0);
+    float dep = abs(uMatMode - 2.0) < 0.5 ? 0.25 : 0.5;
+    vec4 c;
     float w0 = smoothstep(400.0 / 12.0, 400.0 / 30.0, mpp);
     // headset: at most two scales at a time (the coarsest drops out where the 20 m one is in full)
     if (uLite > 0.5) w0 *= 1.0 - smoothstep(20.0 / 12.0, 20.0 / 30.0, mpp);
-    if (w0 > 0.0) { hBump += w0 * 400.0 * 0.5 * cratersAt(uOI0, uOF0 + vLocal / 400.0, d, fr); frT = max(frT, fr * w0); }
+    if (w0 > 0.0) { c = cratersAtG(uOI0, uOF0 + vLocal / 400.0, d, fr); slopeT += w0 * dep * c.yzw; frT = max(frT, fr * w0); }
     float w1 = smoothstep(90.0 / 12.0, 90.0 / 30.0, mpp);
-    if (w1 > 0.0) { hBump += w1 * 90.0 * 0.5 * cratersAt(uOI1, uOF1 + vLocal / 90.0, d, fr); frT = max(frT, fr * w1); }
+    if (w1 > 0.0) { c = cratersAtG(uOI1, uOF1 + vLocal / 90.0, d, fr); slopeT += w1 * dep * c.yzw; frT = max(frT, fr * w1); }
     float w2 = smoothstep(20.0 / 12.0, 20.0 / 30.0, mpp);
-    if (w2 > 0.0) { hBump += w2 * 20.0 * 0.5 * cratersAt(uOI2, uOF2 + vLocal / 20.0, d, fr); frT = max(frT, fr * w2); }
+    if (w2 > 0.0) { c = cratersAtG(uOI2, uOF2 + vLocal / 20.0, d, fr); slopeT += w2 * dep * c.yzw; frT = max(frT, fr * w2); }
     float w3 = uLite > 0.5 ? 0.0 : smoothstep(4.5 / 12.0, 4.5 / 30.0, mpp);
-    if (w3 > 0.0) { hBump += w3 * 4.5 * 0.5 * cratersAt(uOI3, uOF3 + vLocal / 4.5, d, fr); frT = max(frT, fr * w3); }
+    if (w3 > 0.0) { c = cratersAtG(uOI3, uOF3 + vLocal / 4.5, d, fr); slopeT += w3 * dep * c.yzw; frT = max(frT, fr * w3); }
     freshAll = max(freshAll, frT * 0.6 * uHScale);
   }
   float groundVar = 0.0;
@@ -320,6 +361,10 @@ void main() {
     groundVar *= land * uHScale;
   }
   if (hBump != 0.0) nP = bumpNormal(vPosView, nP, hBump * limbFade);
+  if (uTerrain > 0.5 && uCraters > 0.05) {
+    vec3 sW = uBodyToWorld * slopeT * (uHScale * limbFade);
+    nP = normalize(nP - (sW - nP * dot(sW, nP)));
+  }
   float mu0 = dot(nP, uSunDir);
   float mu = max(dot(nP, V), 0.0);
 
@@ -359,69 +404,111 @@ void main() {
   }
   // close-up ground: scanned materials (regolith, rock, sand, soil, snow, forest floor) as detail
   // around the world's own colour, and their grain in the lighting
+  float grainShadow = 1.0;
   if (uTerrain > 0.5 && uMatOn > 0.5 && uHScale > 0.01) {
     float mix2 = 0.0, snowW = 0.0;
     float lumA = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+    // patches of the second material, fixed to the ground (lattices of 400 m and 90 m cells)
+    float patchN = 0.65 * bnAt(uOI0, uOF0 + vLocal / 400.0) + 0.35 * bnAt(uOI1, uOF1 + vLocal / 90.0);
     if (uMatMode < 0.5) {
-      mix2 = smoothstep(0.45, 0.65, bn3(vGround / 260.0 + uSeed)) * 0.8 + freshAll * 0.5;
+      mix2 = smoothstep(0.5, 0.7, patchN) * 0.8 + freshAll * 0.5;
+      // lunar and Mercurian regolith: a faint warm (reddish) tint of mature soil
+      albedo *= mix(vec3(1.0), vec3(1.02, 1.0, 0.96), uHScale);
     } else if (uMatMode < 1.5) {
       // Earth: plants where the map is green, bare soil where it is brown, snow where it is white
       mix2 = smoothstep(0.0, 0.03, albedo.g - 0.85 * albedo.r) * (1.0 - water);
-      snowW = smoothstep(0.32, 0.5, min(albedo.r, albedo.b) / max(uAlbedoScale, 1e-3));
+      // snow: the map's whiteness (kilometres per pixel) says how much of the ground is snow; up
+      // close it lies in crisp patches, gone from slopes steeper than ~35-45 degrees, the rest is
+      // bare rock (so the snowline is not the map's blur)
+      float white = smoothstep(0.25, 0.55, min(albedo.r, albedo.b) / max(uAlbedoScale, 1e-3));
+      float fine = bnAt(uOI2, uOF2 + vLocal / 20.0);
+      float sl = 1.0 - dot(normalize(vTerrN), nB);
+      float cover = smoothstep(0.46, 0.54, white + (patchN - 0.5) * 0.55 + (fine - 0.5) * 0.25 - smoothstep(0.15, 0.32, sl) * 0.9);
+      float zone = smoothstep(0.03, 0.2, white);
+      snowW = cover * zone;
+      vec3 bare = vec3(0.13, 0.12, 0.11) * (0.8 + 0.4 * patchN);
+      albedo = mix(albedo, mix(bare, vec3(0.78, 0.8, 0.83), cover), zone * uHScale);
     } else if (uMatMode < 2.5) {
-      // Mars: dark basaltic sand in the dark regions, dusty soil elsewhere, frost on the polar caps
-      mix2 = smoothstep(0.16, 0.1, lumA / max(uAlbedoScale, 1e-3)) * 0.8 + 0.2 * smoothstep(0.5, 0.7, bn3(vGround / 180.0 + uSeed));
+      // Mars: dark basaltic sand in the dark regions and drifts, dusty soil elsewhere, frost on the polar caps
+      float rel = lumA / max(uAlbedoScale, 1e-3);
+      mix2 = clamp(smoothstep(0.16, 0.1, rel) * 0.8 + 0.6 * smoothstep(0.55, 0.75, patchN), 0.0, 1.0);
       snowW = smoothstep(0.35, 0.5, albedo.b / max(albedo.r, 1e-3));
+      // the Viking mosaic's colour is muted (pinkish grey): up close, the ochre of the dust and
+      // the darker grey-brown of basaltic sand as rovers see them, at the map's brightness
+      vec3 dust = vec3(1.0, 0.56, 0.3), sand = vec3(1.0, 0.72, 0.52);
+      vec3 hue = mix(dust, sand, mix2 * 0.8);
+      vec3 tgt = hue * lumA / dot(hue, vec3(0.2126, 0.7152, 0.0722)) * mix(1.15, 0.8, mix2);
+      albedo = mix(albedo, mix(tgt, albedo, snowW), uHScale);
     } else {
       snowW = 1.0;
     }
     vec3 nPB = normalize(nP * uBodyToWorld);
     vec3 nG;
-    vec3 det = groundDetail(vGround, nB, nPB, mppT, uMatSel, mix2, snowW, uLite, nG);
+    float cliff;
+    vec3 det = groundDetailS(vGround, nB, nPB, mppT, uMatSel, mix2, snowW, uLite, uSunDir * uBodyToWorld, nG, grainShadow, cliff);
+    // bare rock on steep slopes: its own colour where the map shows snow or plants (Earth), dust-stained on Mars
+    if (uMatMode > 0.5 && uMatMode < 2.5 && cliff > 0.0) {
+      float l = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+      // dry land (the map is tan or red, not green or white): the cliff takes the ground's own
+      // tint, in layers (sedimentary strata, as in canyon walls and on Mount Sharp)
+      float arid = uMatMode < 1.5 ? smoothstep(0.004, 0.03, albedo.r - albedo.g) * (1.0 - snowW) : 1.0;
+      vec3 rock = uMatMode < 1.5 ? mix(vec3(0.15, 0.135, 0.12), albedo * 0.85, arid) : mix(albedo, vec3(l) * vec3(1.1, 0.8, 0.6), 0.4) * 0.8;
+      float hA = uMatO.z + dot(vGround, cross(uTanE, uTanN));
+      float band = 0.6 * noise1(hA / 19.0 + 2.5 * patchN) + 0.4 * noise1(hA / 4.7 + 11.0);
+      rock *= mix(1.0, 0.65 + 0.7 * band, arid);
+      rock = mix(rock, rock * vec3(1.12, 0.92, 0.85), arid * smoothstep(0.55, 0.75, band));
+      albedo = mix(albedo, rock, cliff * uHScale);
+    }
     albedo *= mix(vec3(1.0), det, uHScale);
     nP = normalize(mix(nP, uBodyToWorld * nG, uHScale * limbFade));
     mu0 = dot(nP, uSunDir);
     mu = max(dot(nP, V), 0.0);
+    grainShadow = mix(1.0, grainShadow, uHScale);
   }
   float cloud = 0.0;
   float cloudShadow = 1.0;
-  if (uHasClouds > 0.5) {
-    cloud = texture2D(uClouds, vec2(vUv.x + uCloudShift, vUv.y)).r;
-    // the map's clouds are ~20 km per texel: generated billows break up their edges up close
-    float texC = fwidth(vUv.x) * 2048.0;
-    float wc = smoothstep(0.9, 0.25, texC) * (uLite > 0.5 ? 0.6 : 1.0);
-    if (wc > 0.0) {
-      float ang = uCloudShift * 6.2831853;
-      vec3 nc = vec3(cos(ang) * nB.x - sin(ang) * nB.y, sin(ang) * nB.x + cos(ang) * nB.y, nB.z);
-      float bill = 0.6 * bn3(nc * 900.0) + 0.4 * (uLite > 0.5 ? 0.5 : bn3(nc * 2600.0 + 7.0));
-      cloud += (bill - 0.5) * 0.55 * wc * smoothstep(0.02, 0.25, cloud);
-    }
-    cloud = smoothstep(0.08, 0.9, cloud) * uCloudVis;
-    albedo = mix(albedo, vec3(0.75), cloud);
-    // the clouds' shadows on the ground: the cloud (tops ~7 km up) between this point and the Sun
+  vec3 nCloud = nW;
+  float pixAng = length(fwidth(nB));
+  if (uHasClouds > 0.5 && uCloudVis > 0.001) {
+    float ang = uCloudShift * 6.2831853;
+    mat2 rz = mat2(cos(ang), sin(ang), -sin(ang), cos(ang));
+    vec3 nc = vec3(rz * nB.xy, nB.z);
+    float thick;
+    cloud = cloudField(nc, vec2(vUv.x + uCloudShift, vUv.y), pixAng, uLite, thick) * uCloudVis;
+    // cloud tops: billowed relief lit by the Sun (heights ~1-2 km over the cover)
+    if (cloud > 0.01) nCloud = bumpNormal(vPosView, nW, (cloud * 200.0 + thick * 650.0) * limbFade);
+    // thin cloud lets the ground show through; thick decks are bright
+    albedo = mix(albedo, vec3(0.72 + 0.2 * thick), cloud);
+    // the clouds' shadows on the ground: the cloud (tops ~2-8 km up) between this point and the Sun
     vec3 sB = uSunDir * uBodyToWorld;
     float m0 = dot(nB, sB);
     if (m0 > 0.0) {
-      vec3 eastB = normalize(vec3(-nB.y, nB.x, 0.0) + vec3(1e-6, 0.0, 0.0));
-      vec3 northB = cross(nB, eastB);
       vec3 ts = sB - nB * m0;
-      float k = 0.0011 / max(m0, 0.08);
-      float dlon = dot(ts, eastB) * k / max(sqrt(1.0 - nB.z * nB.z), 0.05), dlat = dot(ts, northB) * k;
-      float cs = texture2D(uClouds, vec2(vUv.x + uCloudShift + dlon / 6.2831853, vUv.y + dlat / 3.14159265)).r;
-      cloudShadow = 1.0 - 0.55 * smoothstep(0.08, 0.9, cs) * uCloudVis * (1.0 - cloud);
+      vec3 ns = normalize(nB + ts * (0.0008 / max(m0, 0.08)));
+      vec3 ncs = vec3(rz * ns.xy, ns.z);
+      vec2 uvS = vec2(atan(ns.y, ns.x) / 6.2831853, 0.5 + asin(clamp(ns.z, -1.0, 1.0)) / 3.14159265);
+      float dl = uvS.x - atan(nB.y, nB.x) / 6.2831853;
+      uvS.x = vUv.x + uCloudShift + (fract(dl + 0.5) - 0.5);
+      float th2;
+      float cs = uLite > 0.5 ? smoothstep(0.28, 0.52, texture2D(uClouds, uvS).r) : cloudField(ncs, uvS, pixAng, 1.0, th2);
+      cloudShadow = 1.0 - 0.6 * cs * uCloudVis * (1.0 - cloud);
     }
   }
-
   // Terrain shading only on the day side (no light leaking past the geometric terminator)
   float dayside = smoothstep(-0.04, 0.06, mu0g);
   float light;
   if (uAirless > 0.5) {
     light = mu0 > 0.0 ? 2.0 * mu0 / (mu0 + mu + 1e-4) : 0.0; // Lommel-Seeliger
   } else {
-    light = max(mix(mu0, mu0g, cloud), 0.0);                // Lambert (clouds hide the relief)
+    // Lambert (clouds hide the relief; their own billows show, softly: light diffuses through cloud)
+    float muC = mix(mu0g, (dot(nCloud, uSunDir) + 0.3 * mu0g) / 1.3, 0.8);
+    light = max(mix(mu0, muC, cloud), 0.0);
   }
-  light *= dayside * cloudShadow;
+  light *= dayside * cloudShadow * grainShadow;
   if (uTerrain > 0.5) light *= mix(1.0, clamp(0.5 + vSun, 0.0, 1.0), uHScale);   // shadows of the relief
+  // shadows of the rocks, and the darker ground around their bases (render/Rocks.ts)
+  float rockAO = 0.0;
+  if (uTerrain > 0.5) light *= rockShadow(vPosView, 0.03 + 0.04 * (1.0 - max(mu0g, 0.0)), uLite, rockAO);
   // eclipses: shadows of moons and planets (with a coppery glow where sunlight is bent through an atmosphere)
   float eclRed = 0.0;
   float ecl = sunVisible(vPosView, eclRed);
@@ -447,20 +534,28 @@ void main() {
 
   // Sunlight reaching the ground through the atmosphere
   vec3 sunT = vec3(1.0);
+  vec3 tauR = vec3(0.0), tauM = vec3(0.0);
   if (uAtmo > 0.5) {
     float cR = sunColumn(uRp, mu0g, uHR, uRp);
     float cM = sunColumn(uRp, mu0g, uHM, uRp);
-    sunT = cR > 1.0e11 ? vec3(0.0) : exp(-(uBetaR * cR + uBetaMe * cM));
+    tauR = uBetaR * min(cR, 1.0e9);
+    tauM = uBetaMe * min(cM, 1.0e9);
+    sunT = cR > 1.0e11 ? vec3(0.0) : exp(-(tauR + tauM));
   }
   vec3 sunL = uSunColor * sunT * (uSunIrr / 3.14159265);
   vec3 radiance = albedo * sunL * light;
-  // skylight: the sunlit sky lights the ground too and fills shadows (about the light scattered out
-  // of the beam, half of it downwards), less on slopes facing away from the sky
+  // skylight: the light scattered out of the beam on its way down that still reaches the ground
+  // (Rayleigh: about half; dust and haze scatter forwards, most of it; Martian dust absorbs blue),
+  // less on slopes facing away from the sky, and a little twilight glow after sunset
   if (uAtmo > 0.5) {
-    vec3 tau = uBetaR * uHR + uBetaMe * uHM;
-    float day = smoothstep(-0.1, 0.25, mu0g) * (0.3 + 0.7 * max(mu0g, 0.0)) * ecl;
-    radiance += albedo * uSunColor * (uSunIrr / 3.14159265) * (1.0 - exp(-tau)) * 0.5 * day * (0.5 + 0.5 * dot(nP, nW));
+    vec3 wM = tauM / max(tauR + tauM, vec3(1e-6));
+    vec3 omega = abs(uMatMode - 2.0) < 0.5 ? vec3(0.95, 0.85, 0.62) : vec3(1.0);
+    vec3 down = mix(vec3(0.5), 0.8 * omega, wM);
+    float m0 = max(mu0g, 0.0) + 0.03 * smoothstep(-0.12, 0.0, mu0g);
+    vec3 sky = (1.0 - sunT) * down * m0 * smoothstep(-0.12, 0.02, mu0g) * ecl;
+    radiance += albedo * uSunColor * (uSunIrr / 3.14159265) * sky * (0.55 + 0.45 * dot(nP, nW)) * (1.0 - 0.6 * rockAO);
   }
+  radiance *= 1.0 - 0.4 * rockAO;
   // in a planet's shadow, sunlight refracted through its atmosphere (the Moon turns copper in an eclipse)
   if (eclRed > 0.0) radiance += albedo * sunL * eclRed * 0.004 * vec3(1.0, 0.32, 0.1) * max(mu0g, 0.0);
 
