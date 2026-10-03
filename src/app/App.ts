@@ -830,8 +830,15 @@ export class App {
       if (!nm) cs.resolve(this.named, () => undefined);
       this.starCache.set(key, cs);
     } else if (!cs.exact && n.state === 'ready') {
+      // the name list's position (rounded, and from a different reduction) can be hundreds of AU
+      // off the catalogue's: an explorer parked at the star (arrived, or started there) moves with it
+      const before = cs.upos.clone();
       cs.setPosition(cat.starPosition({ catalog: cat, node: n, slot }));
       cs.exact = true;
+      const shift = cs.upos.sub(before, new Vector3());
+      const away = before.sub(this.rig.upos, new Vector3()).length();
+      // (an anchored explorer already follows its anchor: rig.followAnchor)
+      if (this.rig.anchor !== cs && shift.lengthSq() > 0 && away < Math.max(1000 * cs.radius, 50 * shift.length())) this.rig.upos.addVec(shift, 1);
     }
     return cs;
   }
