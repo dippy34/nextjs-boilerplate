@@ -108,3 +108,27 @@ void main() {
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
+
+/**
+ * The same atmosphere over the landing terrain (render/TerrainPatch.ts): drawn on the terrain's own
+ * geometry after it, marching from the camera to the ground point actually there rather than to the
+ * reference sphere (which would hide mountains seen against the sky, or over-haze them). The shell
+ * itself is drawn before the terrain, which covers it.
+ */
+export const ATMO_HAZE_FRAG = ATMO_FRAG
+  .replace('varying vec3 vWorld;', 'varying vec3 vPosView;')
+  .replace(`  vec3 d = normalize(uToBody * normalize(vWorld));
+  vec2 ta = hitSphere(uO, d, uRt);
+  if (ta.y <= 0.0 || ta.x > ta.y) discard;
+  float t0 = max(ta.x, 0.0);
+  float t1 = ta.y;
+  vec2 tp = hitSphere(uO, d, uRp);
+  bool ground = tp.x <= tp.y && tp.y > 0.0;
+  if (ground) t1 = min(t1, max(tp.x, 0.0));`, `  vec3 pe = uToBody * vPosView;
+  float te = length(pe);
+  vec3 d = pe / te;
+  vec2 ta = hitSphere(uO, d, uRt);
+  if (ta.y <= 0.0 || ta.x > ta.y || ta.x > te) discard;
+  float t0 = max(ta.x, 0.0);
+  float t1 = min(ta.y, te);
+  bool ground = true;`);

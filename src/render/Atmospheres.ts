@@ -160,7 +160,7 @@ export class AtmospheresLayer {
     const mesh = new Mesh(this.geo, mat);
     mesh.matrixAutoUpdate = false;
     mesh.frustumCulled = false;
-    mesh.renderOrder = 20; // after the planets, rings and point sources it dims
+    mesh.renderOrder = 19.8; // after the planets, rings and point sources it dims; before the terrain (TerrainPatch)
     mesh.name = `${name} atmosphere`;
     this.group.add(mesh);
     s = { body: key, spec, mesh, mat };
@@ -203,6 +203,12 @@ export class AtmospheresLayer {
   }
 
   /** Create every atmosphere shell now (for shader warm-up and so none is built mid-flight). */
+  /** The shell material of a world (Body or generated planet) while its shell is drawn. */
+  material(key: object): ShaderMaterial | null {
+    const s = this.shells.get(key);
+    return s && s.mesh.visible ? s.mat : null;
+  }
+
   warmupObjects(): Mesh[] {
     const out: Mesh[] = [];
     for (const b of this.system.bodies) {

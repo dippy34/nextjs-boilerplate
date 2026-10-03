@@ -1,6 +1,7 @@
-import { BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, ShaderMaterial, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, NoBlending, ShaderMaterial, Vector3 } from 'three';
 import type { UPos } from '../core/upos';
 import { baseRadius, type Ground } from '../universe/Terrain';
+import { ATMO_HAZE_FRAG } from './shaders/atmosphere';
 import { FIX_LOGDEPTH, PROJECT_PARS } from './shaders/xr';
 
 /** A world near the explorer that could get terrain this frame (offered by the body layers). */
@@ -19,7 +20,17 @@ export interface TerrainCandidate {
   sunBF: Vector3;
   /** altitude above the reference surface (m) */
   alt: number;
+  /** the material of the world's atmosphere shell, if it has one (render/Atmospheres.ts) */
+  air?: ShaderMaterial | null;
 }
+
+/**
+ * Draw order: the atmosphere shell (19.8, render/Atmospheres.ts), then the terrain over it, then the
+ * terrain's own haze, then cockpits and HUDs (20+). The terrain is in the transparent pass (drawn
+ * opaque) only so that it can come after the shell.
+ */
+const ORDER_TERRAIN = 19.9;
+const ORDER_HAZE = 19.95;
 
 /**
  * Vertex shader of the landing terrain: vertices are stored relative to the patch origin on the
@@ -114,6 +125,9 @@ export class TerrainPatch {
   /** the running job builds the back patch (swap when done) rather than re-shading the front */
   private jobSwaps = false;
   private materials = new Map<ShaderMaterial, ShaderMaterial>();
+  private hazeMaterials = new Map<ShaderMaterial, ShaderMaterial>();
+  /** the atmosphere over the visible patch (its geometry, the haze material) */
+  private haze = new Mesh();
   /** the material whose sphere has the hole cut in it */
   private holed: ShaderMaterial | null = null;
   /** the world being drawn, with this frame's placement */
@@ -132,7 +146,7 @@ export class TerrainPatch {
       mesh.matrixAutoUpdate = false;
       mesh.frustumCulled = false;
       mesh.visible = false;
-      mesh.renderOrder = 1;
+      mesh.renderOrder = ORDER_TERRAIN;
       mesh.name = 'terrain';
       return { mesh, ground: null, up: new Vector3(), origin: new Vector3(), outer: 0, inner: 0, q: 1, e: new Vector3(), nrt: new Vector3(),
         full: new Float64Array((1 + RINGS * SEGS) * 3), sunBF: new Vector3(), version: 0 };
@@ -140,7 +154,12 @@ export class TerrainPatch {
     this.front = mk();
     this.back = mk();
     this.group.name = 'terrain';
-    this.group.add(this.front.mesh, this.back.mesh);
+    this.haze.matrixAutoUpdate = false;
+    this.haze.frustumCulled = false;
+    this.haze.visible = false;
+    this.haze.renderOrder = ORDER_HAZE;
+    this.haze.name = 'terrain haze';
+    this.group.add(this.front.mesh, this.back.mesh, this.haze);
   }
 
   /** The world (Body or ExoPlanet) the visible patch belongs to. */
@@ -168,9 +187,38 @@ export class TerrainPatch {
           ...bodyMat.uniforms, uTerrain: { value: 1 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
           ...Object.fromEntries(FINE_CELLS.flatMap((_, k) => [[`uOI${k}`, { value: new Vector3() }], [`uOF${k}`, { value: new Vector3() }]])),
         },
+        // opaque, but in the transparent pass so it is drawn after the atmosphere shell
+        transparent: true, blending: NoBlending,
       });
       this.materials.set(bodyMat, m);
     }
+    return m;
+  }
+
+  /** Haze material for an atmosphere shell: its uniforms, over the terrain's geometry (heights scaled as drawn). */
+  private hazeFor(air: ShaderMaterial, terrainMat: ShaderMaterial): ShaderMaterial {
+    let m = this.hazeMaterials.get(air);
+    if (!m) {
+      m = new ShaderMaterial({
+        name: 'terrain-haze',
+        vertexShader: TERRAIN_VERT,
+        fragmentShader: ATMO_HAZE_FRAG,
+        uniforms: { ...air.uniforms, uHScale: terrainMat.uniforms.uHScale },
+        transparent: true, depthWrite: false,
+        blending: air.blending, blendSrc: air.blendSrc, blendDst: air.blendDst,
+      });
+      this.hazeMaterials.set(air, m);
+    }
+    m.uniforms.uHScale = terrainMat.uniforms.uHScale;
+    return m;
+  }
+
+  /** A hidden mesh with the haze shader, for compiling it ahead of time (any shell will do). */
+  warmupHaze(air: ShaderMaterial): Mesh {
+    const m = new Mesh(this.back.mesh.geometry, this.hazeFor(air, new ShaderMaterial({ uniforms: { uHScale: { value: 0 } } })));
+    m.visible = false;
+    m.frustumCulled = false;
+    this.group.add(m);
     return m;
   }
 
@@ -264,6 +312,14 @@ export class TerrainPatch {
     const o = fr.origin.clone().applyMatrix4(new Matrix4().extractRotation(c.orient)).add(c.rel);
     m4.setPosition(o);
     fr.mesh.matrixWorldNeedsUpdate = true;
+    // the atmosphere over it, marched to the ground actually there
+    this.haze.visible = !!c.air;
+    if (c.air) {
+      this.haze.geometry = fr.mesh.geometry;
+      this.haze.material = this.hazeFor(c.air, mat);
+      this.haze.matrix.copy(m4);
+      this.haze.matrixWorldNeedsUpdate = true;
+    }
     // the sphere is cut away inside 96 % of the patch (the patch fades to the reference surface)
     return { dir: fr.up, cos: Math.cos((fr.outer * 0.96) / b.radius) };
   }
@@ -271,6 +327,7 @@ export class TerrainPatch {
   hide(): void {
     this.front.mesh.visible = false;
     this.back.mesh.visible = false;
+    this.haze.visible = false;
     this.job = null;
     this.front.ground = null;
   }

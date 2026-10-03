@@ -502,6 +502,8 @@ export class App {
     const bodyObjs = this.bodies.warmupObjects(), exoObjs = this.exo.warmupObjects();
     // the landing terrain's shader for both kinds of surface material
     const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
+    const air = this.atmospheres.warmupObjects()[0];
+    if (air) terrain.push(this.terrain.warmupHaze(air.material as ShaderMaterial));
     const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
@@ -1606,8 +1608,10 @@ export class App {
     {
       const cands = [this.bodies.terrainCandidate(), this.exo.terrainCandidate()].filter((c) => c !== null);
       cands.sort((a, b) => a.alt - b.alt);
+      const c = cands[0] ?? null;
+      if (c) c.air = this.atmospheres.material(c.ground.owner);
       this.terrain.vr = this.vr.active;
-      this.terrain.update(cands[0] ?? null);
+      this.terrain.update(c);
     }
     this.craft.update(this.rig.upos, pixelAngle, jd, this.system.sun, this.system.byId.get(399)!);
     this.holes.vr = this.vr.active;
