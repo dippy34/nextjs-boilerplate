@@ -918,6 +918,33 @@ export class App {
    * Fraction of the view a sphere covers, from angles: for bodies so close that their centre may be
    * behind the camera (standing on a surface, skimming it).
    */
+  /**
+   * Radiance of the daytime sky when the explorer is inside a sunlit atmosphere (0 otherwise):
+   * the zenith Rayleigh optical depth (green) times the sunlight, fading through twilight.
+   */
+  private skyRadiance(): number {
+    let best = 0;
+    const rel = new Vector3();
+    const sky = (tau: number, up: Vector3, sunDir: Vector3, sunIrr: number) => {
+      const t = Math.min(1, Math.max(0, (up.dot(sunDir) + 0.1) / 0.2));
+      best = Math.max(best, Math.min(1, tau) * (sunIrr / Math.PI) * t * t * (3 - 2 * t));
+    };
+    for (const v of this.bodies.views.values()) {
+      if (!v.resolved || v.body.kind === 'star') continue;
+      const spec = this.atmospheres.spec(v.body);
+      if (!spec || v.dist > v.body.radius + spec.top * 0.5) continue;
+      const up = rel.copy(v.rel).negate().normalize();
+      const toSun = this.system.sun.upos.sub(v.body.upos, new Vector3());
+      const d = toSun.length();
+      sky(spec.betaR[1] * spec.HR, up.clone(), toSun.divideScalar(d), sunIrradianceAt(d));
+    }
+    for (const e of this.exo.atmospheres()) {
+      if (e.rel.length() > e.radius + e.spec.top * 0.5) continue;
+      sky(e.spec.betaR[1] * e.spec.HR, e.rel.clone().negate().normalize(), e.sunDir, e.sunIrr);
+    }
+    return best;
+  }
+
   /** Radiance of the sunlit ring ice around the explorer (0 when not inside Saturn's rings). */
   private ringRadiance(): number {
     const rp = this.bodies.ringParticles;
@@ -1067,6 +1094,9 @@ export class App {
       // a star's disk is shown at ~1.4 (bright, but its colour and surface still show)
       lightCap = Math.min(lightCap, 1.4 / ((E * d * d) / (Math.PI * s.radius * s.radius)));
     }
+    // under a daytime sky the eye adapts to the sky: the stars fade out
+    const sky = this.skyRadiance();
+    if (sky > 0) lightCap = Math.min(lightCap, 1.2 / sky);
     target = Math.min(target, Math.log(diskCap), Math.log(lightCap));
     if (this.frameCount < 3) this.logExposure = target;
     this.logExposure += (target - this.logExposure) * (1 - Math.exp(-dt * 2.5));
