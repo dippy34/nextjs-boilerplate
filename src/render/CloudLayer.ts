@@ -45,7 +45,7 @@ void main() {
   // the map is ~5 km per texel: generated billows break up its blur (kilometre scales)
   vec3 q = nB * (uRadius / 6000.0);
   float d = 0.5 * cn(q) + 0.3 * cn(q * 2.7 + 5.1) + (uLite > 0.5 ? 0.1 : 0.2 * cn(q * 7.3 + 9.7));
-  float cov = smoothstep(0.3, 0.75, c + (d - 0.5) * 0.45);
+  float cov = smoothstep(0.42, 0.85, c + (d - 0.5) * 0.45);
   float dist = length(vWorld);
   cov *= uOpacity * smoothstep(450e3, 120e3, dist);
   if (cov < 0.004) discard;
