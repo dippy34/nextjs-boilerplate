@@ -417,13 +417,17 @@ void main() {
     } else if (uMatMode < 1.5) {
       // Earth: plants where the map is green, bare soil where it is brown, snow where it is white
       mix2 = smoothstep(0.0, 0.03, albedo.g - 0.85 * albedo.r) * (1.0 - water);
-      float white = smoothstep(0.32, 0.5, min(albedo.r, albedo.b) / max(uAlbedoScale, 1e-3));
-      // snow sheds from slopes steeper than ~35-45 degrees (a ragged snowline): the map's white
-      // there is bare rock
-      float sl = 1.0 - dot(normalize(vTerrN), nB) + (patchN - 0.5) * 0.12;
-      float keep = 1.0 - smoothstep(0.17, 0.3, sl);
-      snowW = white * keep;
-      albedo = mix(albedo, vec3(0.13, 0.12, 0.11) * (0.8 + 0.4 * patchN), white * (1.0 - keep) * uHScale);
+      // snow: the map's whiteness (kilometres per pixel) says how much of the ground is snow; up
+      // close it lies in crisp patches, gone from slopes steeper than ~35-45 degrees, the rest is
+      // bare rock (so the snowline is not the map's blur)
+      float white = smoothstep(0.25, 0.55, min(albedo.r, albedo.b) / max(uAlbedoScale, 1e-3));
+      float fine = bnAt(uOI2, uOF2 + vLocal / 20.0);
+      float sl = 1.0 - dot(normalize(vTerrN), nB);
+      float cover = smoothstep(0.46, 0.54, white + (patchN - 0.5) * 0.55 + (fine - 0.5) * 0.25 - smoothstep(0.15, 0.32, sl) * 0.9);
+      float zone = smoothstep(0.03, 0.2, white);
+      snowW = cover * zone;
+      vec3 bare = vec3(0.13, 0.12, 0.11) * (0.8 + 0.4 * patchN);
+      albedo = mix(albedo, mix(bare, vec3(0.78, 0.8, 0.83), cover), zone * uHScale);
     } else if (uMatMode < 2.5) {
       // Mars: dark basaltic sand in the dark regions and drifts, dusty soil elsewhere, frost on the polar caps
       float rel = lumA / max(uAlbedoScale, 1e-3);
