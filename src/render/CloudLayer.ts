@@ -1,6 +1,56 @@
 import { CustomBlending, DoubleSide, Matrix3, Matrix4, Mesh, OneFactor, OneMinusSrcAlphaFactor, ShaderMaterial, SphereGeometry, type Texture, Vector3 } from 'three';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
+/**
+ * GLSL shared by the clouds painted on Earth's surface (BODY_FRAG, seen from orbit) and the cloud
+ * layer below: the same cover everywhere, so nothing changes shape on the way down. Needs
+ * `uniform sampler2D uClouds` declared by the host shader.
+ */
+export const CLOUD_GLSL = /* glsl */ `
+float clh3(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float cln3(vec3 p) {
+  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(clh3(i), clh3(i + vec3(1,0,0)), f.x), mix(clh3(i + vec3(0,1,0)), clh3(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(clh3(i + vec3(0,0,1)), clh3(i + vec3(1,0,1)), f.x), mix(clh3(i + vec3(0,1,1)), clh3(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+// Earth's clouds: the cloud map (~20 km per texel) broken up below its resolution by warped fractal
+// billows and scattered small cumulus, each octave only while it spans a few pixels (no flicker).
+// nc: body-fixed direction rotated with the clouds' drift; pix: radians per pixel. Returns the
+// cover (0..1); thick: optical thickness proxy (0..1) for shading.
+float cloudField(vec3 nc, vec2 uv, float pix, float lite, out float thick) {
+  float c = texture2D(uClouds, uv).r;
+  thick = c;
+  float oct = lite > 0.5 ? 2.0 : 5.0;
+  // warp so the billows are not lattice-aligned blobs
+  vec3 q = nc * 300.0;
+  vec3 wq = vec3(cln3(q * 0.5 + 3.1), cln3(q * 0.5 + 7.7), cln3(q * 0.5 + 13.3)) - 0.5;
+  q += wq * 1.6;
+  float n = 0.0, a = 0.55, wsum = 0.0, f = 300.0;
+  for (int i = 0; i < 5; i++) {
+    if (float(i) >= oct) break;
+    float w = smoothstep(0.45, 0.15, f * pix);       // drawn while one billow spans > ~3 pixels
+    n += a * w * (cln3(q) - 0.5);
+    wsum += a * w;
+    q = q * 2.7 + 5.3;
+    f *= 2.7;
+    a *= 0.55;
+  }
+  // edges eaten away, thin cloud broken into cells; thick decks stay closed
+  float edge = 1.0 - smoothstep(0.55, 0.95, c);
+  float cov = c + n * 1.25 * (0.3 + 0.7 * edge);
+  // fair-weather cumulus where the map shows thin haze (cells of ~2-4 km)
+  if (lite < 0.5) {
+    float wc = smoothstep(0.35, 0.12, 2400.0 * pix);
+    if (wc > 0.0) {
+      float cu = cln3(nc * 2400.0 + wq * 3.0) * 0.7 + cln3(nc * 6100.0) * 0.3;
+      cov = max(cov, smoothstep(0.62, 0.8, cu) * smoothstep(0.05, 0.3, c) * wc * 0.9);
+    }
+  }
+  thick = clamp(c + n * 0.8, 0.0, 1.0);
+  return smoothstep(0.26, 0.56, cov);
+}
+`;
+
 const CLOUD_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
@@ -30,22 +80,18 @@ uniform float uOpacity;
 uniform float uLite;
 uniform float uUnder;        // 1 when the explorer is below the layer
 varying vec3 vWorld;
-float ch(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
-float cn(vec3 p) {
-  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(ch(i), ch(i + vec3(1,0,0)), f.x), mix(ch(i + vec3(0,1,0)), ch(i + vec3(1,1,0)), f.x), f.y),
-             mix(mix(ch(i + vec3(0,0,1)), ch(i + vec3(1,0,1)), f.x), mix(ch(i + vec3(0,1,1)), ch(i + vec3(1,1,1)), f.x), f.y), f.z);
-}
+${CLOUD_GLSL}
 void main() {
   vec3 n = normalize(vWorld - uCenter);
   vec3 nB = uToBody * n;
   float lon = atan(nB.y, nB.x), lat = asin(clamp(nB.z, -1.0, 1.0));
   vec2 uv = vec2(lon / 6.2831853 + 0.5 + uCloudShift, 0.5 + lat / 3.14159265);
-  float c = texture2D(uClouds, uv).r;
-  // the map is ~5 km per texel: generated billows break up its blur (kilometre scales)
-  vec3 q = nB * (uRadius / 6000.0);
-  float d = 0.5 * cn(q) + 0.3 * cn(q * 2.7 + 5.1) + (uLite > 0.5 ? 0.1 : 0.2 * cn(q * 7.3 + 9.7));
-  float cov = smoothstep(0.42, 0.85, c + (d - 0.5) * 0.45);
+  // the same cover as the clouds painted on the surface (seen from orbit), drifting with them
+  float ang = uCloudShift * 6.2831853;
+  vec3 nc = vec3(cos(ang) * nB.x - sin(ang) * nB.y, sin(ang) * nB.x + cos(ang) * nB.y, nB.z);
+  float thick;
+  float cov = cloudField(nc, uv, length(fwidth(nB)), uLite, thick);
+  float d = thick;
   float dist = length(vWorld);
   cov *= uOpacity * smoothstep(450e3, 120e3, dist);
   if (cov < 0.004) discard;

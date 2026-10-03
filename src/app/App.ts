@@ -996,6 +996,11 @@ export class App {
     return Math.max(0, Math.min(1, (ar + hv - th) / (2 * hv)));
   }
 
+  /** A body's albedo for the exposure: near its ground, the eye adapts to the ground around (TerrainPatch.exposureAlbedo). */
+  private surfaceAlbedo(b: Body): number {
+    return this.terrain.owner === b ? this.terrain.exposureAlbedo(b.albedo) : b.albedo;
+  }
+
   private updateExposure(dt: number): { xStar: number; xSurf: number; mLim: number; xDark: number } {
     const pixSA = (this.view.pixelAngle * this.view.pixelRatio) ** 2; // per CSS pixel
     const xDark = (0.01 * pixSA) / magToIrradiance(this.starMagLimit);
@@ -1020,7 +1025,7 @@ export class App {
       const b = v.body;
       const L = b.kind === 'star'
         ? (AU / SUN_RADIUS) ** 2
-        : ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
+        : ((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
       wBest = w;
       lBest = L;
       keyBest = b.kind === 'star' ? STAR_KEY : 0.45;
@@ -1097,7 +1102,7 @@ export class App {
       if (!v.resolved || v.pixelRadius <= 1.5 || (!onScreen(v.rel) && this.bigCoverage(v.rel, v.body.radius) < 0.02)) continue;
       const b = v.body;
       if (b.kind === 'star') lightCap = Math.min(lightCap, 1.8 / (AU / SUN_RADIUS) ** 2);
-      else diskCap = Math.min(diskCap, 1.6 / (((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1)));
+      else diskCap = Math.min(diskCap, 1.6 / (((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1)));
     }
     for (const cv of this.craft.views) {
       if (cv.pixelRadius <= 1.5 || !onScreen(cv.rel)) continue;
