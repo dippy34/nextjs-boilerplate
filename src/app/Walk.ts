@@ -363,6 +363,8 @@ export class Walk {
   private jumpBuffer = 0;
   private crouchToggle = false;
   private lastGround = 0;
+  /** seconds the drawn terrain under the walker has been missing */
+  private lostFrame = 0;
   private approachTarget: SpaceObject | null = null;
   private approachWait = 0;
   private descend = { h0: 1, pitch0: 0 };
@@ -465,6 +467,7 @@ export class Walk {
     const was = this.state;
     this.state = 'off';
     this.approachTarget = null;
+    this.lostFrame = 0;
     app.vr.comfort = 0;
     this.marks.group.visible = false;
     if (this.orbitsBefore !== null) { app.orbits.enabled = this.orbitsBefore; this.orbitsBefore = null; }
@@ -662,10 +665,15 @@ export class Walk {
     }
     // something else took over the camera: a flight, a VR travel
     if (app.rig.autopilot || app.vr.traveling) { this.exit(true); return false; }
-    if (!this.updateFrame()) {
-      // the terrain went away (another world got closer, or it is being rebuilt): keep the last frame
-      if (!this.world || !app.terrain.owner || app.terrain.owner !== this.world) {
-        if (this.state === 'descend') { this.exit(true); return false; }
+    if (this.updateFrame()) this.lostFrame = 0;
+    else {
+      // the terrain went away (it is being rebuilt, or another world came closer): walk on with the
+      // frame we had, but give up after a moment rather than stand on nothing
+      this.lostFrame += dt;
+      if (this.state === 'descend' || this.lostFrame > 3) {
+        this.say(`No ground under you any more: back to free flight`);
+        this.exit(true);
+        return false;
       }
     }
     if (this.state === 'descend') return this.updateDescend(dt);
