@@ -66,6 +66,10 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   - Comets: `src/render/CometTails.ts` (coma/ion/dust quad per active comet, sky display gain; nucleus
     mesh + jets for the nearest one within 30,000 km, fed to the exposure as `nucleusView`).
   - Landmarks: `src/universe/Landmarks.ts` (places with coordinates; search ids `lm:`; VR Places tab).
+    Sharper regional heights around them: `pipeline/build_terrain_patches.py` -> `terrain/patches/`,
+    loaded by `TerrainSource.nearPatches` (via `Ground.prepare`), blended in `TerrainSource.height`.
+  - Tour (T, `App.tourItems` / `prepareTour`: time jumps for the eclipse and the next Jupiter shadow),
+    photo mode (U).
   - Eclipses: `BodiesLayer.updateEclipses` picks up to 4 occluders per body; `sunVisible()` in
     `shaders/body.ts` (disc-overlap penumbra, red glow in Earth's shadow); `sunlit` feeds the exposure.
   - Walking: `App.keepAboveGround` keeps eye height within 4 m of the ground unless climbing.
