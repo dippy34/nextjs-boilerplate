@@ -399,6 +399,13 @@ void main() {
   }
   vec3 sunL = uSunColor * sunT * (uSunIrr / 3.14159265);
   vec3 radiance = albedo * sunL * light;
+  // skylight: the sunlit sky lights the ground too and fills shadows (about the light scattered out
+  // of the beam, half of it downwards), less on slopes facing away from the sky
+  if (uAtmo > 0.5) {
+    vec3 tau = uBetaR * uHR + uBetaMe * uHM;
+    float day = smoothstep(-0.1, 0.25, mu0g) * (0.3 + 0.7 * max(mu0g, 0.0)) * ecl;
+    radiance += albedo * uSunColor * (uSunIrr / 3.14159265) * (1.0 - exp(-tau)) * 0.5 * day * (0.5 + 0.5 * dot(nP, nW));
+  }
   // in a planet's shadow, sunlight refracted through its atmosphere (the Moon turns copper in an eclipse)
   if (eclRed > 0.0) radiance += albedo * sunL * eclRed * 0.004 * vec3(1.0, 0.32, 0.1) * max(mu0g, 0.0);
 
