@@ -178,8 +178,14 @@ uniform vec3 uTanN;
 uniform vec3 uMatO;      // the patch origin in the anchor's frame (m)
 vec2 mrot(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(c * v.x - s * v.y, s * v.x + c * v.y); }
 vec2 mhash2(vec2 p) { p = mod(p, 289.0); return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
+float gMatLite;   // headset tier: one tap per material and scale instead of three (cheaper, the tiling shows more)
 // one material at one scale, hex-tiled: colour (rgb), normal slope in the projection's axes (xy) and height
 void hexMat(vec2 uv, vec2 gx, vec2 gy, float layer, out vec3 col, out vec2 nrm, out float hgt) {
+  if (gMatLite > 0.5) {
+    vec4 c1 = textureGrad(uMatCol, vec3(uv, layer), gx, gy), n1 = textureGrad(uMatNrm, vec3(uv, layer), gx, gy);
+    col = c1.rgb * 2.0; nrm = n1.rg * 2.0 - 1.0; hgt = n1.a;
+    return;
+  }
   vec2 st = uv * 3.4641016;
   vec2 sk = vec2(st.x - 0.57735027 * st.y, 1.15470054 * st.y);
   vec2 id = floor(sk);
@@ -231,6 +237,7 @@ float hexH(vec2 uv, vec2 gx, vec2 gy, float layer) {
 }
 vec3 groundDetailS(vec3 g, vec3 up, vec3 tn, float mpp, vec4 sel, float mix2, float snowW, float lite, vec3 sunB, out vec3 nOut, out float shadow, out float cliff) {
   vec3 e = uTanE, nr = uTanN, u3 = cross(e, nr);
+  gMatLite = lite;
   shadow = 1.0;
   cliff = 0.0;
   // flat ground: the horizontal projection; cliffs: the two vertical ones, blended by the slope's direction

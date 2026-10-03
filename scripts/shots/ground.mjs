@@ -56,7 +56,7 @@ for (const [name, body] of sites) {
     // optional tweak before the shot (debugging): EVAL is evaluated in the page
     if (process.env.EVAL) { const r = await page.evaluate(process.env.EVAL); if (r !== undefined) console.log('eval', JSON.stringify(r)); await frames(3); }
     const st = await page.evaluate(() => ({ alt: window.app.rig.altitude, owner: window.app.terrain.owner?.name, mat: (window.app.terrain.group.children.find((m) => m.material?.uniforms?.uMatOn)?.material.uniforms.uMatOn.value) ?? null, fps: Math.round(window.app.fps) }));
-    await page.screenshot({ path: `${out}-${body}-${hgt}.png`, timeout: 240000 });
+    await page.screenshot({ path: `${out}-${body}-${name.split(/[ (]/)[0]}${name.split(/[ (]/)[1] ?? ""}-${hgt}.png`.replace(/[^A-Za-z0-9/._-]/g, ""), timeout: 240000 });
     console.log('shot', name, hgt, JSON.stringify(st));
   }
 }

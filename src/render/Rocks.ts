@@ -292,7 +292,7 @@ export class Rocks {
     for (const big of [false, true]) {
       for (let k = 0; k < SHAPES; k++) {
         const n = big ? Math.ceil(this.cap / 10) : Math.ceil(this.cap / SHAPES);
-        const m = new InstancedMesh(rockGeometry(k * 17 + 2, big ? 4 : 2), this.mat, n);
+        const m = new InstancedMesh(rockGeometry(k * 17 + 2, big ? (vr ? 3 : 4) : (vr ? 1 : 2)), this.mat, n);
         m.geometry.setAttribute('aRock', new InstancedBufferAttribute(new Float32Array(n * 4), 4));
         m.count = 0;
         m.frustumCulled = false;

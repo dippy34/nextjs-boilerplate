@@ -155,7 +155,7 @@ float craters(vec3 p, float freq, float seed, float density, out float fresh) {
     if (d > 1.35) continue;
     float bowl = d < 1.0 ? (d * d - 1.0) * 0.55 : 0.0;
     float rim = 0.22 * exp(-pow((d - 1.0) / 0.22, 2.0));
-    h += (bowl + rim) * rc / freq;
+    h += (bowl + rim) * rc / freq * (1.0 - smoothstep(1.1, 1.35, d));   // (continuous at the cut-off: no dotted rings)
     fresh = max(fresh, bh3(c + 23.0) * (1.0 - smoothstep(0.7, 1.5, d)));
   }
   return h;
@@ -177,7 +177,7 @@ float cratersAt(vec3 ci, vec3 r, float density, out float fresh) {
     if (d > 1.35) continue;
     float bowl = d < 1.0 ? (d * d - 1.0) * 0.55 : 0.0;
     float rim = 0.22 * exp(-pow((d - 1.0) / 0.22, 2.0));
-    h += (bowl + rim) * rc;
+    h += (bowl + rim) * rc * (1.0 - smoothstep(1.1, 1.35, d));
     fresh = max(fresh, bh3(c + 23.0) * (1.0 - smoothstep(0.7, 1.5, d)));
   }
   return h;
@@ -477,9 +477,16 @@ void main() {
     float cliff;
     vec3 det = groundDetailS(vGround, nB, nPB, mppT, uMatSel, mix2, snowW, uLite, uSunDir * uBodyToWorld, nG, grainShadow, cliff);
     // bare rock on steep slopes: its own colour where the map shows snow or plants (Earth), dust-stained on Mars
-    if (uMatMode > 0.5 && uMatMode < 2.5) {
+    if (uMatMode > 0.5 && uMatMode < 2.5 && cliff > 0.0) {
       float l = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
-      vec3 rock = uMatMode < 1.5 ? vec3(0.15, 0.135, 0.12) : mix(albedo, vec3(l) * vec3(1.1, 0.8, 0.6), 0.4) * 0.8;
+      // dry land (the map is tan or red, not green or white): the cliff takes the ground's own
+      // tint, in layers (sedimentary strata, as in canyon walls and on Mount Sharp)
+      float arid = uMatMode < 1.5 ? smoothstep(0.004, 0.03, albedo.r - albedo.g) * (1.0 - snowW) : 1.0;
+      vec3 rock = uMatMode < 1.5 ? mix(vec3(0.15, 0.135, 0.12), albedo * 0.85, arid) : mix(albedo, vec3(l) * vec3(1.1, 0.8, 0.6), 0.4) * 0.8;
+      float hA = uMatO.z + dot(vGround, cross(uTanE, uTanN));
+      float band = 0.6 * noise1(hA / 19.0 + 2.5 * patchN) + 0.4 * noise1(hA / 4.7 + 11.0);
+      rock *= mix(1.0, 0.65 + 0.7 * band, arid);
+      rock = mix(rock, rock * vec3(1.12, 0.92, 0.85), arid * smoothstep(0.55, 0.75, band));
       albedo = mix(albedo, rock, cliff * uHScale);
     }
     albedo *= mix(vec3(1.0), det, uHScale);
