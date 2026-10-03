@@ -396,16 +396,26 @@ export class App {
     return items.filter((i) => !/:-1$/.test(i.id));
   }
 
-  /** Tour destinations that need more than a fly-to (a time jump, a search). */
+  /** Tour destinations that need more than a fly-to (a time jump, a search): desktop flies there. */
   private tourAction(what: string): void {
-    const fly = (o: SpaceObject | null) => { if (o) { this.select(o); this.goTo(o); } };
-    if (what === 'proxima') fly(this.findByName('Proxima Cen b'));
-    else if (what === 'eclipse') {
+    const o = this.prepareTour(what);
+    if (o) { this.select(o); this.goTo(o); }
+  }
+
+  /**
+   * Set up a tour destination (jumping the clock if needed) and return what to fly to; the caller
+   * flies (desktop go-to or VR travel).
+   */
+  prepareTour(what: string): SpaceObject | null {
+    if (what === 'proxima') return this.findByName('Proxima Cen b');
+    if (what === 'eclipse') {
       this.clock.jdTdb = utcToTdb(dateToJdUtc(new Date('2026-03-03T11:33:00Z')));
       this.clock.paused = true;
-      fly(this.findByName('Moon'));
       this.hud.toast('3 March 2026, 11:33 UTC: total lunar eclipse (time paused)', 4);
-    } else if (what === 'shadow') {
+      if (this.vr.active) this.vr.flash('Total lunar eclipse, 3 March 2026');
+      return this.findByName('Moon');
+    }
+    if (what === 'shadow') {
       // the next time a Galilean moon's shadow falls on Jupiter's disk (15-minute steps, up to 4 days)
       const jup = this.findByName('Jupiter') as Body;
       const moons = ['Io', 'Europa', 'Ganymede', 'Callisto'].map((n) => this.findByName(n) as Body);
@@ -426,9 +436,11 @@ export class App {
         this.clock.jdTdb = found.jd;
         this.clock.paused = true;
         this.hud.toast(`${found.moon}'s shadow on Jupiter (time paused)`, 4);
+        if (this.vr.active) this.vr.flash(`${found.moon}'s shadow on Jupiter`);
       }
-      fly(jup);
-    } else if (what === 'comet') {
+      return jup;
+    }
+    if (what === 'comet') {
       const sun = this.system.sun.upos;
       let best: Comet | null = null, bm = Infinity;
       for (const c of this.small.cometObjects) {
@@ -437,8 +449,9 @@ export class App {
         const m = c.row[8] + (c.row[9] ?? 10) * Math.log10(Math.max(r, 0.1));
         if (r < 4 && m < bm) { bm = m; best = c; }
       }
-      fly(best);
+      return best;
     }
+    return null;
   }
 
   /** K: missions and recent discoveries. */

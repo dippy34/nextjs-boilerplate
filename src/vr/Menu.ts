@@ -113,7 +113,15 @@ export class VRMenu {
         if (!this.exoList.length) p.text('Loading the exoplanet catalogue…', area.x + 20, area.y + 40, 28, COLORS.dim);
         break;
       case 'craft': this.paintGrid(p, area, app.craft.craft.filter((c) => c.valid), 4, 3); break;
-      case 'places': this.paintGrid(p, area, [app.findByName("Saturn's rings"), ...app.landmarks].filter(nonNull), 3, 4); break;
+      case 'places': {
+        const jup = app.findByName('Jupiter'), moon = app.findByName('Moon');
+        const events = [
+          jup ? new TourEvent('shadow', "Moon shadow on Jupiter", jup, 'jumps to the next shadow transit') : null,
+          moon ? new TourEvent('eclipse', 'Total lunar eclipse', moon, '3 March 2026, the Moon in Earth\'s shadow') : null,
+        ];
+        this.paintGrid(p, area, [app.findByName("Saturn's rings"), ...app.landmarks, ...events].filter(nonNull), 3, 4);
+        break;
+      }
       case 'nebulae': this.paintGrid(p, area, NEBULAE.map((n) => app.findByName(n)).filter(nonNull), 4, 3); break;
       case 'holes': this.paintGrid(p, area, [app.milkyWay, ...GALAXIES.map((n) => app.findByName(n)).filter(nonNull), ...HOLES.slice(0, 6).map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull)], 4, 4); break;
       case 'search': this.paintSearch(p, area); break;
@@ -127,6 +135,7 @@ export class VRMenu {
     if (o instanceof CatalogStar) return `${(d / LY).toFixed(d < 10 * LY ? 2 : 1)} light years`;
     if (o instanceof MilkyWay) return 'our galaxy, from outside';
     if (o instanceof Landmark) return `on ${o.def.body} · ${o.def.about}`;
+    if (o instanceof TourEvent) return o.about;
     if (o instanceof RingSpot) return 'among the ice of the B ring';
     if (o instanceof Galaxy) {
       const mly = d / LY / 1e6;
@@ -156,7 +165,7 @@ export class VRMenu {
   private drawThumb(p: Panel, o: SpaceObject, cx: number, cy: number, r: number): void {
     const c = p.ctx;
     // places show the world they are on
-    const idx = this.thumbIndex?.bodies[o instanceof Landmark ? o.world.name : o instanceof RingSpot ? 'Saturn' : o.name];
+    const idx = this.thumbIndex?.bodies[o instanceof Landmark || o instanceof TourEvent ? o.world.name : o instanceof RingSpot ? 'Saturn' : o.name];
     if (this.thumbs && this.thumbIndex && idx) {
       const s = this.thumbIndex.cell;
       c.drawImage(this.thumbs, idx[0] * s, idx[1] * s, s, s, cx - r, cy - r, 2 * r, 2 * r);
@@ -226,7 +235,9 @@ export class VRMenu {
     const tx = x + 52 + 2 * r;
     p.text(o.name, tx, y + h * 0.4, 34, sel ? COLORS.sel : COLORS.text, 700, 'left', w - (tx - x) - 16);
     p.text(this.subtitle(o), tx, y + h * 0.66, 22, COLORS.dim, 400, 'left', w - (tx - x) - 16);
-    p.region({ id, x, y, w, h, onClick: () => this.host.travelTo(o) });
+    p.region({ id, x, y, w, h, onClick: () => {
+      if (o instanceof TourEvent) { const t = this.host.app.prepareTour(o.what); if (t) this.host.travelTo(t); } else this.host.travelTo(o);
+    } });
   }
 
   private paintGrid(p: Panel, a: { x: number; y: number; w: number; h: number }, items: SpaceObject[], cols: number, rows = 3): void {
@@ -335,6 +346,17 @@ export class VRMenu {
     p.text(`Missions: ${ms.doneCount} / ${ms.total}`, tx, a.y + 540, 30, COLORS.warn, 600);
     ms.list.filter((m) => !m.done).slice(0, 4).forEach((m, i) => p.text(`○ ${m.title}`, tx, a.y + 590 + i * 38, 24, COLORS.dim, 500, 'left', 520));
   }
+}
+
+/** A tour event as a menu tile (the clock is set when it is chosen); shows its world's picture. */
+class TourEvent implements SpaceObject {
+  readonly kind = 'event';
+  readonly radius = 0;
+  readonly parentObject = null;
+  constructor(readonly what: string, readonly name: string, readonly world: SpaceObject, readonly about: string) {}
+  get key(): string { return `event:${this.what}`; }
+  get upos() { return this.world.upos; }
+  info(): [string, string][] { return [['Event', this.about]]; }
 }
 
 function nonNull<T>(x: T | null | undefined): x is T {

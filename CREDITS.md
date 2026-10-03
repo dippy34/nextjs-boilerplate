@@ -260,6 +260,11 @@ heights in PNG files; all are public domain (U.S. Government work):
 - **Mercury**: MESSENGER USGS global DEM 665 m v2 (NASA/JHUAPL/CIW), via USGS Astrogeology
   (`Mercury_Messenger_USGS_DEM_Global_665m_v2.tif`).
 
+Landmark coordinates (`src/universe/Landmarks.ts`): the USGS/IAU Gazetteer of Planetary Nomenclature
+(<https://planetarynames.wr.usgs.gov/>) for feature centres; the Apollo 11, Curiosity and Perseverance
+landing sites as published by NASA and the mission teams. Their ground elevations are rounded values
+read from the elevation models above.
+
 Relief finer than these models, and all relief on other solid moons and dwarf planets, is
 generated: fractal hills and crater fields (bowls with raised rims; depth-to-diameter 0.16 for small
 craters and 0.09 for large ones, somewhat shallower than fresh lunar craters, about 0.2 for simple
