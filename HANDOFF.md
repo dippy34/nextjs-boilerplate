@@ -109,6 +109,26 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     normal + height); `groundDetail` in the terrain shaders blends flat/steep/snow materials at three
     scales by slope and height, as detail around the world's own colour. `render/Rocks.ts` scatters
     rocks per body-fixed cell on the drawn ground (`TerrainPatch.groundRadius`).
+  - Display curve (`shaders/tone.ts`): the ACES fit applied to luminance only, so hues and
+    saturation survive (per-channel ACES bleached mid-tones: Saturn came out off-white); highlights
+    above ~60% of white blend towards white. Same curve in the headset via `CustomToneMapping`.
+  - Comet tails (`CometTails`, TAIL_FRAG): a box in the comet's frame (x away from the Sun, y in the
+    orbit plane behind the motion from the orbital elements, z the orbit normal), in coma radii;
+    1/b coma integrated analytically, ion tube with plasma rays and curved, striated dust fan
+    ray-marched with steps that shrink near the tube's axis and the fan's plane.
+  - Saturn's rings: `shaders/rings.ts` (per-ring particle colour, ringlets below the profile's
+    resolution, backscattering phase function with opposition surge, penumbra, Saturnshine). Within
+    3 km of the plane `RingParticles.slab` draws the whole ring as a medium (Gaussian layer, σ 4.5 m,
+    measured optical depth, sunlight dimmed by the layer, self-gravity wakes) on a sphere around the
+    eye; the ice chunks are shaded and fogged by the same layer (`LAYER_GLSL`).
+  - Star surfaces: `shaders/star.ts` (arithmetic hash: `sin` of large arguments lined the granules
+    up on a grid; granules ~1000 km on the Sun; bright points; mesogranulation); the corona glow
+    fades close to a star (`StarCorona`).
+  - Milky Way from outside: `MilkyWayVolume` ray-marches the galaxy model per pixel (with H II knots,
+    OB associations, dust lanes on the arms' inner edges, feathers) and takes over from the glow cube
+    a few kpc outside the disc.
+  - Point sources fade in over the last ~1.3 mag above the cut-off (`psf.ts`).
+  - Shot scripts for visual review: `scripts/shots/{comet,rings,solar}.mjs`.
   - Spacecraft models (`SpacecraftLayer.parts`): ISS (Sun-tracking arrays), Hubble, JWST, Voyager,
     New Horizons built from parts, baked per finish (`bake`); HULL_FRAG adds cells/foil/quilting/truss
     lattice from the part-local position (`aLoc`).
