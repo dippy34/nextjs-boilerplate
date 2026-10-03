@@ -272,14 +272,17 @@ export class TerrainPatch {
     this.hScale = Math.min(1, Math.max(0, (th - alt) / (th * 0.35)));
     mat.uniforms.uHScale.value = this.hScale;
 
+    // height above the ground itself (not the reference surface): on a high mountain or plateau the
+    // finest rings must still be at the explorer's feet
+    const altG = Math.max(0, alt - b.height(up, Math.max(1, Math.min(alt, 2000) * 0.05)) * this.hScale);
     // patch size: past the horizon over the highest relief, but well short of a hemisphere
     const outer = Math.min(b.radius * 0.45, 500e3, Math.max(20e3, 1.3 * Math.sqrt(2 * b.radius * (Math.max(alt, 0) + 2 * b.amplitude))));
-    const inner = Math.max(0.25, Math.max(alt, 0) * 0.025);
+    const inner = Math.max(0.25, altG * 0.025);
 
     // start a new patch when this one is off-centre, the wrong size or for another world
     const f = this.front;
     const need = f.ground !== b || !f.mesh.visible || f.version !== (b.version?.() ?? 0)
-      || f.up.angleTo(up) * b.radius > Math.max(2 * Math.max(alt, 0), 25)
+      || f.up.angleTo(up) * b.radius > Math.max(2 * altG, 25)
       || outer > f.outer * 1.3 || outer < f.outer * 0.6 || inner > f.inner * 4 || inner < f.inner * 0.25;
     if (need && (!this.job || !this.jobSwaps)) {
       this.job = this.build(this.back, b, up, outer, inner, c.lonLeft, c.sunBF.clone());
@@ -420,8 +423,9 @@ export class TerrainPatch {
     if (!b) return 0;
     const base = baseRadius(b, n);
     if (!f.mesh.visible) return base;
-    // the mesh only carries features larger than its local vertex spacing
-    const spacing = Math.max(f.inner, f.up.angleTo(n) * b.radius * Math.max(f.q - 1, (2 * Math.PI) / SEGS));
+    // the mesh only carries features larger than its local vertex spacing (as build() sampled them)
+    const rho = f.up.angleTo(n) * b.radius;
+    const spacing = rho < f.inner ? f.inner : rho * Math.max(f.q - 1, (2 * Math.PI) / SEGS);
     return base + b.height(n, spacing) * this.hScale * this.fade(b, n);
   }
 
