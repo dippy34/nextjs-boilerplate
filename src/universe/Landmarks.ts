@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import type { UPos } from '../core/upos';
 import type { Body, SpaceObject } from './Body';
+import { baseRadius } from './Terrain';
 
 /** A named place on a solid world, from planetocentric latitude / east longitude (IAU frames). */
 interface LandmarkDef {
@@ -84,9 +85,10 @@ export class Landmark implements SpaceObject {
     return up.clone().multiplyScalar(Math.sin(e)).addScaledVector(horiz, Math.cos(e)).normalize();
   }
 
-  /** on the ground at the place */
+  /** on the ground at the place (elevations are measured from the reference ellipsoid, which on Earth
+   * and Mars stands up to ~7 km above the mean radius at the equator) */
   get upos(): UPos {
-    return this.world.upos.clone().addVec(this.up(), this.world.radius + this.def.h);
+    return this.world.upos.clone().addVec(this.up(), baseRadius(this.world, this.dirBF) + this.def.h);
   }
 
   info(): [string, string][] {

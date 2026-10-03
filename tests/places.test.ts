@@ -33,6 +33,14 @@ describe('places', () => {
     expect(dir.dot(l.up())).toBeGreaterThan(0.4);
   });
 
+  it('elevations are measured from the reference ellipsoid (oblate worlds)', () => {
+    const mars = { name: 'Mars', radius: 3389.5e3, radii: [3396.19e3, 3396.19e3, 3376.2e3], upos: UPos.from(0, 0, 0), orientation: new Matrix4() } as unknown as Body;
+    const def = LANDMARKS.find((d) => d.name.startsWith('Opportunity'))!;
+    const p = new Landmark(def, mars).upos.sub(mars.upos, new Vector3());
+    // near the equator: about the equatorial radius plus the elevation, not the mean radius
+    expect(p.length() - def.h).toBeGreaterThan(3396e3);
+  });
+
   it('mountains are seen from a low viewpoint, across the sunlight', () => {
     const def = LANDMARKS.find((d) => d.name === 'Mount Everest')!;
     const l = new Landmark(def, moon);
