@@ -141,6 +141,10 @@ export class TerrainPatch {
   budgetVrMs = 2;
   /** presenting to a headset (smaller per-frame budget) */
   vr = false;
+  /** counts the patches swapped in (and shadow updates): things placed on the drawn ground re-place themselves when it changes */
+  serial = 0;
+  /** where the ground materials' texture axes are anchored (body-fixed) */
+  private anchor = { ground: null as Ground | null, pos: new Vector3(), e: new Vector3(1, 0, 0), n: new Vector3(0, 1, 0), up: new Vector3(0, 0, 1) };
 
   constructor() {
     const mk = (): Built => {
@@ -187,7 +191,7 @@ export class TerrainPatch {
         fragmentShader: bodyMat.fragmentShader,
         uniforms: {
           ...bodyMat.uniforms, uTerrain: { value: 1 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
-          uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) },
+          uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) }, uMatO: { value: new Vector3() },
           ...Object.fromEntries(FINE_CELLS.flatMap((_, k) => [[`uOI${k}`, { value: new Vector3() }], [`uOF${k}`, { value: new Vector3() }]])),
         },
         // opaque, but in the transparent pass so it is drawn after the atmosphere shell
@@ -289,12 +293,13 @@ export class TerrainPatch {
       while (performance.now() - t0 < budget) {
         if (this.job.next().done) {
           this.job = null;
-          if (!this.jobSwaps) break;
+          if (!this.jobSwaps) { this.serial++; break; }
           const old = this.front;
           this.front = this.back;
           this.back = old;
           this.back.mesh.visible = false;
           this.front.mesh.visible = true;
+          this.serial++;
           break;
         }
       }
@@ -312,7 +317,18 @@ export class TerrainPatch {
       (mat.uniforms[`uOF${k}`].value as Vector3).set(v[0] - iv[0], v[1] - iv[1], v[2] - iv[2]);
     });
     // the patch's east and north at its centre (texture axes of the ground materials)
-    if (mat.uniforms.uTanE) { (mat.uniforms.uTanE.value as Vector3).copy(fr.e); (mat.uniforms.uTanN.value as Vector3).copy(fr.nrt); }
+    // ground material axes: a fixed anchor near the explorer (moved only after travelling far), so
+    // the textures stay put on the ground when a new patch replaces the old
+    const an = this.anchor;
+    if (an.ground !== b || an.pos.distanceTo(fr.origin) > 40e3) {
+      an.ground = b; an.pos.copy(fr.origin); an.e.copy(fr.e); an.n.copy(fr.nrt); an.up.copy(fr.up);
+    }
+    if (mat.uniforms.uTanE) {
+      (mat.uniforms.uTanE.value as Vector3).copy(an.e);
+      (mat.uniforms.uTanN.value as Vector3).copy(an.n);
+      const d = fr.origin.clone().sub(an.pos);
+      (mat.uniforms.uMatO.value as Vector3).set(d.dot(an.e), d.dot(an.n), d.dot(an.up));
+    }
     const m4 = fr.mesh.matrix.copy(c.orient);
     const o = fr.origin.clone().applyMatrix4(new Matrix4().extractRotation(c.orient)).add(c.rel);
     m4.setPosition(o);
@@ -360,6 +376,29 @@ export class TerrainPatch {
     const dist = camBF.length();
     const dir = camBF.divideScalar(dist);
     return { dir, dist, ground: this.groundRadius(dir), centre: c.upos };
+  }
+
+  /**
+   * The Sun's clearance over the relief (aSun: penumbra widths, lit above -0.5) at body-fixed
+   * direction `n`, interpolated on the visible patch; 2 (lit) outside it.
+   */
+  sunClearance(n: Vector3): number {
+    const f = this.front;
+    const b = f.ground;
+    if (!b || !f.mesh.visible) return 2;
+    const A = (f.mesh.geometry.attributes.aSun as BufferAttribute).array as Float32Array;
+    const rho = f.up.angleTo(n) * b.radius;
+    if (rho >= f.outer) return 2;
+    const sf = ((Math.atan2(n.dot(f.nrt), n.dot(f.e)) / (2 * Math.PI)) * SEGS + SEGS) % SEGS;
+    const s0 = Math.floor(sf), fs = sf - s0;
+    const ring = (k: number) => {
+      const a = A[1 + k * SEGS + (s0 % SEGS)], c = A[1 + k * SEGS + ((s0 + 1) % SEGS)];
+      return a + (c - a) * fs;
+    };
+    if (rho < f.inner) return A[0] + (ring(0) - A[0]) * (rho / f.inner);
+    const kf = Math.log(rho / f.inner) / Math.log(f.q);
+    const k0 = Math.min(RINGS - 1, Math.floor(kf)), k1 = Math.min(RINGS - 1, k0 + 1);
+    return ring(k0) + (ring(k1) - ring(k0)) * Math.min(1, kf - k0);
   }
 
   /** relief fades out over the outer part of the patch, reaching the reference surface at 94 % */

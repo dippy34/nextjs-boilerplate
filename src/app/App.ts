@@ -1632,7 +1632,7 @@ export class App {
       if (c) c.air = this.atmospheres.material(c.ground.owner);
       this.terrain.vr = this.vr.active;
       this.terrain.update(c);
-      this.rocks.update(this.rig.upos);
+      this.rocks.update(this.rig.upos, this.renderer.gl);
     }
     this.craft.update(this.rig.upos, pixelAngle, jd, this.system.sun, this.system.byId.get(399)!);
     this.holes.vr = this.vr.active;
