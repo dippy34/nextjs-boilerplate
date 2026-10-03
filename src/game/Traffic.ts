@@ -3,6 +3,7 @@ import { formatDistance } from '../core/units';
 import { UPos } from '../core/upos';
 import type { Body, SpaceObject } from '../universe/Body';
 import { ShipModel, type ShipLook } from './ShipModel';
+import { Station } from './Station';
 
 const ROLES: { role: string; names: string[]; look: ShipLook }[] = [
   { role: 'Freighter', names: ['Aurora', 'Halcyon', 'Long Haul', 'Meridian', 'Tortoise'], look: { hull: [0.62, 0.6, 0.55], trim: [0.9, 0.62, 0.1], engine: [1.0, 0.7, 0.35], scale: 3.2 } },
@@ -66,7 +67,9 @@ export class TrafficShip implements SpaceObject {
 export class Traffic {
   readonly group = new Group();
   ships: TrafficShip[] = [];
+  stations: Station[] = [];
   private body: Body | null = null;
+  private time = 0;
 
   constructor() {
     this.group.name = 'traffic';
@@ -76,7 +79,9 @@ export class Traffic {
   setBody(body: Body | null): void {
     if (body === this.body) return;
     for (const s of this.ships) this.group.remove(s.model.group);
+    for (const s of this.stations) this.group.remove(s.group);
     this.ships = [];
+    this.stations = [];
     this.body = body;
     if (!body || body.gm <= 0 || body.kind === 'star') return;
     let h = 0;
@@ -96,9 +101,21 @@ export class Traffic {
       this.ships.push(ship);
       this.group.add(ship.model.group);
     }
+    // one station in a low orbit (above the atmosphere of a giant)
+    if (body.radius > 1e5) {
+      const rad = body.radius * (body.isGasGiant ? 1.6 : 1) + Math.max(400e3, body.radius * 0.07);
+      const nrm = new Vector3(r() - 0.5, r() - 0.5, r() * 2 - 0.5).normalize();
+      const a = new Vector3().crossVectors(nrm, Math.abs(nrm.z) < 0.9 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0)).normalize();
+      const b = new Vector3().crossVectors(nrm, a);
+      const st = new Station(body, rad, a, b, r() * Math.PI * 2, 2 * Math.PI * Math.sqrt(rad ** 3 / body.gm), Math.floor(r() * 1000));
+      this.stations.push(st);
+      this.group.add(st.group);
+    }
   }
 
-  update(cam: UPos, jd: number): void {
+  update(cam: UPos, jd: number, dt = 0): void {
+    this.time += dt;
+    for (const st of this.stations) { st.update(jd, this.time); st.place(cam); }
     const rel = new Vector3();
     for (const s of this.ships) {
       s.update(jd);

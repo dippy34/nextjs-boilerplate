@@ -20,6 +20,8 @@ import { StarFieldLayer } from '../render/StarField';
 import { TileDetail } from '../render/TileDetail';
 import { type CraftView, SpacecraftLayer } from '../render/SpacecraftLayer';
 import { GalaxiesLayer } from '../render/GalaxiesLayer';
+import { DeepSkyLayer } from '../render/DeepSkyLayer';
+import { DeepSkyObject, loadDeepSky } from '../universe/DeepSky';
 import { Galaxy, loadGalaxies } from '../universe/Galaxies';
 import { loadSpacecraft, Spacecraft } from '../universe/Spacecraft';
 import { Hud } from '../ui/Hud';
@@ -34,6 +36,7 @@ import { CatalogStar, NamedStars } from '../universe/Stars';
 import { CameraRig } from './CameraRig';
 import { Game } from '../game/Game';
 import { TrafficShip } from '../game/Traffic';
+import { Station } from '../game/Station';
 import { Input } from './Input';
 import { Systems } from './Systems';
 import { VRSupport } from './VR';
@@ -91,6 +94,8 @@ export class App {
   game!: Game;
   /** other galaxies (SIMBAD) */
   galaxies!: GalaxiesLayer;
+  /** nebulae and star clusters (SIMBAD) */
+  deepSky!: DeepSkyLayer;
   /** real spacecraft (JPL Horizons trajectories) */
   craft!: SpacecraftLayer;
   /** close-up map tiles for the body being approached */
@@ -186,10 +191,12 @@ export class App {
     const m87 = galaxyList.find((g) => g.name === 'M87'), m87bh = blackHoles.find((b) => b.name === 'M87*');
     if (m87 && m87bh) m87.upos.copy(m87bh.upos);
     app.galaxies = new GalaxiesLayer(galaxyList);
+    const dso = await loadDeepSky(DATA).catch((e) => { console.warn('deep sky', e); return [] as DeepSkyObject[]; });
+    app.deepSky = new DeepSkyLayer(dso, starField.psf, starField.colorLut, xrCapable);
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.craft.group, app.galaxies.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
@@ -409,6 +416,11 @@ export class App {
       this.hud.toast('Leaving the galaxy');
       return;
     }
+    if (obj instanceof DeepSkyObject) {
+      this.rig.flyTo(obj, obj.radius * (obj.data.kind === 'open' ? 1.6 : 2.6));
+      this.hud.toast(`Going to ${obj.name}`);
+      return;
+    }
     if (obj instanceof Galaxy) {
       this.rig.flyTo(obj, obj.radius * 2.4, undefined, true, obj.viewDir(this.rig.upos.sub(obj.upos, new Vector3())));
       this.hud.toast(`Going to ${obj.name}`);
@@ -419,6 +431,12 @@ export class App {
     else if (obj instanceof ExoPlanet) d = obj.radius * 3.5;
     else if (obj instanceof Spacecraft) d = Math.max(obj.radius * 5, 10);
     else if (obj instanceof TrafficShip) d = obj.radius * 6;
+    else if (obj instanceof Station) {
+      // arrive in front of the docking port, on the hub axis
+      this.rig.flyTo(obj, 700, undefined, true, obj.axis.clone());
+      this.hud.toast(`Going to ${obj.name}: fly in slowly to dock`);
+      return;
+    }
     else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 4.5, 2e7);
     else if (obj instanceof Comet) d = obj.radius > 0 ? obj.radius * 60 : 2e7;
     else d = Math.max(obj.radius * 4, 1e6);
@@ -445,6 +463,8 @@ export class App {
     if (b) return b;
     const gx = this.galaxies.galaxies.find((g) => g.name.toLowerCase() === n || g.data.simbad.toLowerCase().replace(/\s+/g, '') === n.replace(/\s+/g, '') || (n === 'andromeda' && g.name.startsWith('Andromeda')));
     if (gx) return gx;
+    const dso = this.deepSky.objects.find((o) => o.name.toLowerCase() === n || o.data.simbad.toLowerCase().replace(/\s+/g, '') === n.replace(/\s+/g, ''));
+    if (dso) return dso;
     const sc = this.craft.craft.find((c) => c.name.toLowerCase() === n || (n === 'iss' && c.name.startsWith('International')) || (n === 'jwst' && c.name.startsWith('James')) || (n === 'hubble' && c.name.startsWith('Hubble')));
     if (sc) { sc.update(this.clock.jdTdb); return sc; }
     const c = this.small.cometObjects.find((x) => x.name.toLowerCase().includes(n));
@@ -508,6 +528,10 @@ export class App {
       if (best >= 0) out.push({ label: st.names[0], detail: `star · ${st.names.slice(1, 3).join(', ')}`, id: `star:${st.index}`, score: best + (st.proper ? 0 : 0.3) });
     }
     out.push(...this.systems.search(q, score));
+    this.deepSky.objects.forEach((o, i) => {
+      const sc = Math.min(...[o.name, o.data.simbad, o.data.simbad.replace(/\s+/g, ''), o.kind].map(score).filter((x) => x >= 0));
+      if (Number.isFinite(sc)) out.push({ label: o.name, detail: `${o.data.kind === 'open' || o.data.kind === 'globular' ? `${o.data.kind} cluster` : 'nebula'} · ${Math.round(o.data.distPc * 3.2616).toLocaleString()} ly`, id: `dso:${i}`, score: sc + 0.02 });
+    });
     this.galaxies.galaxies.forEach((g, i) => {
       const sc = Math.min(...[g.name, g.data.simbad, g.data.simbad.replace(/\s+/g, ''), 'galaxy'].map(score).filter((x) => x >= 0));
       if (Number.isFinite(sc)) out.push({ label: g.name, detail: `galaxy · ${((g.data.distPc * 3.2616) / 1e6).toFixed(g.data.distPc < 3e5 ? 2 : 1)} million ly`, id: `gx:${i}`, score: sc + (g.name === 'Milky Way' ? 0 : 0.05) });
@@ -531,6 +555,7 @@ export class App {
     if (kind === 'xh') return this.exoHost(Number(v));
     if (kind === 'sc') return this.craft.craft[Number(v)] ?? null;
     if (kind === 'gx') return this.galaxies.galaxies[Number(v)] ?? null;
+    if (kind === 'dso') return this.deepSky.objects[Number(v)] ?? null;
     if (kind === 'xp') return this.exoPlanet(Number(v), Number(id.split(':')[2]));
     return null;
   }
@@ -581,6 +606,9 @@ export class App {
       if (d < soi) { best = b; bestSoi = soi; }
     }
     // close to a ship (game mode) or a spacecraft: ride along with it
+    for (const st of this.game.traffic.stations) {
+      if (st.upos.sub(this.rig.upos, rel).length() < 3000) { this.rig.setAnchor(st); return; }
+    }
     for (const sh of this.game.traffic.ships) {
       if (sh.upos.sub(this.rig.upos, rel).length() < sh.radius * 300) { this.rig.setAnchor(sh); return; }
     }
@@ -620,6 +648,7 @@ export class App {
     alt = Math.min(alt, this.nearestStarDist);
     for (const ev of this.exo.views) alt = Math.min(alt, ev.dist - ev.planet.radius);
     for (const cv of this.craft.views) alt = Math.min(alt, cv.dist - cv.craft.radius);
+    for (const st of this.game.traffic.stations) alt = Math.min(alt, st.upos.sub(this.rig.upos, rel).length() - st.radius * 0.5);
     for (const h of this.blackHoles) {
       alt = Math.min(alt, h.upos.sub(this.rig.upos, rel).length() - h.radius);
       if (h.companion) alt = Math.min(alt, h.companion.upos.sub(this.rig.upos, rel).length() - h.companion.radius);
@@ -747,6 +776,19 @@ export class App {
     this.activeSystems = act;
   }
 
+  /**
+   * Fraction of the view a sphere covers, from angles: for bodies so close that their centre may be
+   * behind the camera (standing on a surface, skimming it).
+   */
+  private bigCoverage(rel: Vector3, radius: number): number {
+    const d = rel.length();
+    const ar = Math.asin(Math.min(1, radius / Math.max(d, radius)));
+    if (ar < 0.35) return 0;
+    const th = rel.angleTo(new Vector3(0, 0, -1).applyQuaternion(this.view.quat));
+    const hv = (this.view.fovY * Math.PI) / 360;
+    return Math.max(0, Math.min(1, (ar + hv - th) / (2 * hv)));
+  }
+
   private updateExposure(dt: number): { xStar: number; xSurf: number; mLim: number; xDark: number } {
     const pixSA = (this.view.pixelAngle * this.view.pixelRatio) ** 2; // per CSS pixel
     const xDark = (0.01 * pixSA) / magToIrradiance(this.starMagLimit);
@@ -758,11 +800,14 @@ export class App {
     const screen = this.view.width * this.view.height;
     for (const v of this.bodies.views.values()) {
       if (!v.resolved || v.pixelRadius < 2) continue;
-      const p = this.project(v.rel);
-      if (!p) continue;
-      const pr = v.pixelRadius / this.view.pixelRatio;
-      if (p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
-      const coverage = Math.min(1, (Math.PI * pr * pr) / screen);
+      let coverage = this.bigCoverage(v.rel, v.body.radius);
+      if (coverage === 0) {
+        const p = this.project(v.rel);
+        if (!p) continue;
+        const pr = v.pixelRadius / this.view.pixelRatio;
+        if (p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
+        coverage = Math.min(1, (Math.PI * pr * pr) / screen);
+      }
       const w = smoothstep(0.0015, 0.08, coverage);
       if (w <= wBest) continue;
       const b = v.body;
@@ -822,7 +867,7 @@ export class App {
       return !!p && p.x > -margin && p.y > -margin && p.x < this.view.width + margin && p.y < this.view.height + margin;
     };
     for (const v of this.bodies.views.values()) {
-      if (!v.resolved || v.pixelRadius <= 1.5 || !onScreen(v.rel)) continue;
+      if (!v.resolved || v.pixelRadius <= 1.5 || (!onScreen(v.rel) && this.bigCoverage(v.rel, v.body.radius) < 0.02)) continue;
       const b = v.body;
       if (b.kind === 'star') lightCap = Math.min(lightCap, 1.8 / (AU / SUN_RADIUS) ** 2);
       else diskCap = Math.min(diskCap, 1.6 / ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI));
@@ -889,7 +934,8 @@ export class App {
     for (const ev of this.exo.views) if (this.exoShown(ev)) consider(ev.planet, this.project(ev.rel), ev.pixelRadius / this.view.pixelRatio, ev.pixelRadius > 2 ? -6 : -3);
     for (const cv of this.craft.views) if (this.craftShown(cv)) consider(cv.craft, this.project(cv.rel), cv.pixelRadius / this.view.pixelRatio, -5);
     for (const gv of this.galaxies.views) if (gv.pixelRadius >= 2.5) consider(gv.galaxy, this.project(gv.rel), Math.min(gv.pixelRadius / this.view.pixelRatio, 80), 2);
-    for (const sh of this.game.traffic.ships) {
+    for (const dv of this.deepSky.views) if (dv.pixelRadius >= 3 && dv.dist > dv.obj.radius) consider(dv.obj, this.project(dv.rel), Math.min(dv.pixelRadius / this.view.pixelRatio, 80), 1.5);
+    for (const sh of [...this.game.traffic.ships, ...this.game.traffic.stations]) {
       const r = sh.upos.sub(this.rig.upos, new Vector3());
       if (r.length() < 2e6) consider(sh, this.project(r), (Math.atan2(sh.radius, r.length()) / this.view.pixelAngle) / this.view.pixelRatio, -4);
     }
@@ -969,7 +1015,8 @@ export class App {
     for (const ev of this.exo.views) if (this.exoShown(ev)) consider(ev.planet, ev.rel, ev.planet.radius, ev.pixelRadius > 2 ? -1 : -0.3);
     for (const cv of this.craft.views) if (this.craftShown(cv)) consider(cv.craft, cv.rel, cv.craft.radius, -0.6);
     for (const gv of this.galaxies.views) if (gv.pixelRadius >= 2.5) consider(gv.galaxy, gv.rel, gv.galaxy.radius * 0.5, 0.5);
-    for (const sh of this.game.traffic.ships) {
+    for (const dv of this.deepSky.views) if (dv.pixelRadius >= 3 && dv.dist > dv.obj.radius) consider(dv.obj, dv.rel, dv.obj.radius * 0.6, 0.4);
+    for (const sh of [...this.game.traffic.ships, ...this.game.traffic.stations]) {
       const r = sh.upos.sub(this.rig.upos, new Vector3());
       if (r.length() < 2e6) consider(sh, r, sh.radius, -0.6);
     }
@@ -1069,7 +1116,8 @@ export class App {
     for (const ev of this.exo.views) if (this.exoShown(ev)) consider(ev.planet, ev.rel, ev.planet.radius, ev.pixelRadius > 2 ? -1 : -0.3);
     for (const cv of this.craft.views) if (this.craftShown(cv)) consider(cv.craft, cv.rel, cv.craft.radius, -0.6);
     for (const gv of this.galaxies.views) if (gv.pixelRadius >= 2.5) consider(gv.galaxy, gv.rel, gv.galaxy.radius * 0.5, 0.5);
-    for (const sh of this.game.traffic.ships) {
+    for (const dv of this.deepSky.views) if (dv.pixelRadius >= 3 && dv.dist > dv.obj.radius) consider(dv.obj, dv.rel, dv.obj.radius * 0.6, 0.4);
+    for (const sh of [...this.game.traffic.ships, ...this.game.traffic.stations]) {
       const r = sh.upos.sub(this.rig.upos, new Vector3());
       if (r.length() < 2e6) consider(sh, r, sh.radius, -0.6);
     }
@@ -1191,9 +1239,9 @@ export class App {
       const p = this.project(s.upos.sub(this.rig.upos, rel));
       if (p) out.push({ rel: rel.clone(), key: s.key, text: s.name, x: p.x, y: p.y, radius: 4, priority: s === sel ? 1e4 : 450, cls: s === sel ? 'selected' : 'star' });
     }
-    for (const sh of this.game.traffic.ships) {
+    for (const sh of [...this.game.traffic.stations, ...this.game.traffic.ships]) {
       const r = sh.upos.sub(this.rig.upos, new Vector3());
-      if (r.length() > 1.5e6 && sh !== sel) continue;
+      if (r.length() > (sh instanceof Station ? 3e7 : 1.5e6) && sh !== sel) continue;
       const p = this.project(r);
       if (p && !this.occluded(r, null)) out.push({ rel: r, key: sh.key, text: sh.name, x: p.x, y: p.y, radius: 3, priority: sh === sel ? 1e4 : 300, cls: sh === sel ? 'selected' : 'ship' });
     }
@@ -1216,6 +1264,12 @@ export class App {
     for (const { bh, rel: r, shadowPx } of this.labelledHoles()) {
       const p = this.project(r);
       if (p && !this.occluded(r, bh)) out.push({ rel: r, key: bh.key, text: bh.name, x: p.x, y: p.y, radius: shadowPx / dpr, priority: bh === sel ? 1e4 : 420, cls: bh === sel ? 'selected' : 'blackhole' });
+    }
+    for (const dv of this.deepSky.views) {
+      const isSel = dv.obj === sel;
+      if (!isSel && (dv.pixelRadius < 3 || dv.dist < dv.obj.radius * 0.8)) continue;
+      const p = this.project(dv.rel);
+      if (p) out.push({ rel: dv.rel.clone(), key: dv.obj.key, text: dv.obj.name, x: p.x, y: p.y, radius: Math.min(dv.pixelRadius / dpr, 60), priority: isSel ? 1e4 : 520 + Math.min(dv.pixelRadius, 40), cls: isSel ? 'selected' : 'nebula' });
     }
     for (const gv of this.galaxies.views) {
       const isSel = gv.galaxy === sel;
@@ -1319,6 +1373,7 @@ export class App {
     if (sunDistPc > 60) this.galaxy.update(this.renderer.gl, this.camGal, !this.galaxy.ready && sunDistPc > 150 ? 6 : 1);
     this.sky.updateWith(xStar / xDark, sunDistPc, this.galaxy.ready ? this.galaxy.target.texture : null, this.camGal);
     this.galaxies.update(this.rig.upos, pixelAngle, xStar / xDark, smoothstep(300, 1500, sunDistPc), this.view.quat);
+    this.deepSky.update(this.rig.upos, this.camPc, pixelAngle, xStar / xDark);
     this.lastMLim = mLim;
     const psf = this.starFields[0].psf;
     psf.uExposure.value = xStar;

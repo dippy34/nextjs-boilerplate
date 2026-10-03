@@ -22,6 +22,7 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; color:
 .label.exoplanet { color: #8fe3d0; }
 .label.craft { color: #ffd38a; }
 .label.ship { color: #ff9f7a; }
+.label.nebula { color: #ff9fc8; }
 .label.dwarf { color: #ffbe7a; }
 .label.moon { color: #9fe0bb; }
 .label.star { color: #f3e3b0; }

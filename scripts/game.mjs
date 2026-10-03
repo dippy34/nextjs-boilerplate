@@ -78,7 +78,44 @@ st = await page.evaluate(() => ({ mode: window.app.game.mode, ship: window.app.g
 check('V switches to the chase view', st.mode === 'chase' && st.ship && !st.cockpit, JSON.stringify(st));
 await page.screenshot({ path: path.join(outDir, 'g3-chase.png') });
 
-// 7. V again: off, classic flight back
+// 7. docking: fly to the station around the Moon, then in along its axis
+await page.keyboard.press('KeyV'); // chase -> off
+await frames(2);
+await page.keyboard.press('KeyV'); // off -> cockpit
+await frames(6);
+st = await page.evaluate(() => { const g = window.app.game; return { stations: g.traffic.stations.map((s) => s.name) }; });
+check('a station orbits the world we are at', st.stations.length === 1, JSON.stringify(st));
+await page.evaluate(() => { const a = window.app; const s = a.game.traffic.stations[0]; a.select(s); a.goTo(s); });
+await page.waitForFunction(() => !window.app.rig.autopilot, null, { timeout: 120000 });
+await frames(4);
+await page.keyboard.down('KeyW');
+await page.waitForFunction(() => window.app.game.docked !== null || window.app.game.docking !== null, null, { timeout: 120000 }).catch(() => undefined);
+await page.keyboard.up('KeyW');
+await page.waitForFunction(() => window.app.game.docked !== null, null, { timeout: 120000 }).catch(() => undefined);
+st = await page.evaluate(() => { const g = window.app.game; return { docked: g.docked?.name ?? null, missions: g.missions.list.filter((m) => m.done).map((m) => m.id) }; });
+check('the docking computer docks the ship', !!st.docked, JSON.stringify(st));
+await frames(12);
+await page.screenshot({ path: path.join(outDir, 'g4-docked.png') });
+await page.keyboard.down('KeyS');
+await frames(6);
+await page.keyboard.up('KeyS');
+st = await page.evaluate(() => ({ docked: window.app.game.docked }));
+check('thrust undocks', st.docked === null);
+
+// 8. landing: come down onto the Moon
+await page.evaluate(() => { const a = window.app; const m = a.findByName('Moon'); a.select(m); a.placeNear(m, m.radius * 1.002, 30, 20); a.rig.lookAt(m.upos.sub(a.rig.upos).normalize()); });
+await frames(4);
+await page.keyboard.down('KeyW');
+await page.waitForFunction(() => window.app.game.landed !== null, null, { timeout: 240000 }).catch(() => undefined);
+await page.keyboard.up('KeyW');
+await frames(4);
+st = await page.evaluate(() => ({ landed: window.app.game.landed?.name ?? null, alt: window.app.rig.altitude }));
+check('the ship touches down on the Moon', st.landed === 'Moon' && st.alt < 15, JSON.stringify(st));
+await page.screenshot({ path: path.join(outDir, 'g5-landed.png') });
+
+// 9. V: off, classic flight back
+await page.keyboard.press('KeyV');
+await frames(2);
 await page.keyboard.press('KeyV');
 await frames(3);
 st = await page.evaluate(() => ({ mode: window.app.game.mode, inertia: window.app.rig.inertia, ships: window.app.game.traffic.ships.length }));

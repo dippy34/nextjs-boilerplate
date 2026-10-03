@@ -24,6 +24,8 @@ const DEFS: Def[] = [
   { id: 'hole', title: 'Face a black hole', detail: 'Within 60 Schwarzschild radii of any black hole', check: (a) => a.blackHoles.some((b) => b.upos.sub(a.rig.upos, new Vector3()).length() < b.radius * 60) },
   { id: 'outside', title: 'Leave the Milky Way', detail: '30,000 parsecs from the Sun', check: (a) => a.rig.upos.sub(a.system.sun.upos, new Vector3()).length() > 30000 * PC },
   { id: 'andromeda', title: 'Visit Andromeda', detail: 'Within 3 of its radii', check: (a, near) => near(a.findByName('Andromeda Galaxy'), 3) },
+  { id: 'dock', title: 'Dock at a space station', detail: 'Ship mode: fly slowly into a station docking port', check: (a) => !!a.game?.docked },
+  { id: 'land', title: 'Land on another world', detail: 'Ship mode: come down slowly onto any solid surface', check: (a) => !!a.game?.landed },
   { id: 'stars', title: 'Visit five stars', detail: 'Come close to five different stars', check: () => false },
   { id: 'log', title: 'Explorer', detail: 'Log 25 discoveries', check: () => false },
 ];

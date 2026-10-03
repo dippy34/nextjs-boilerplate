@@ -9,6 +9,7 @@ import type { LabelCandidate } from '../render/Labels';
 import { BlackHole } from '../universe/BlackHoles';
 import { MilkyWay } from '../universe/MilkyWay';
 import { Galaxy } from '../universe/Galaxies';
+import { DeepSkyObject } from '../universe/DeepSky';
 import { ExoPlanet } from '../universe/Planets';
 import { Spacecraft } from '../universe/Spacecraft';
 import { Body, type SpaceObject } from '../universe/Body';
@@ -383,6 +384,7 @@ export class VRSupport {
     if (obj instanceof BlackHole) return obj.radius * 18;
     if (obj instanceof MilkyWay) return obj.radius * 2.6;
     if (obj instanceof Galaxy) return obj.radius * 2.4;
+    if (obj instanceof DeepSkyObject) return obj.radius * (obj.data.kind === 'open' ? 1.6 : 2.6);
     return obj.radius > 0 ? obj.radius * 80 : 3e7;
   }
 
@@ -611,7 +613,7 @@ export class VRSupport {
     const { head, up } = this.headPose();
     const top = cands.filter((c) => c.rel).sort((a, b) => b.priority - a.priority).slice(0, MAX_LABELS);
     const placed: Vector3[] = [];
-    const colors: Record<string, string> = { planet: '#9cc4ff', exoplanet: '#8fe3d0', craft: '#ffd38a', ship: '#ff9f7a', dwarf: '#ffbe7a', moon: '#9fe0bb', star: '#f3e3b0', comet: '#9feaff', blackhole: '#d3a6ff', galaxy: '#ffe2b0', selected: COLORS.sel };
+    const colors: Record<string, string> = { planet: '#9cc4ff', exoplanet: '#8fe3d0', craft: '#ffd38a', ship: '#ff9f7a', nebula: '#ff9fc8', dwarf: '#ffbe7a', moon: '#9fe0bb', star: '#f3e3b0', comet: '#9feaff', blackhole: '#d3a6ff', galaxy: '#ffe2b0', selected: COLORS.sel };
     let n = 0;
     for (const c of top) {
       const dir = c.rel!.clone().sub(head).normalize();

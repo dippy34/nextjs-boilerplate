@@ -5,7 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 REMOTE="$(git remote get-url origin)"
 SRC="$(git rev-parse --short HEAD)"
-npm run build
+# SKIP_BUILD=1 publishes the existing dist/ (e.g. the exact build that was just verified)
+if [ "${SKIP_BUILD:-0}" != "1" ]; then npm run build; fi
 TMP="$(mktemp -d)"
 cp -r dist/. "$TMP/"
 touch "$TMP/.nojekyll"            # serve files as-is, skip Jekyll

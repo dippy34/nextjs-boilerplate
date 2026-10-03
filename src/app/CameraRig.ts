@@ -40,6 +40,12 @@ export class CameraRig {
     return this.goto !== null;
   }
 
+  /** Kill the current velocity (docking, landing). */
+  stop(): void {
+    this.velocity.set(0, 0, 0);
+    this.speed = 0;
+  }
+
   /** seconds left on the current autopilot flight (0 if none) */
   get gotoRemaining(): number {
     return this.goto ? this.goto.T - this.goto.t : 0;

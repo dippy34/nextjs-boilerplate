@@ -43,6 +43,10 @@ export const scenarios = [
   { name: '29-local-group', query: `time=${T}&paused=1&campc=-900000,600000,700000&look=Andromeda Galaxy&fov=70` },
   { name: '30-cockpit-earth', query: `time=${T}&paused=1&target=Earth&dist=1.8&az=60&el=10&ship=cockpit&fov=70` },
   { name: '31-chase-saturn', query: `time=${T}&paused=1&target=Saturn&dist=5&az=40&el=15&ship=chase&fov=60` },
+  { name: '32-orion-nebula', query: `time=${T}&paused=1&target=Orion Nebula&dist=2.6&fov=60` },
+  { name: '33-ring-nebula', query: `time=${T}&paused=1&target=Ring Nebula&dist=2.6&fov=60` },
+  { name: '34-omega-centauri', query: `time=${T}&paused=1&target=Omega Centauri&dist=2.6&fov=60` },
+  { name: '35-crab-nebula', query: `time=${T}&paused=1&target=Crab Nebula&dist=2.6&fov=60` },
 ];
 
 const browser = await chromium.launch({

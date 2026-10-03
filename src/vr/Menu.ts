@@ -8,6 +8,7 @@ import { MilkyWay } from '../universe/MilkyWay';
 import { Galaxy } from '../universe/Galaxies';
 import { ExoPlanet, type PlanetType } from '../universe/Planets';
 import { Spacecraft } from '../universe/Spacecraft';
+import { DeepSkyObject } from '../universe/DeepSky';
 import { CatalogStar } from '../universe/Stars';
 import { COLORS, Panel } from './Panel';
 
@@ -26,8 +27,10 @@ export interface MenuHost {
   exitVR(): void;
 }
 
-type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'exo' | 'holes' | 'craft' | 'search' | 'settings';
-const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small'], ['stars', 'Stars'], ['exo', 'Exoplanets'], ['holes', 'Deep space'], ['craft', 'Spacecraft'], ['search', 'Search'], ['settings', 'Settings']];
+type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'exo' | 'nebulae' | 'holes' | 'craft' | 'search' | 'settings';
+const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small'], ['stars', 'Stars'], ['exo', 'Exoplanets'], ['nebulae', 'Nebulae'], ['holes', 'Galaxies'], ['craft', 'Craft'], ['search', 'Search'], ['settings', 'Settings']];
+const NEBULAE = ['Orion Nebula', 'Carina Nebula', 'Eagle Nebula', 'Lagoon Nebula', 'Ring Nebula', 'Helix Nebula', 'Crab Nebula', 'Veil Nebula (Cygnus Loop)',
+  'Tarantula Nebula', 'Pleiades', 'Omega Centauri', 'Hercules Cluster (M13)'];
 /** famous confirmed planets of other stars (NASA Exoplanet Archive names) */
 const EXOPLANETS = ['Proxima Cen b', 'TRAPPIST-1 e', 'Kepler-186 f', '51 Peg b', 'HD 189733 b', '55 Cnc e', 'eps Eri b', 'TOI-700 d',
   'LHS 1140 b', 'K2-18 b', 'Kepler-452 b', 'HR 8799 e'];
@@ -94,7 +97,7 @@ export class VRMenu {
     p.button('close', 1460, 26, 110, 72, '✕', () => this.host.closeMenu(), { size: 40 });
     const tw = (p.width - 80 + 12) / TABS.length;
     TABS.forEach(([id, label], i) => {
-      p.button(`tab:${id}`, 40 + i * tw, 122, tw - 12, 76, label, () => { this.tab = id; p.dirty = true; }, { active: this.tab === id, size: 27 });
+      p.button(`tab:${id}`, 40 + i * tw, 122, tw - 12, 76, label, () => { this.tab = id; p.dirty = true; }, { active: this.tab === id, size: 24 });
     });
     const area = { x: 40, y: 222, w: p.width - 80, h: p.height - 262 };
     switch (this.tab) {
@@ -108,6 +111,7 @@ export class VRMenu {
         if (!this.exoList.length) p.text('Loading the exoplanet catalogue…', area.x + 20, area.y + 40, 28, COLORS.dim);
         break;
       case 'craft': this.paintGrid(p, area, app.craft.craft.filter((c) => c.valid), 4, 3); break;
+      case 'nebulae': this.paintGrid(p, area, NEBULAE.map((n) => app.findByName(n)).filter(nonNull), 4, 3); break;
       case 'holes': this.paintGrid(p, area, [app.milkyWay, ...GALAXIES.map((n) => app.findByName(n)).filter(nonNull), ...HOLES.slice(0, 6).map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull)], 4, 4); break;
       case 'search': this.paintSearch(p, area); break;
       case 'settings': this.paintSettings(p, area); break;
@@ -123,6 +127,7 @@ export class VRMenu {
       const mly = d / LY / 1e6;
       return `galaxy · ${mly < 1 ? `${Math.round(mly * 1000)} thousand ly` : `${mly.toFixed(mly < 10 ? 1 : 0)} million ly`}`;
     }
+    if (o instanceof DeepSkyObject) return `${o.kind} · ${Math.round(d / LY).toLocaleString()} ly`;
     if (o instanceof Spacecraft) {
       const au = o.upos.sub(app.system.sun.upos, new Vector3()).length() / 1.495978707e11;
       return o.isOrbiter ? `Earth orbit · ${formatDistance(d)}` : o.parentObject ? `near Earth · ${formatDistance(d)}` : `${au.toFixed(au > 10 ? 0 : 2)} AU from the Sun`;
@@ -192,7 +197,7 @@ export class VRMenu {
       c.fill();
       return;
     }
-    const col = o instanceof CatalogStar ? starColor(o) : o instanceof Body ? o.color : o instanceof ExoPlanet ? EXO_COLOR[o.spec.type] : o instanceof Spacecraft ? [0.95, 0.78, 0.4] : [0.7, 0.7, 0.7];
+    const col = o instanceof CatalogStar ? starColor(o) : o instanceof Body ? o.color : o instanceof ExoPlanet ? EXO_COLOR[o.spec.type] : o instanceof Spacecraft ? [0.95, 0.78, 0.4] : o instanceof DeepSkyObject ? (o.data.kind === 'emission' ? [1, 0.35, 0.45] : o.data.kind === 'planetary' ? [0.4, 0.95, 0.9] : o.data.kind === 'snr' ? [0.6, 0.7, 1] : [1, 0.92, 0.75]) : [0.7, 0.7, 0.7];
     const g = c.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
     const css = (k: number) => `rgb(${Math.round(255 * Math.min(1, col[0] * k))},${Math.round(255 * Math.min(1, col[1] * k))},${Math.round(255 * Math.min(1, col[2] * k))})`;
     const glow = o instanceof CatalogStar;
@@ -270,7 +275,7 @@ export class VRMenu {
     // results
     const rx = a.x + 950, rw = a.w - 950;
     const results = this.query.trim() ? app.searchItems(this.query.trim()).slice(0, 8) : [];
-    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars, 6,333 exoplanets, 23 black holes, billions of generated stars', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
+    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars, 6,333 exoplanets, spacecraft, nebulae, clusters, 47 galaxies, 23 black holes', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
     results.forEach((r, i) => {
       p.button(`res:${r.id}`, rx, a.y + i * 92, rw, 82, r.label, () => {
         const o = app.resolveSearchId(r.id);

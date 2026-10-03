@@ -1,4 +1,4 @@
-import { Vector3 } from 'three';
+import { Matrix4, Quaternion, Vector3 } from 'three';
 import { blackbodyRGB, luminance, magToIrradiance } from '../astro/photometry';
 import { formatUtc } from '../core/time';
 import { AU, formatDistance, formatSpeed, PC } from '../core/units';
@@ -8,8 +8,9 @@ import { ShipAudio } from './Audio';
 import { Cockpit } from './Cockpit';
 import { Missions } from './Missions';
 import { LIGHT, ShipModel } from './ShipModel';
-import { Traffic } from './Traffic';
+import { Traffic, TrafficShip } from './Traffic';
 import { WarpFx } from './WarpFx';
+import { Station } from './Station';
 
 export type ViewMode = 'off' | 'cockpit' | 'chase';
 
@@ -38,6 +39,14 @@ export class Game {
   private warping = false;
   private time = 0;
   private hudTimer = 0;
+  /** docking in progress: offset of the camera from the hold point when it started (station axes) */
+  private docking: { station: Station; t: number; from: Vector3; q0: Quaternion } | null = null;
+  /** station we are docked at */
+  docked: Station | null = null;
+  /** world we have touched down on */
+  landed: Body | null = null;
+  /** seconds before the docking computer may engage again (after undocking) */
+  private dockCooldown = 0;
 
   constructor(private app: App) {
     // children of the camera dolly: they move with the explorer; in VR the head moves inside
@@ -69,6 +78,9 @@ export class Game {
     this.ship.group.visible = m === 'chase';
     this.app.rig.inertia = m === 'off' ? 0 : 1.2;
     if (m === 'off') {
+      this.docked = null;
+      this.docking = null;
+      this.landed = null;
       this.traffic.setBody(null);
       this.warping = false;
       this.audio.update(0, 0, false);
@@ -106,9 +118,13 @@ export class Game {
     else if (app.vr.traveling) this.warping = true;
     this.updateLight();
     // traffic around the world we ride along with
-    const anchor = rig.anchor instanceof Body && rig.anchor.kind !== 'star' ? rig.anchor : null;
-    this.traffic.setBody(anchor);
-    this.traffic.update(rig.upos, app.clock.jdTdb);
+    // (riding along with a station or ship keeps the traffic of the world it orbits)
+    const a = rig.anchor;
+    const world = a instanceof Station || a instanceof TrafficShip ? a.body : a instanceof Body && a.kind !== 'star' ? a : null;
+    this.traffic.setBody(world);
+    this.traffic.update(rig.upos, app.clock.jdTdb, dt);
+    this.updateDocking(dt);
+    this.updateLanding(dt);
     // engines, warp streaks, sound
     const throttle = Math.min(1, Math.abs(rig.thrust) * (app.input.keys.has('ShiftLeft') || app.input.keys.has('ShiftRight') ? 1 : 0.6));
     this.ship.setThrust(this.warping ? 1 : throttle);
@@ -123,13 +139,105 @@ export class Game {
     this.cockpit.update(dt);
   }
 
+  /** Where a docked ship sits: 14 m in front of the port, on the hub axis. */
+  private holdPoint(st: Station): Vector3 {
+    return st.port().sub(this.app.rig.upos, new Vector3()).addScaledVector(st.axis, 14);
+  }
+
+  private holdQuat(st: Station): Quaternion {
+    // facing the port along the axis; "up" fixed in the station frame
+    const fwd = st.axis.clone().negate();
+    const up = Math.abs(fwd.z) < 0.9 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0);
+    return new Quaternion().setFromRotationMatrix(new Matrix4().lookAt(new Vector3(), fwd, up));
+  }
+
+  private updateDocking(dt: number): void {
+    const app = this.app, rig = app.rig;
+    const moving = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyR', 'KeyF'].some((k) => app.input.keys.has(k)) || Math.abs(rig.thrust) > 0.05;
+    this.dockCooldown = Math.max(0, this.dockCooldown - dt);
+    if (this.docked) {
+      const st = this.docked;
+      if (moving || !this.traffic.stations.includes(st)) {
+        this.docked = null;
+        this.dockCooldown = 20;
+        rig.upos.addVec(st.axis, 25);
+        app.hud.toast(`Undocked from ${st.name}`);
+        return;
+      }
+      rig.upos.addVec(this.holdPoint(st));
+      rig.stop();
+      return;
+    }
+    if (this.docking && moving && this.docking.t > 0.15) {
+      // the pilot takes the controls back
+      this.docking = null;
+      this.dockCooldown = 10;
+      app.hud.toast('Docking cancelled');
+    }
+    if (this.docking) {
+      const d = this.docking;
+      d.t = Math.min(1, d.t + dt / 3.5);
+      const s = d.t * d.t * (3 - 2 * d.t);
+      const target = this.holdPoint(d.station);
+      rig.upos.addVec(target.addScaledVector(d.from, 1 - s));
+      rig.quat.copy(d.q0).slerp(this.holdQuat(d.station), s);
+      rig.stop();
+      if (d.t >= 1) {
+        this.docked = d.station;
+        this.docking = null;
+        app.hud.toast(`Docked at ${d.station.name}. Thrust to undock.`);
+        if (app.vr.active) app.vr.flash(`Docked at ${d.station.name}`);
+        this.audio.chime();
+      }
+      return;
+    }
+    if (rig.autopilot || app.vr.traveling || this.dockCooldown > 0) return;
+    for (const st of this.traffic.stations) {
+      const rel = rig.upos.sub(st.port(), new Vector3());
+      const dist = rel.length();
+      if (dist > 400 || dist < 1) continue;
+      // in front of the port, roughly on the axis, and slow
+      if (rel.dot(st.axis) / dist > 0.75 && rig.speed < 400) {
+        const hold = this.holdPoint(st);
+        this.docking = { station: st, t: 0, from: hold.negate(), q0: rig.quat.clone() };
+        app.hud.toast(`Docking computer engaged: ${st.name}`);
+        break;
+      }
+    }
+  }
+
+  /** Touch down when coming in slowly over a solid surface. */
+  private updateLanding(dt: number): void {
+    const app = this.app, rig = app.rig;
+    void dt;
+    const a = rig.anchor;
+    if (this.landed) {
+      if (a !== this.landed || rig.altitude > 40) { this.landed = null; app.hud.toast('Lift-off'); }
+      return;
+    }
+    if (!(a instanceof Body) || a.kind === 'star' || a.isGasGiant || this.docked) return;
+    // (flight speed already scales with altitude, so coming down to 10 m is a gentle touchdown)
+    if (rig.altitude < 10 && !rig.autopilot) {
+      this.landed = a;
+      rig.stop();
+      // level the ship: local vertical up
+      const up = rig.upos.sub(a.upos, new Vector3()).normalize();
+      const fwd = rig.forward(new Vector3());
+      const flat = fwd.sub(up.clone().multiplyScalar(fwd.dot(up))).normalize();
+      if (flat.lengthSq() > 0.5) rig.quat.setFromRotationMatrix(new Matrix4().lookAt(new Vector3(), flat, up));
+      app.hud.toast(`Touchdown on ${a.name}!`);
+      if (app.vr.active) app.vr.flash(`Touchdown on ${a.name}!`);
+      this.audio.chime();
+    }
+  }
+
   private fillReadout(): void {
     const app = this.app, rig = app.rig, r = this.cockpit.readout;
     r.speed = formatSpeed(rig.speed);
     r.throttle = rig.thrust;
     r.boost = app.input.keys.has('ShiftLeft') || app.input.keys.has('ShiftRight');
     r.altitude = formatDistance(rig.altitude);
-    r.reference = rig.anchor?.name ?? 'deep space';
+    r.reference = this.docked ? `DOCKED · ${this.docked.name}` : this.landed ? `LANDED · ${this.landed.name}` : rig.anchor?.name ?? 'deep space';
     const sel = app.selection;
     if (sel) {
       const d = sel.upos.sub(rig.upos, new Vector3()).length();
