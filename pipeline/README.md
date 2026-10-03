@@ -18,6 +18,8 @@ bash pipeline/run_all.sh        # or: npm run data
 | `build_milkyway.py` | NASA SVS Deep Star Maps 2020 `milkyway_2020_4k.exr` (+ `hiptyc` layer and AT-HYG to measure its brightness response) | `sky/milkyway_4k.jpg`, `sky/manifest.json` |
 | `fetch_atmospheres.py` | NASA NSSDCA planetary fact sheets | `solar/atmospheres.json` |
 | `fetch_gaia.py` | ESA Gaia Archive TAP (Gaia DR3, d < 100 pc subset) | `data-raw/gaia_dr3_100pc.csv` |
+| `build_terrain.py` | SVS LOLA LDEM 16 ppd, USGS MOLA 463 m and MESSENGER 665 m DEMs | `terrain/{moon,mars,mercury}.png` (16-bit heights in RGB, 2048x1024) + `terrain/terrain.json` |
+| `build_terrain_patches.py` | PDS LOLA `LDEM_128.IMG` and the MOLA 463 m mosaic, read row by row with range requests | `terrain/patches/*.png` around the landmarks, listed in `terrain/terrain.json` |
 | `build_stars.py` | AT-HYG v4.0, HYG v4.4, the Gaia subset | `stars/` (CC BY-SA 4.0) and `stars-gaia/` (CC BY-NC 3.0 IGO): brightest-first octree tiles, `named.json` |
 
 ## Moon calibration

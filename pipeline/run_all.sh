@@ -21,3 +21,6 @@ python3 build_blackholes.py         # BlackCAT + SIMBAD + published masses -> pu
 python3 build_exoplanets.py        # NASA Exoplanet Archive -> public/data/exoplanets.json
 python3 build_spacecraft.py        # JPL Horizons trajectories -> public/data/spacecraft.json
 python3 build_galaxies.py          # SIMBAD nearby galaxies -> public/data/galaxies.json
+python3 build_deepsky.py           # SIMBAD + Sharpless/RCW nebulae and clusters -> public/data/deepsky.json
+python3 build_terrain.py           # LOLA / MOLA / MESSENGER global heights -> public/data/terrain
+python3 build_terrain_patches.py   # sharper LOLA 128 ppd / MOLA patches around landmarks (range requests)
