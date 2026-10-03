@@ -31,5 +31,105 @@
    "credit": "NASA/JHUAPL/CIW, MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology",
    "source": "https://planetarymaps.usgs.gov/mosaic/Mercury_Messenger_USGS_DEM_Global_665m_v2.tif"
   }
- }
+ },
+ "patches": [
+  {
+   "file": "patches/apollo11.png",
+   "width": 512,
+   "height": 512,
+   "offset": -2646.0,
+   "scale": 0.5,
+   "lat1": 2.6796875,
+   "lat0": -1.3203125,
+   "lon0": 21.46875,
+   "lon1": 25.46875,
+   "name": "apollo11",
+   "body": "moon",
+   "credit": "LRO LOLA LDEM_128 (PDS Geosciences)"
+  },
+  {
+   "file": "patches/tycho.png",
+   "width": 768,
+   "height": 768,
+   "offset": -3538.0,
+   "scale": 0.5,
+   "lat1": -40.3046875,
+   "lat0": -46.3046875,
+   "lon0": 345.6328125,
+   "lon1": 351.6328125,
+   "name": "tycho",
+   "body": "moon",
+   "credit": "LRO LOLA LDEM_128 (PDS Geosciences)"
+  },
+  {
+   "file": "patches/copernicus.png",
+   "width": 768,
+   "height": 768,
+   "offset": -3685.0,
+   "scale": 0.5,
+   "lat1": 12.625,
+   "lat0": 6.625,
+   "lon0": 336.9140625,
+   "lon1": 342.9140625,
+   "name": "copernicus",
+   "body": "moon",
+   "credit": "LRO LOLA LDEM_128 (PDS Geosciences)"
+  },
+  {
+   "file": "patches/olympus.png",
+   "width": 1024,
+   "height": 1024,
+   "offset": -2802.25,
+   "scale": 0.5,
+   "lat1": 26.65625,
+   "lat0": 10.65625,
+   "lon0": -141.8046875,
+   "lon1": -125.8046875,
+   "name": "olympus",
+   "body": "mars",
+   "credit": "MGS MOLA DEM 463 m (USGS)"
+  },
+  {
+   "file": "patches/valles.png",
+   "width": 1024,
+   "height": 1024,
+   "offset": -5737.5,
+   "scale": 0.5,
+   "lat1": -5.8984375,
+   "lat0": -21.8984375,
+   "lon0": -67.203125,
+   "lon1": -51.203125,
+   "name": "valles",
+   "body": "mars",
+   "credit": "MGS MOLA DEM 463 m (USGS)"
+  },
+  {
+   "file": "patches/gale.png",
+   "width": 512,
+   "height": 512,
+   "offset": -4607.0,
+   "scale": 0.5,
+   "lat1": -2.5859375,
+   "lat0": -6.5859375,
+   "lon0": 135.4375,
+   "lon1": 139.4375,
+   "name": "gale",
+   "body": "mars",
+   "credit": "MGS MOLA DEM 463 m (USGS)"
+  },
+  {
+   "file": "patches/jezero.png",
+   "width": 512,
+   "height": 512,
+   "offset": -4166.0,
+   "scale": 0.5,
+   "lat1": 20.4453125,
+   "lat0": 16.4453125,
+   "lon0": 75.4453125,
+   "lon1": 79.4453125,
+   "name": "jezero",
+   "body": "mars",
+   "credit": "MGS MOLA DEM 463 m (USGS)"
+  }
+ ]
 }
