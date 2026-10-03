@@ -6,13 +6,27 @@ export const BODY_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
 ${PROJECT_PARS}
+uniform float uLumpy;     // irregular shape of small bodies (relative radius variation)
+uniform float uSeed;
 varying vec3 vNormalBF;   // body-fixed unit normal
 varying vec3 vPosView;    // camera-relative world position (m)
 varying vec2 vUv;
+float vh3(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float vn3(vec3 p) {
+  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(vh3(i), vh3(i + vec3(1,0,0)), f.x), mix(vh3(i + vec3(0,1,0)), vh3(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(vh3(i + vec3(0,0,1)), vh3(i + vec3(1,0,1)), f.x), mix(vh3(i + vec3(0,1,1)), vh3(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
 void main() {
   vNormalBF = normalize(position);
   vUv = uv;
-  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vec3 pos = position;
+  if (uLumpy > 0.0) {
+    vec3 n = normalize(position);
+    float l = 0.6 * vn3(n * 1.3 + uSeed) + 0.3 * vn3(n * 2.9 + uSeed * 1.7) + 0.1 * vn3(n * 6.1 + uSeed * 2.3);
+    pos *= 1.0 + uLumpy * (l - 0.5) * 2.0;
+  }
+  vec4 wp = modelMatrix * vec4(pos, 1.0);
   vPosView = wp.xyz;
   gl_Position = projectView(viewMatrix * wp);
   #include <logdepthbuf_vertex>
@@ -38,6 +52,13 @@ uniform float uAlbedoScale;   // multiplies texture (linear) to obtain reflectan
 uniform float uAirless;       // 1 = Lommel-Seeliger, 0 = Lambert
 uniform float uBands;         // 1 = procedural gas-giant banding
 uniform float uSeed;
+uniform float uProc;          // 1 = procedural surface (bodies without a map)
+uniform float uIcy;           // 0 rock .. 1 ice (bright, cracked, fresh crater rays)
+uniform vec3 uTint;           // secondary colour of the surface's variegation
+uniform float uCraters;       // crater density 0..1
+uniform float uLumpy;
+uniform float uRadiusM;       // mean radius (m), for bump heights
+uniform float uMapW;          // map width (texels) for close-up detail; 0 = none
 uniform vec3 uSunDir;         // world-space unit vector body -> Sun
 uniform float uSunIrr;        // solar irradiance at the body (PI at 1 AU)
 uniform vec3 uSunColor;
@@ -63,6 +84,51 @@ vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(
 
 float hash1(float n) { return fract(sin(n) * 43758.5453123); }
 float noise1(float x) { float i = floor(x); float f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(hash1(i), hash1(i + 1.0), f); }
+float bh3(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+vec3 bh33(vec3 p) {
+  p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
+  return fract(sin(p) * 43758.5453123);
+}
+float bn3(vec3 p) {
+  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(bh3(i), bh3(i + vec3(1,0,0)), f.x), mix(bh3(i + vec3(0,1,0)), bh3(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(bh3(i + vec3(0,0,1)), bh3(i + vec3(1,0,1)), f.x), mix(bh3(i + vec3(0,1,1)), bh3(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float bfbm(vec3 p) { return 0.5 * bn3(p) + 0.3 * bn3(p * 2.03 + 3.1) + 0.2 * bn3(p * 4.1 + 7.7); }
+// One scale of craters on the unit sphere: height (radius units) and freshness (bright ejecta).
+// Only the 2x2x2 block of cells nearest to the point is visited (crater influence stays within
+// half a cell: radius <= 0.36, rim out to 1.35 radii), 8 cells instead of 27.
+float craters(vec3 p, float freq, float seed, float density, out float fresh) {
+  vec3 q = p * freq + seed;
+  vec3 i = floor(q), f = fract(q);
+  vec3 b = step(0.5, f) - 1.0;
+  float h = 0.0;
+  fresh = 0.0;
+  for (int x = 0; x <= 1; x++) for (int y = 0; y <= 1; y++) for (int z = 0; z <= 1; z++) {
+    vec3 g = b + vec3(float(x), float(y), float(z));
+    vec3 c = i + g;
+    if (bh3(c + 11.0) > density) continue;
+    vec3 o = bh33(c) * 0.6 + 0.2;
+    float rc = 0.14 + 0.22 * bh3(c + 5.0);
+    float d = length(g + o - f) / rc;
+    if (d > 1.35) continue;
+    float bowl = d < 1.0 ? (d * d - 1.0) * 0.55 : 0.0;
+    float rim = 0.22 * exp(-pow((d - 1.0) / 0.22, 2.0));
+    h += (bowl + rim) * rc / freq;
+    fresh = max(fresh, bh3(c + 23.0) * (1.0 - smoothstep(0.7, 1.5, d)));
+  }
+  return h;
+}
+// Normal of a surface displaced by height h (metres) along n, from screen-space derivatives
+// (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU").
+vec3 bumpNormal(vec3 pos, vec3 n, float h) {
+  vec3 dpdx = dFdx(pos), dpdy = dFdy(pos);
+  float dhdx = dFdx(h), dhdy = dFdy(h);
+  vec3 r1 = cross(dpdy, n), r2 = cross(n, dpdx);
+  float det = dot(dpdx, r1);
+  vec3 grad = sign(det) * (dhdx * r1 + dhdy * r2);
+  return normalize(abs(det) * n - grad);
+}
 
 void main() {
   vec3 nB = normalize(vNormalBF);
@@ -82,6 +148,35 @@ void main() {
     nP = normalize(uBodyToWorld * pB);
     if (uWater > 0.5) water = smoothstep(0.35, 0.65, rel.b);
   }
+  // irregular small bodies: the true (displaced) surface normal
+  if (uLumpy > 0.0) {
+    vec3 ng = normalize(cross(dFdx(vPosView), dFdy(vPosView)));
+    if (dot(ng, vPosView - uBodyCenter) < 0.0) ng = -ng;
+    nP = ng;
+    mu0g = dot(nP, uSunDir);
+  }
+  // procedural surface (bodies without a map) or fine detail beyond a map's resolution
+  float freshAll = 0.0;
+  float hProc = 0.0;
+  if (uProc > 0.5) {
+    float f1, f2, f3;
+    float f0;
+    hProc = 1.6 * craters(nB, 1.4, uSeed + 3.0, 0.3 * uCraters, f0)
+          + craters(nB, 3.0, uSeed, 0.55 * uCraters, f1) + craters(nB, 8.0, uSeed + 17.0, 0.7 * uCraters, f2)
+          + craters(nB, 21.0, uSeed + 41.0, 0.85 * uCraters, f3) + 0.015 * (bfbm(nB * 5.0 + uSeed) - 0.5);
+    freshAll = max(f1, max(f2 * 0.8, f3 * 0.6));
+  } else if (uMapW > 0.0) {
+    float texPerPx = fwidth(vUv.x) * uMapW;
+    float w = smoothstep(0.7, 0.2, texPerPx);           // fades in when a texel covers > ~1.5 pixels
+    if (w > 0.0) {
+      float fd;
+      float fq = uMapW / 25.0;
+      hProc = w * (craters(nB, fq, uSeed, 0.6, fd) + 0.4 * craters(nB, fq * 2.7, uSeed + 9.0, 0.7, fd));
+    }
+  }
+  // relief fades towards the limb, where it would only alias into a ragged silhouette
+  float limbFade = smoothstep(0.05, 0.4, dot(nP, V));
+  if (hProc != 0.0) nP = bumpNormal(vPosView, nP, hProc * uRadiusM * (uProc > 0.5 ? 1.0 : 0.6) * limbFade);
   float mu0 = dot(nP, uSunDir);
   float mu = max(dot(nP, V), 0.0);
 
@@ -92,6 +187,13 @@ void main() {
     albedo = srgbToLinear(t) * uAlbedoScale;
   } else {
     albedo = uColor * uAlbedoScale;
+    if (uProc > 0.5) {
+      // patchy terrain of two materials, darker or brighter crater floors, fresh bright ejecta
+      float v = bfbm(nB * 2.2 + uSeed * 0.7);
+      albedo *= mix(vec3(1.0), uTint, smoothstep(0.35, 0.75, v)) * (0.75 + 0.5 * bfbm(nB * 9.0 + uSeed));
+      albedo *= 1.0 + freshAll * (0.35 + 0.6 * uIcy);
+      if (uIcy > 0.5) albedo *= 0.92 + 0.16 * smoothstep(0.48, 0.5, abs(bn3(nB * 6.0 + uSeed) - 0.5) + 0.48); // cracks
+    }
   }
   if (uBands > 0.5) {
     float lat = asin(clamp(vNormalBF.z, -1.0, 1.0));
@@ -166,6 +268,28 @@ ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
+/** Uniforms of a star's surface (see StarLook.ts). */
+export const STAR_LOOK_UNIFORMS = /* glsl */ `
+uniform float uSeed;
+uniform float uGranFreq;
+uniform float uGranAmp;
+uniform float uSpots;
+uniform float uSpotLat;
+uniform float uFaculae;
+uniform float uLimbA;
+uniform float uLimbB;
+uniform float uRotRate;
+uniform float uGravDark;
+uniform vec3 uAxis;
+uniform float uFlares;
+`;
+
+/**
+ * A star's photosphere: granulation (cellular, bright cells with dark lanes) at the star's own
+ * scale, giant convection cells on supergiants, spots with umbra/penumbra in the star's active
+ * latitudes, faculae brightening towards the limb, differential rotation, gravity darkening on fast
+ * rotators, quadratic limb darkening, and occasional flares on active red dwarfs.
+ */
 export const STAR_FRAG = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
@@ -174,24 +298,130 @@ uniform float uRadiance;    // mean disk radiance (photometric units)
 uniform float uExposure;
 uniform float uTime;
 uniform mat3 uBodyToWorld;
+${STAR_LOOK_UNIFORMS}
 varying vec3 vNormalBF;
 varying vec3 vPosView;
 varying vec2 vUv;
-float h3(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float h3(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+vec3 h33(vec3 p) {
+  p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)));
+  return fract(sin(p) * 43758.5453123);
+}
 float n3(vec3 p) {
   vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(mix(h3(i), h3(i + vec3(1,0,0)), f.x), mix(h3(i + vec3(0,1,0)), h3(i + vec3(1,1,0)), f.x), f.y),
              mix(mix(h3(i + vec3(0,0,1)), h3(i + vec3(1,0,1)), f.x), mix(h3(i + vec3(0,1,1)), h3(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
+// cellular noise: x = distance to the nearest cell centre, y = to the second nearest
+vec2 cells(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  float d1 = 9.0, d2 = 9.0;
+  for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
+    vec3 g = vec3(float(x), float(y), float(z));
+    vec3 o = h33(i + g);
+    float d = length(g + o - f);
+    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+  }
+  return vec2(d1, d2);
+}
+float fbm3(vec3 p) { return 0.55 * n3(p) + 0.3 * n3(p * 2.1 + 7.0) + 0.15 * n3(p * 4.3 + 13.0); }
+vec3 rotateAbout(vec3 v, vec3 k, float a) { float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c); }
+
 void main() {
   vec3 nW = normalize(uBodyToWorld * vNormalBF);
   vec3 V = normalize(-vPosView);
   float mu = clamp(dot(nW, V), 0.0, 1.0);
-  // Linear limb darkening, u = 0.6 (visible band); mean over the disk = 1 - u/3
-  float ld = (1.0 - 0.6 * (1.0 - mu)) / 0.8;
-  float gran = 0.92 + 0.16 * n3(vNormalBF * 180.0 + uTime * 0.02);
-  vec3 c = uColor * uRadiance * ld * gran;
-  gl_FragColor = vec4(min(c * uExposure, vec3(6.0e4)), 1.0);
+  // surface coordinates rotating with the star (equator faster: differential rotation)
+  float lat = dot(vNormalBF, uAxis);
+  vec3 q = rotateAbout(normalize(vNormalBF), uAxis, -uRotRate * uTime * (1.0 - 0.25 * lat * lat)) + uSeed;
+  // granulation: bright cell centres, dark intergranular lanes, slowly evolving. Cells are warped
+  // so they are irregular, and fade out once they are smaller than a pixel (no moiré).
+  vec3 gp = q * uGranFreq;
+  float cellPx = 1.0 / max(length(fwidth(gp)), 1e-6);           // pixels per cell
+  float gVis = smoothstep(1.5, 5.0, cellPx);
+  vec3 warp = vec3(n3(gp * 0.35 + 5.0), n3(gp * 0.35 + 17.0), n3(gp * 0.35 + 29.0)) - 0.5;
+  vec2 c = cells(gp + warp * 0.9 + vec3(0.0, 0.0, uTime * 0.03));
+  // few, huge cells (supergiants) have broad, soft lanes; many small cells (dwarfs) sharp ones
+  float soft = smoothstep(60.0, 6.0, uGranFreq);
+  float lanes = smoothstep(0.02, 0.28 + 0.2 * n3(gp * 0.5) + 0.5 * soft, c.y - c.x);
+  float blob = 1.0 - smoothstep(0.0, 0.75 + 0.4 * soft, c.x);   // bright cell centres
+  float gran = 1.0 + uGranAmp * gVis * (mix(lanes * 0.9 + blob * 0.5, lanes * 0.35 + blob * 1.1 + 0.6 * (fbm3(gp * 1.7) - 0.5), soft) - 0.8);
+  // giant convection cells / supergranulation (large on supergiants), visible from farther
+  float bigVis = smoothstep(1.5, 5.0, cellPx * 6.0);
+  gran *= 1.0 + 0.9 * uGranAmp * bigVis * (fbm3(q * max(1.6, uGranFreq * 0.12)) - 0.5);
+  // spots in the active latitudes: umbra and penumbra
+  float band = exp(-pow((abs(lat) - uSpotLat) / 0.22, 2.0));
+  float sf = fbm3(q * 7.0 + 31.0) * band;
+  float thr = 1.0 - clamp(uSpots * 2.2, 0.0, 0.95);
+  float pen = smoothstep(thr - 0.06, thr, sf);
+  float umb = smoothstep(thr + 0.03, thr + 0.08, sf);
+  float spot = pen * 0.45 + umb * 0.5;
+  // faculae: bright network around active regions, visible towards the limb
+  float fac = uFaculae * smoothstep(thr - 0.2, thr - 0.05, sf) * (1.0 - spot) * pow(1.0 - mu, 1.5) * 0.6;
+  // limb darkening (quadratic law, normalised to unit mean) and gravity darkening
+  float x = 1.0 - mu;
+  float ld = (1.0 - uLimbA * x - uLimbB * x * x) / (1.0 - uLimbA / 3.0 - uLimbB / 6.0);
+  float gd = 1.0 - uGravDark * (1.0 - lat * lat);
+  vec3 col = uColor * ld * gd * gran * (1.0 - spot) * (1.0 + fac);
+  // cooler (redder) spots, lanes and equator; hotter cell centres a little whiter
+  float cool = clamp(spot * 1.4 + uGravDark * (1.0 - lat * lat) + (1.0 - gran) * 1.5, 0.0, 1.0);
+  col *= mix(vec3(1.0), vec3(1.0, 0.78, 0.6), cool);
+  // shown a little more saturated than the blackbody (bright disks otherwise wash out to white)
+  col = max(mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, 1.35), 0.0);
+  // flares on active red dwarfs: a bright patch that flashes up and fades
+  if (uFlares > 0.0) {
+    float epoch = floor(uTime / 23.0);
+    if (h3(vec3(epoch, uSeed, 3.0)) < uFlares * 2.0) {
+      vec3 fp = normalize(h33(vec3(epoch, uSeed, 7.0)) * 2.0 - 1.0);
+      float age = fract(uTime / 23.0) * 23.0;
+      float f = exp(-age / 3.0) * smoothstep(0.0, 0.5, age) * 4.0;
+      col += vec3(0.9, 0.95, 1.0) * f * exp(-pow(length(normalize(vNormalBF) - fp) / 0.08, 2.0));
+    }
+  }
+  gl_FragColor = vec4(min(col * uRadiance * uExposure, vec3(6.0e4)), 1.0);
+${OUTPUT_FRAGMENT}
+  #include <logdepthbuf_fragment>
+}`;
+
+/** Camera-facing corona around a resolved star: inner glow, streamers, prominences. */
+export const CORONA_VERT = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
+varying vec2 vXY;
+void main() {
+  vXY = position.xy;
+  gl_Position = projectView(modelViewMatrix * vec4(position, 1.0));
+  #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
+}`;
+export const CORONA_FRAG = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+uniform vec3 uColor;
+uniform float uIntensity;  // display value of the glow at the limb
+uniform float uQuad;       // quad half-size in star radii
+uniform float uCorona;
+uniform float uProm;
+uniform float uSeed;
+uniform float uTime;
+varying vec2 vXY;
+float h2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float n2(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y); }
+void main() {
+  float r = length(vXY) * uQuad;          // in star radii
+  if (r < 0.985) discard;
+  float a = atan(vXY.y, vXY.x);
+  // streamers: angular structure that widens outwards (periodic in angle)
+  float st = n2(vec2(cos(a) * 3.0 + uSeed, sin(a) * 3.0 + uTime * 0.01)) * 0.7 + n2(vec2(cos(a) * 9.0, sin(a) * 9.0 + uSeed)) * 0.3;
+  float glow = uCorona * (0.55 * exp(-(r - 1.0) * 7.0) + (0.05 + 0.12 * st) / (r * r));
+  glow *= 1.0 - smoothstep(0.7, 1.0, length(vXY));
+  // prominences: bright loops just above the limb
+  float pn = n2(vec2(cos(a) * 14.0 + uSeed, sin(a) * 14.0 + r * 9.0 - uTime * 0.02));
+  float prom = uProm * pow(pn, 7.0) * 6.0 * smoothstep(1.16, 1.0, r);
+  vec3 c = uColor * glow + vec3(1.0, 0.32, 0.42) * prom;
+  gl_FragColor = vec4(c * uIntensity, 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;

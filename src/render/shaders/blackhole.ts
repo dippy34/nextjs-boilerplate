@@ -52,6 +52,12 @@ uniform float uExposure;
 uniform float uTime;
 uniform int uMaxSteps;
 uniform float uStepK;
+uniform float uDiskSeed;     // per-hole look of the gas
+uniform float uSpiral;       // strength of spiral arms (tidal spiral shocks in binaries)
+uniform float uArms;
+uniform float uStreakFreq;
+uniform float uAngFreq;
+uniform float uWarp;
 varying vec3 vWorld;
 
 const float LUT_LOG_MIN = 2.5;
@@ -78,8 +84,10 @@ float vnoise(vec3 p) {
 // slowed-down Keplerian angular speed. Two layers cross-fade so the shear never winds up.
 float streaks(float lr, float ang, float seed) {
   float n = 0.0, amp = 0.6, fr = 1.0;
+  // warp the radius a little so streaks wander instead of forming perfect circles
+  lr += uWarp * 0.12 * (vnoise(vec3(cos(ang) * 1.3, sin(ang) * 1.3, lr * 2.0 + seed + uDiskSeed)) - 0.5);
   for (int o = 0; o < 3; o++) {
-    vec3 q = vec3(cos(ang) * 2.2 * fr, sin(ang) * 2.2 * fr, lr * 9.0 * fr + seed);
+    vec3 q = vec3(cos(ang) * uAngFreq * fr, sin(ang) * uAngFreq * fr, lr * uStreakFreq * fr + seed + uDiskSeed);
     n += amp * vnoise(q);
     amp *= 0.5; fr *= 2.3;
   }
@@ -93,7 +101,10 @@ float diskTexture(float r, float ang) {
   float n1 = streaks(lr, ang - w * p1 * P, 0.0);
   float n2 = streaks(lr, ang - w * p2 * P, 37.0);
   float n = n1 * (1.0 - abs(2.0 * p1 - 1.0)) + n2 * (1.0 - abs(2.0 * p2 - 1.0));
-  return smoothstep(0.15, 0.95, n);
+  float t = smoothstep(0.15, 0.95, n);
+  // logarithmic spiral arms (pitch ~15 degrees), turning slowly
+  float sp = 0.5 + 0.5 * cos(uArms * (ang - lr / 0.27 - uTime * 0.05 + uDiskSeed));
+  return t * mix(1.0, 0.35 + 1.3 * sp * sp, uSpiral);
 }
 
 // Light from the disk where the traced ray crosses it at P (rs) moving along k (eye -> scene).

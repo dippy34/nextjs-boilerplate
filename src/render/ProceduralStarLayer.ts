@@ -73,7 +73,7 @@ export class ProceduralStarLayer {
       this.workers.push(w);
     }
     this.template = new ShaderMaterial({
-      vertexShader: STAR_VERT, fragmentShader: STAR_FRAG,
+      name: 'procedural-stars', vertexShader: STAR_VERT, fragmentShader: STAR_FRAG,
       uniforms: {
         ...psf, uOffset: { value: new Vector3() }, uScale: { value: 1 }, uAbsMin: { value: ABS_MIN }, uAbsStep: { value: ABS_STEP },
         uHideRadius: { value: 0 }, uExtinction: { value: 0 }, uColorLut: { value: colorLut },

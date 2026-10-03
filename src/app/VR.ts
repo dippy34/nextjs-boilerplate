@@ -369,7 +369,7 @@ export class VRSupport {
       if (obj.name === 'Saturn' || obj.name === 'Uranus') return obj.radius * 4.6;
       return Math.max(obj.radius / Math.sin((24 * Math.PI) / 180), 3e3);
     }
-    if (obj instanceof CatalogStar) return Math.max(obj.radius * 9, 1e9);
+    if (obj instanceof CatalogStar) return Math.max(obj.radius * 6, 2e7);
     if (obj instanceof BlackHole) return obj.radius * 18;
     if (obj instanceof MilkyWay) return obj.radius * 2.6;
     return obj.radius > 0 ? obj.radius * 80 : 3e7;

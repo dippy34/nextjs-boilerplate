@@ -31,7 +31,7 @@ export class GalaxyGlow {
     this.target = make(512);
     this.cubeCam = new CubeCamera(0.1, 10, this.target);
     this.mat = new ShaderMaterial({
-      vertexShader: GLOW_VERT, fragmentShader: glowFrag(DUST_NORM),
+      name: 'galaxy-glow', vertexShader: GLOW_VERT, fragmentShader: glowFrag(DUST_NORM),
       uniforms: {
         uCam: { value: new Vector3() }, uToGal: { value: new Matrix3().copy(GALAXY.toGalM) },
         uNear: { value: GLOW_NEAR }, uSteps: { value: 128 }, uSeed: { value: 0 },

@@ -11,11 +11,13 @@ import type { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
 import type { AtmosphereSpec } from './Atmospheres';
 import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
+import { StarCorona } from './StarCorona';
+import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 interface MapInfo {
-  file: string; channels: string; lonLeft: number; credit: string;
+  file: string; channels: string; lonLeft: number; credit: string; width: number; height: number;
   /** optional high-resolution tier, loaded only while the body fills a large part of the view */
   hi?: { file: string; width: number; height: number };
 }
@@ -24,8 +26,8 @@ interface TextureManifest {
 }
 
 /** pixel radius above which the high-resolution map is wanted, and below which it may be released */
-const HI_WANT_PX = 420;
-const HI_KEEP_PX = 180;
+const HI_WANT_PX = 260;
+const HI_KEEP_PX = 140;
 const HI_RELEASE_S = 20;
 const RELIEF_WANT_PX = 40;
 
@@ -87,7 +89,7 @@ ${PSF_VERTEX}
 void main() {
   float energy;
   float radius = psfSetup(aIrr, energy);
-  if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+  if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0; return; }
   gl_Position = projectView(viewMatrix * vec4(position, 1.0));
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
@@ -129,6 +131,9 @@ export class BodiesLayer {
   private bitmapLoader = new ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none' });
   private hiTex = new Map<string, { tex: Texture | null; lastWanted: number }>();
   private glare: Mesh | null = null;
+  /** the Sun's corona and surface look */
+  private sunCorona: StarCorona | null = null;
+  private sunLook: StarLook | null = null;
   /** camera-facing glare around the Sun (VR only: the desktop path has a bloom pass) */
   glareOn = false;
   /** allow the 8k map tier (off in VR: uploading an 8k texture stalls a headset frame) */
@@ -302,6 +307,7 @@ export class BodiesLayer {
       if (r) out.push(r);
     }
     if (this.glare) out.push(this.glare);
+    if (this.sunCorona) out.push(this.sunCorona.mesh);
     return out;
   }
 
@@ -310,6 +316,7 @@ export class BodiesLayer {
     const mapInfo = texKey ? this.manifest.maps[texKey] : undefined;
     const isStar = b.kind === 'star';
     const mat = new ShaderMaterial({
+      name: isStar ? 'sun-surface' : 'body',
       vertexShader: BODY_VERT,
       fragmentShader: isStar ? STAR_FRAG : BODY_FRAG,
       uniforms: {
@@ -323,7 +330,9 @@ export class BodiesLayer {
         uRelief: { value: null }, uHasRelief: { value: 0 }, uWater: { value: 0 },
         uAtmo: { value: 0 }, uRp: { value: b.radii[0] }, uBetaR: { value: new Vector3() }, uHR: { value: 8000 },
         uBetaMe: { value: new Vector3() }, uHM: { value: 1200 },
-        uSeed: { value: (b.id % 97) * 1.37 },
+        uSeed: { value: hashString(b.name) * 500 },
+        uProc: { value: 0 }, uIcy: { value: 0 }, uTint: { value: new Vector3(1, 1, 1) }, uCraters: { value: 0 },
+        uLumpy: { value: 0 }, uRadiusM: { value: b.radius }, uMapW: { value: 0 },
         uSunDir: { value: new Vector3(1, 0, 0) },
         uSunIrr: { value: Math.PI },
         uSunColor: { value: new Vector3(...this.sunColor) },
@@ -332,6 +341,7 @@ export class BodiesLayer {
         uBodyCenter: { value: new Vector3() },
         uHasRings: { value: 0 }, uRingTex: { value: null }, uRingRadii: { value: new Vector3() },
         uRadiance: { value: 1 }, uTime: { value: 0 },
+        ...(isStar ? starLookUniforms(this.sunLook = starLook('sun', b.teff, 1, 4.83, true)) : {}),
         uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       side: FrontSide,
@@ -355,6 +365,7 @@ export class BodiesLayer {
       const geomAlbedo = b.meta.albedo as number | undefined;
       const known = geomAlbedo !== undefined;
       const lambertRho = Math.min(1, 1.5 * b.albedo);
+      this.surfaceLook(b, u, texKey, mapInfo?.width ?? 0);
       if (texKey) {
         this.texture(texKey).then(({ tex, meanLum }) => {
           u.uMap.value = tex;
@@ -379,8 +390,67 @@ export class BodiesLayer {
         u.uHM.value = atmo.HM;
       }
     }
-    if (isStar) this.createGlare(b);
+    if (isStar) {
+      this.createGlare(b);
+      this.sunCorona = new StarCorona();
+      this.group.add(this.sunCorona.mesh);
+    }
     return mesh;
+  }
+
+  /**
+   * Every solid body gets its own look: bodies without a map a seeded procedural surface (crater
+   * fields at three scales, two-tone terrain, bright fresh ejecta, cracks on ices) coloured by type,
+   * small ones an irregular shape, and mapped bodies fine crater detail below the map's resolution.
+   */
+  private surfaceLook(b: Body, u: Record<string, { value: unknown }>, texKey: string | null, mapWidth: number): void {
+    const h = (k: string) => hashString(b.name + k);
+    const solid = !b.isGasGiant && b.kind !== 'star' && !['Venus', 'Earth', 'Titan'].includes(b.name);
+    if (!solid) return;
+    const R = b.radius;
+    u.uLumpy.value = (R < 20e3 ? 0.22 : R < 80e3 ? 0.14 : R < 200e3 ? 0.07 : 0) * (texKey ? 0.4 : 1) * (0.7 + 0.6 * h('l'));
+    // geologically young surfaces have few craters
+    const young = ['Io', 'Europa', 'Enceladus', 'Triton'].includes(b.name);
+    // bright, frost-covered dwarf planets (Eris, Makemake) look smooth
+    const frosty = (b.kind === 'tno' || b.kind === 'dwarf') && b.meta.albedo !== undefined && b.albedo > 0.6;
+    u.uCraters.value = young ? 0.15 : frosty ? 0.2 : b.kind === 'tno' ? 0.55 : 0.85 + 0.15 * h('c');
+    if (texKey) {
+      u.uMapW.value = young ? 0 : mapWidth;
+      return;
+    }
+    u.uProc.value = 1;
+    // ice or rock: from the measured albedo when there is one, otherwise by distance from the Sun
+    // (moons beyond Jupiter's orbit are icy)
+    const measured = b.meta.albedo !== undefined;
+    const outer = b.pos.length() > 4.5 * AU;
+    const a = measured ? b.albedo : outer ? 0.6 : b.albedo;
+    const icy = a > 0.45 ? 1 : a > 0.3 ? 0.5 : 0;
+    u.uIcy.value = icy;
+    // colour by kind of surface, with a per-body variation (the data has albedos, rarely colours)
+    const vary = (c: [number, number, number], k: number): [number, number, number] =>
+      [c[0] * (1 + k * (h('r') - 0.5)), c[1] * (1 + k * (h('g') - 0.5)), c[2] * (1 + k * (h('b') - 0.5))];
+    const hasColour = b.color.some((v, i) => Math.abs(v - [0.6, 0.6, 0.6][i]) > 1e-3);
+    let base: [number, number, number];
+    let tint: [number, number, number];
+    if (b.kind === 'tno') {
+      // Kuiper-belt objects range from neutral grey to very red (tholins)
+      const red = h('red');
+      base = vary([1.0, 0.82 - 0.25 * red, 0.68 - 0.35 * red], 0.15);
+      tint = [0.85 + 0.3 * h('t'), 0.75, 0.65];
+    } else if (icy >= 1) {
+      base = vary([0.93, 0.95, 0.98], 0.08);
+      tint = [0.8, 0.86, 0.95];
+    } else if (a < 0.1) {
+      base = vary([0.42, 0.4, 0.38], 0.15); // carbonaceous
+      tint = [0.75, 0.68, 0.6];
+    } else {
+      base = vary([0.85, 0.76, 0.66], 0.2); // stony
+      tint = [0.9, 0.85, 0.8];
+    }
+    if (hasColour) base = [b.color[0], b.color[1], b.color[2]];
+    (u.uColor.value as Vector3).set(...base);
+    (u.uTint.value as Vector3).set(...tint);
+    b.color = base;
   }
 
   private createGlare(b: Body): void {
@@ -541,7 +611,11 @@ export class BodiesLayer {
       const hi = want ? this.wantHi(key, now) : null;
       const lo = this.loadedTex.get(key)?.tex ?? null;
       const tex = hi ?? lo;
-      if (tex && u.uMap.value !== tex) u.uMap.value = tex;
+      if (tex && u.uMap.value !== tex) {
+        u.uMap.value = tex;
+        // close-up detail is scaled to the map in use
+        if ((u.uMapW.value as number) > 0) u.uMapW.value = hi ? this.manifest.maps[key].hi!.width : this.manifest.maps[key].width;
+      }
     }
     const rk = this.reliefKey(b);
     if (rk && pixelRadius > RELIEF_WANT_PX) this.requestRelief(rk, u);
@@ -560,8 +634,17 @@ export class BodiesLayer {
   }
   private reliefRequested = new Set<string>();
 
-  /** VR: glare quad around the resolved Sun, facing the viewer. */
+  /** VR: glare quad around the resolved Sun, facing the viewer; and the Sun's corona. */
   private updateGlare(viewQuat?: Quaternion): void {
+    const sv = this.views.get(this.system.sun);
+    if (this.sunCorona && this.sunLook) {
+      if (sv && sv.resolved && sv.pixelRadius > 1.5 && viewQuat) {
+        const c = blackbodyRGB(this.system.sun.teff);
+        const L = luminance(c);
+        this.sunCorona.update(sv.rel, this.system.sun.radius, viewQuat, [c[0] / L, c[1] / L, c[2] / L],
+          this.surfaceExposure.value * (AU / SUN_RADIUS) ** 2, this.sunLook, this.time);
+      } else this.sunCorona.hide();
+    }
     const g = this.glare;
     if (!g) return;
     const sun = this.system.sun;

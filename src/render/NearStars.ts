@@ -1,13 +1,15 @@
-import { AdditiveBlending, BufferAttribute, BufferGeometry, DynamicDrawUsage, Group, Matrix3, Matrix4, Mesh, Points, ShaderMaterial, SphereGeometry, Vector3 } from 'three';
+import { AdditiveBlending, BufferAttribute, BufferGeometry, DynamicDrawUsage, Group, Matrix3, Mesh, Points, Quaternion, type Quaternion as Q, ShaderMaterial, SphereGeometry, Vector3 } from 'three';
 import { blackbodyRGB, luminance, magToIrradiance } from '../astro/photometry';
-import { PC } from '../core/units';
+import { PC, SUN_RADIUS } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { CatalogStar } from '../universe/Stars';
 import { BODY_VERT, STAR_FRAG } from './shaders/body';
+import { StarCorona } from './StarCorona';
+import { applyStarLook, starLook, starLookUniforms, type StarLook } from './StarLook';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
-const SPRITE_VERT = /* glsl */ `
+export const SPRITE_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
 ${PROJECT_PARS}
@@ -19,14 +21,14 @@ ${PSF_VERTEX}
 void main() {
   float energy;
   float radius = psfSetup(aIrr, energy);
-  if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+  if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0; return; }
   gl_Position = projectView(viewMatrix * vec4(position, 1.0));
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy; vColor = aColor;
 }`;
-const SPRITE_FRAG = /* glsl */ `
+export const SPRITE_FRAG = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
 ${PSF_UNIFORMS}
@@ -52,8 +54,21 @@ export class NearStarsLayer {
   private irr = new Float32Array(MAX);
   private col = new Float32Array(MAX * 3);
   private meshes: Mesh[] = [];
-  private sphere = new SphereGeometry(1, 96, 48);
+  private coronas: StarCorona[] = [];
+  private sphere = new SphereGeometry(1, 128, 64);
+  private looks = new Map<string, StarLook>();
   stars: CatalogStar[] = [];
+
+  /** The surface look of a star (stable per star). */
+  look(s: CatalogStar): StarLook {
+    let l = this.looks.get(s.key);
+    if (!l) {
+      l = starLook(s.key, s.teff, s.radius / SUN_RADIUS, s.absMag);
+      if (this.looks.size > 2000) this.looks.clear();
+      this.looks.set(s.key, l);
+    }
+    return l;
+  }
 
   constructor(psf: Record<string, { value: number }>, private surfaceExposure: { value: number }) {
     const g = new BufferGeometry();
@@ -61,7 +76,7 @@ export class NearStarsLayer {
     g.setAttribute('aIrr', new BufferAttribute(this.irr, 1).setUsage(DynamicDrawUsage));
     g.setAttribute('aColor', new BufferAttribute(this.col, 3).setUsage(DynamicDrawUsage));
     this.sprites = new Points(g, new ShaderMaterial({
-      vertexShader: SPRITE_VERT, fragmentShader: SPRITE_FRAG, uniforms: { ...psf },
+      name: 'near-star-sprites', vertexShader: SPRITE_VERT, fragmentShader: SPRITE_FRAG, uniforms: { ...psf },
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     }));
     this.sprites.frustumCulled = false;
@@ -72,21 +87,34 @@ export class NearStarsLayer {
   private mesh(i: number): Mesh {
     while (this.meshes.length <= i) {
       const m = new Mesh(this.sphere, new ShaderMaterial({
-        vertexShader: BODY_VERT, fragmentShader: STAR_FRAG,
-        uniforms: { uColor: { value: new Vector3() }, uRadiance: { value: 1 }, uExposure: this.surfaceExposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+        name: 'near-star-surface', vertexShader: BODY_VERT, fragmentShader: STAR_FRAG,
+        uniforms: {
+          uColor: { value: new Vector3() }, uRadiance: { value: 1 }, uExposure: this.surfaceExposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
+          ...starLookUniforms(starLook('init', 5772, 1, 4.83)), uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+        },
       }));
       m.matrixAutoUpdate = false;
       m.frustumCulled = false;
       this.group.add(m);
       this.meshes.push(m);
+      const c = new StarCorona();
+      this.group.add(c.mesh);
+      this.coronas.push(c);
     }
     return this.meshes[i];
   }
 
-  update(cam: UPos, pixelAngle: number, time: number): void {
+  /** A mesh to compile the star shader with before it is first needed. */
+  warmupObjects(): Mesh[] {
+    this.mesh(0);
+    return [this.meshes[0], this.coronas[0].mesh];
+  }
+
+  update(cam: UPos, pixelAngle: number, time: number, viewQuat?: Q): void {
     let n = 0;
     const rel = new Vector3();
     for (const m of this.meshes) m.visible = false;
+    for (const c of this.coronas) c.hide();
     for (const s of this.stars.slice(0, MAX)) {
       s.upos.sub(cam, rel);
       const d = rel.length();
@@ -101,14 +129,21 @@ export class NearStarsLayer {
       this.col.set([c[0] / L, c[1] / L, c[2] / L], n * 3);
       if (pxR > 0.6) {
         const m = this.mesh(n);
+        const look = this.look(s);
         m.visible = true;
-        m.matrix.copy(new Matrix4().makeScale(s.radius, s.radius, s.radius)).setPosition(rel);
+        // spin axis and polar flattening (fast-rotating hot stars)
+        const q = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), look.axis);
+        m.matrix.compose(rel, q, new Vector3(s.radius, s.radius, s.radius * (1 - look.flattening)));
         m.matrixWorldNeedsUpdate = true;
         const u = (m.material as ShaderMaterial).uniforms;
         u.uColor.value.set(c[0] / L, c[1] / L, c[2] / L);
         // mean disk radiance = irradiance * d^2 / (pi R^2), independent of distance
-        u.uRadiance.value = (E * d * d) / (Math.PI * s.radius * s.radius);
+        const radiance = (E * d * d) / (Math.PI * s.radius * s.radius);
+        u.uRadiance.value = radiance;
         u.uTime.value = time;
+        (u.uBodyToWorld.value as Matrix3).setFromMatrix4(m.matrix.clone().makeRotationFromQuaternion(q));
+        applyStarLook(u, look);
+        if (viewQuat) this.coronas[n].update(rel, s.radius, viewQuat, [c[0] / L, c[1] / L, c[2] / L], radiance * this.surfaceExposure.value, look, time);
       }
       n++;
     }

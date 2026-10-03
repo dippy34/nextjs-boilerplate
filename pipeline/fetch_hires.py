@@ -112,17 +112,19 @@ class StripTiff:
         self.compression = tags.get(259, (1,))[0]
         self.sample_format = tags.get(339, (1,))[0]
         self.offsets = tags[273]
-        assert self.compression == 1 and self.rows_per_strip == 1, "needs uncompressed one-row strips"
+        assert self.compression == 1, "needs uncompressed strips"
         dt = {(8, 1): "u1", (16, 1): "u2", (16, 2): "i2", (32, 3): "f4"}[(self.bits, self.sample_format)]
         self.dtype = np.dtype(bo + dt)
         print(f"  {url.rsplit('/', 1)[-1]}: {self.width}x{self.height}x{self.bands} {self.dtype} planar={self.planar}")
 
     def row(self, r: int, band: int = 0) -> np.ndarray:
+        rps = self.rows_per_strip
+        strips_per_band = (self.height + rps - 1) // rps
         if self.planar == 2:
-            off = self.offsets[band * self.height + r]
+            off = self.offsets[band * strips_per_band + r // rps] + (r % rps) * self.width * self.dtype.itemsize
             data = range_get(self.url, off, off + self.width * self.dtype.itemsize - 1)
             return np.frombuffer(data, self.dtype).astype(np.float32)
-        off = self.offsets[r]
+        off = self.offsets[r // rps] + (r % rps) * self.width * self.bands * self.dtype.itemsize
         data = range_get(self.url, off, off + self.width * self.bands * self.dtype.itemsize - 1)
         return np.frombuffer(data, self.dtype).astype(np.float32).reshape(self.width, self.bands)[:, band]
 

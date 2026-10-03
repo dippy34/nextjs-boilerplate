@@ -159,7 +159,12 @@ Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`, 
   Horizons osculating-element tables for Triton, Titan, Iapetus and the irregular moons (≤0.07°).
 * 302 large asteroids/TNOs as full bodies, 75,565 numbered asteroids propagated on the GPU, 4,077
   comets propagated in a Web Worker.
-* NASA/USGS global maps for 22 bodies, Earth night lights and clouds, Saturn's rings from the Voyager 2
+* Every body and star looks like itself: stars get their own granulation, spots, flares, flattening
+  and corona from their temperature and size (giant convection cells on red supergiants); the 459
+  moons and the asteroids get 4K maps from the full-resolution USGS mosaics or, where no spacecraft has
+  mapped them, a seeded procedural surface and an irregular shape for small bodies; each black hole has
+  its own disk temperature, gas pattern and (for M87\* and the microquasars) jets.
+* NASA/USGS global maps for 23 bodies, Earth night lights and clouds, Saturn's rings from the Voyager 2
   PPS occultation profile with planet↔ring shadows.
 * Free flight with altitude-scaled speed (metres/s to parsecs/s), orbit mode, logarithmic go-to
   autopilot, time control (pause, ×1 … 100 years/s, reverse), labels, orbit lines, search, info panel,

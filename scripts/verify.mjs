@@ -43,7 +43,12 @@ for (const sc of scenarios) {
   if (only.size && !only.has(sc.name)) continue;
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   const errors = [];
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    errors.push(m.text());
+    // keep the whole message of a shader failure (it carries the GLSL log)
+    if (/Shader Error|VALIDATE_STATUS/.test(m.text())) fs.writeFileSync(path.join(outDir, `${sc.name}-shader-error.txt`), m.text());
+  });
   page.on('pageerror', (e) => errors.push(String(e)));
   const t0 = Date.now();
   await page.goto(`${base}?${sc.query}`, { waitUntil: 'load' });

@@ -6,6 +6,7 @@ import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
 import { GalaxyGlow } from '../render/GalaxyLayer';
+import { JetsLayer } from '../render/Jets';
 import { Labels, type LabelCandidate } from '../render/Labels';
 import { NearStarsLayer } from '../render/NearStars';
 import { OrbitsLayer } from '../render/Orbits';
@@ -69,6 +70,7 @@ export class App {
   atmospheres!: AtmospheresLayer;
   blackHoles: BlackHole[] = [];
   holes!: BlackHoleLayer;
+  jets!: JetsLayer;
   /** the Milky Way's unresolved light (from the galaxy model) */
   galaxy!: GalaxyGlow;
   /** procedural stars filling the galaxy beyond the catalogues */
@@ -145,12 +147,13 @@ export class App {
     app.atmospheres = atmospheres;
     app.blackHoles = blackHoles;
     app.holes = new BlackHoleLayer(blackHoles, bodies.surfaceExposure, renderer.depthMode === 'reversed-z');
+    app.jets = new JetsLayer(blackHoles);
     app.galaxy = new GalaxyGlow();
     app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.procStars.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
@@ -327,7 +330,7 @@ export class App {
    * is compiled while presenting.
    */
   private warmUp(): void {
-    const objs = [...this.bodies.warmupObjects(), ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects()];
+    const objs = [...this.bodies.warmupObjects(), ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
@@ -349,7 +352,7 @@ export class App {
     }
     let d: number;
     if (obj instanceof Body) d = obj.kind === 'star' ? obj.radius * 8 : Math.max(obj.radius * 3.5, 2e3);
-    else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 8, 1e9);
+    else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 4.5, 2e7);
     else if (obj instanceof Comet) d = obj.radius > 0 ? obj.radius * 60 : 2e7;
     else d = Math.max(obj.radius * 4, 1e6);
     this.rig.flyTo(obj, d);
@@ -557,6 +560,9 @@ export class App {
     const xDark = (0.01 * pixSA) / magToIrradiance(this.starMagLimit);
     let wBest = 0;
     let lBest = 1;
+    // display level the eye settles a view-filling disk at: mid-grey for a lit surface, bright for
+    // a self-luminous one (a star's or an accretion disk's)
+    let keyBest = 0.45;
     const screen = this.view.width * this.view.height;
     for (const v of this.bodies.views.values()) {
       if (!v.resolved || v.pixelRadius < 2) continue;
@@ -573,6 +579,7 @@ export class App {
         : (Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI;
       wBest = w;
       lBest = L;
+      keyBest = b.kind === 'star' ? 1.1 : 0.45;
     }
     for (const hv of this.holes.views) {
       if (!hv.diskRadiance) continue;
@@ -580,7 +587,7 @@ export class App {
       const pr = hv.innerDiskPx / this.view.pixelRatio;
       if (!p || p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
       const w = smoothstep(0.0015, 0.08, Math.min(1, (Math.PI * pr * pr) / screen));
-      if (w > wBest) { wBest = w; lBest = hv.diskRadiance; }
+      if (w > wBest) { wBest = w; lBest = hv.diskRadiance; keyBest = 0.8; }
     }
     for (const s of this.near.stars) {
       const rel = s.upos.sub(this.rig.upos, new Vector3());
@@ -591,10 +598,11 @@ export class App {
       if (w > wBest && this.project(rel)) {
         wBest = w;
         lBest = (magToIrradiance(s.absMag + 5 * Math.log10(d / PC) - 5) * d * d) / (Math.PI * s.radius * s.radius);
+        keyBest = 1.1;
       }
     }
     const lx = Math.log(xDark);
-    let target = wBest > 0 ? Math.min(lx, lx + (Math.log(0.45 / lBest) - lx) * wBest) : lx;
+    let target = wBest > 0 ? Math.min(lx, lx + (Math.log(keyBest / lBest) - lx) * wBest) : lx;
     // Eye adaptation to the brightest resolved disk in view: a planet disk should stay below ~1.6
     // (bright but not washed out) and only limits surface exposure; a resolved star disk dims everything.
     let diskCap = Infinity;
@@ -607,7 +615,7 @@ export class App {
     for (const v of this.bodies.views.values()) {
       if (!v.resolved || v.pixelRadius <= 1.5 || !onScreen(v.rel)) continue;
       const b = v.body;
-      if (b.kind === 'star') lightCap = Math.min(lightCap, 2.5 / (AU / SUN_RADIUS) ** 2);
+      if (b.kind === 'star') lightCap = Math.min(lightCap, 1.8 / (AU / SUN_RADIUS) ** 2);
       else diskCap = Math.min(diskCap, 1.6 / ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI));
     }
     for (const hv of this.holes.views) {
@@ -625,7 +633,8 @@ export class App {
       const pr = Math.asin(Math.min(1, s.radius / d)) / this.view.pixelAngle;
       if (pr <= 1.5) continue;
       const E = magToIrradiance(s.absMag + 5 * Math.log10(d / PC) - 5);
-      lightCap = Math.min(lightCap, 2.5 / ((E * d * d) / (Math.PI * s.radius * s.radius)));
+      // a star's disk is shown at ~1.4 (bright, but its colour and surface still show)
+      lightCap = Math.min(lightCap, 1.4 / ((E * d * d) / (Math.PI * s.radius * s.radius)));
     }
     target = Math.min(target, Math.log(diskCap), Math.log(lightCap));
     if (this.frameCount < 3) this.logExposure = target;
@@ -1016,6 +1025,7 @@ export class App {
     this.atmospheres.update(this.rig.upos, this.bodies.views);
     this.holes.vr = this.vr.active;
     this.holes.update(this.rig.upos, pixelAngle, now / 1000);
+    this.jets.update(this.rig.upos, pixelAngle, now / 1000);
     const { xStar, xSurf, mLim, xDark } = this.updateExposure(dt);
     const sunDistPc = this.camPc.length();
     GALAXY.toGal(this.camPc, this.camGal);
@@ -1033,7 +1043,7 @@ export class App {
     for (const c of this.catalogs) c.update(this.camPc, mLim, this.fieldMinDistPc);
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);
     this.procStars.update(this.camPc, mLim, NEAR_STAR_RADIUS, this.vr.active ? 2 : 4);
-    this.near.update(this.rig.upos, pixelAngle, now / 1000);
+    this.near.update(this.rig.upos, pixelAngle, now / 1000, this.view.quat);
     this.orbits.focus = this.rig.anchor instanceof Body ? this.rig.anchor : null;
     this.orbits.update(this.rig.upos, pixelAngle, jd);
     this.small.update(this.rig.upos, jd);

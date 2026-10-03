@@ -34,8 +34,10 @@ void main() {
   float energy;
   float radius = psfSetup(magToIrradiance(m), energy);
   if (radius <= 0.0 || d < uHideRadius) {
+    // culled: outside the clip volume. (A point size <= 0 is undefined in GLSL ES and crashes
+    // some software rasterisers, so keep it at 1.)
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-    gl_PointSize = 0.0;
+    gl_PointSize = 1.0;
     return;
   }
   gl_Position = projectView(viewMatrix * vec4(rel * PC, 1.0));
@@ -90,7 +92,7 @@ export class StarFieldLayer {
     this.colorLut.minFilter = LinearFilter;
     this.colorLut.needsUpdate = true;
     this.template = new ShaderMaterial({
-      vertexShader: STAR_VERT,
+      name: 'star-field', vertexShader: STAR_VERT,
       fragmentShader: STAR_FRAG,
       uniforms: {
         ...this.psf,

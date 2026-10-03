@@ -44,6 +44,20 @@ Per-map source URLs and credits are in `public/data/textures/manifest.json` and 
 Maps marked "8k" have a high-resolution tier that is loaded only while the body fills a large part of
 the view and is freed again afterwards.
 
+The moons, dwarf planets and asteroids are 4096 × 2048 maps area-averaged from the **full-resolution
+USGS Astrogeology mosaics** (`pipeline/fetch_moons_hires.py`; uncompressed GeoTIFFs read with HTTP range
+requests): Europa (500 m), Ganymede (1.4 km, colour), Callisto (1 km), Io (1 km, colour), Titan (4 km),
+Enceladus (110 m), Tethys (293 m), Dione (154 m), Rhea (417 m), Iapetus (783 m), Triton (600 m, colour),
+Pluto and Charon (300 m), Ceres (Dawn, 20 px/deg), Vesta (Dawn, 74 px/deg) — NASA/JPL/USGS/SSI/JHUAPL/
+SwRI/DLR, public domain — and **Phobos** (Mars Express HRSC SRC global mosaic, 16 px/deg; ESA/DLR/FU
+Berlin, CC BY-SA 3.0 IGO). Each was aligned to the earlier preview by correlation.
+
+Bodies without a map (most small moons, asteroids and Kuiper-belt objects) get a **procedural surface**
+seeded by their name: crater fields at several scales, two-tone terrain, bright fresh ejecta, cracks on
+icy bodies, and an irregular shape for bodies under ~200 km. Colours follow the measured albedo where
+there is one (icy beyond Jupiter otherwise; Kuiper-belt objects from grey to tholin-red). Mapped bodies get
+fine procedural craters below the map's resolution when seen very close. These are invented details.
+
 | Body | Source | Credit / licence |
 |---|---|---|
 | Earth (day, 4k + 8k) | NASA Earth Observatory, Blue Marble: Next Generation, Oct 2004, 21600×10800 | NASA Earth Observatory / Reto Stöckli — public domain |
@@ -109,6 +123,15 @@ carry restrictions on commercial use — check the caption of each PIA image bef
 * Sun-path optical depth: Chapman grazing-incidence function in the closed form popularised by
   C. Schüler (GPU Pro 3, 2012).
 
+## Stars up close (`src/render/StarLook.ts`)
+
+Each star's surface is generated from its temperature, size and luminosity plus a per-star seed:
+granulation scaled by the pressure scale height (∝ T/g; a handful of giant cells on red supergiants, as
+in simulations of Betelgeuse such as Freytag et al. 2002), quadratic limb darkening loosely following
+Claret's V-band coefficients, starspots, faculae and flares by activity (strongest in cool dwarfs),
+flattening and gravity darkening for fast-rotating hot stars (as measured by interferometry for Vega
+and Altair). The corona glow and prominences are artistic.
+
 ## Black holes (`public/data/blackholes.json`, `pipeline/build_blackholes.py`)
 
 * **BlackCAT** — Corral-Santana et al. 2016, *A&A* 587, A61, via CDS VizieR (J/A+A/587/A61, tables A1
@@ -129,7 +152,12 @@ carry restrictions on commercial use — check the caption of each PIA image bef
   15πG²M²/(4c⁴b²); thin-disk temperature profile of Shakura & Sunyaev 1973 / Novikov & Thorne 1973 with a
   zero-torque inner edge at the ISCO; Doppler and gravitational shifts applied to a blackbody spectrum.
   Disk orientations follow the catalogue inclinations (the node on the sky is unknown and fixed
-  arbitrarily per object). X-ray binaries are shown in outburst (inner disk ≈ 10⁷ K); the disks of
+  arbitrarily per object). Cygnus X-1 and GRS 1915+105 (persistent sources) are shown bright
+  (inner disk 1–1.6 × 10⁷ K); the transient X-ray binaries in quiescence with cool disks of their own
+  temperature (~6,000–12,000 K, from mass and a seed); binary disks show two-armed tidal spiral shocks.
+  Jets: M87's optical jet (parabolic collimation r ∝ z^0.58, Asada & Nakamura 2012, *ApJL* 745, L28; the
+  counter-jet is Doppler-dimmed) and the radio jets of Cygnus X-1 and GRS 1915+105 drawn faintly.
+  The disks of
   Sgr A\* and M87\* are illustrative — their real accretion flows are faint and radiate mostly in
   radio. The streaky gas texture and its slowed-down rotation are procedural.
 

@@ -86,7 +86,7 @@ export class SkyLayer {
     tex.magFilter = LinearFilter;
     tex.anisotropy = 4;
     const mat = new ShaderMaterial({
-      vertexShader: VERT, fragmentShader: FRAG,
+      name: 'sky', vertexShader: VERT, fragmentShader: FRAG,
       uniforms: {
         uMap: { value: tex }, uGain: this.gain, uGalaxy: { value: null }, uMix: { value: 0 }, uModelK: { value: 0 },
         uModelRef: { value: SkyLayer.MODEL_REF }, uModelExp: { value: 1.65 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,

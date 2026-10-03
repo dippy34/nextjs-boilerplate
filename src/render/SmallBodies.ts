@@ -52,7 +52,7 @@ void main() {
   // Artistic boost only for distant asteroids (belt structure); physical within ~0.05 AU.
   float boost = mix(1.0, uBoost, smoothstep(0.05, 0.5, delta));
   float radius = psfSetup(magToIrradiance(V) * boost, energy);
-  if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+  if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0; return; }
   gl_Position = projectView(viewMatrix * vec4(rel, 1.0));
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
@@ -76,7 +76,7 @@ void main() {
   vec3 rel = uSunRel + position * AU_M;
   float energy;
   float radius = aMag > 90.0 ? 0.0 : psfSetup(magToIrradiance(aMag) * uBoost, energy);
-  if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+  if (radius <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0; return; }
   gl_Position = projectView(viewMatrix * vec4(rel, 1.0));
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}

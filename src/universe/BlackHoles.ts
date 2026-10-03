@@ -36,6 +36,12 @@ export class BlackHole implements SpaceObject {
   readonly diskInner: number;
   /** peak disk temperature (K) */
   readonly diskTmax: number;
+  /** accretion state shown */
+  readonly diskState: 'outburst' | 'persistent' | 'quiescent' | 'illustrative' | 'none';
+  /** relativistic jets: seen in visible light (M87), only in radio (microquasars), or none */
+  readonly jet: 'optical' | 'radio' | null;
+  /** look of the disk's gas: seed, spiral arms (tidal spiral shocks in binaries), streak scales */
+  readonly diskLook: { seed: number; spiral: number; arms: number; streakFreq: number; angFreq: number; warp: number };
   readonly companion: CatalogStar | null = null;
   readonly data: BlackHoleData;
   private orbitE1 = new Vector3();
@@ -67,7 +73,26 @@ export class BlackHole implements SpaceObject {
     this.diskInner = this.radius * 3;
     // X-ray binaries in outburst: inner disk ~1 keV (~1e7 K). The supermassive holes accrete through
     // faint, hot flows that glow mainly in radio; their thin disk here is illustrative and cool.
-    this.diskTmax = this.supermassive ? (d.name.startsWith('M87') ? 5200 : 6200) : 1.0e7;
+    // Persistent sources accrete near their Eddington limit (inner disk ~1-2e7 K); the other
+    // X-ray transients spend most of their time in quiescence with cool, faint disks. Each
+    // quiescent disk gets its own temperature (about 6,000-12,000 K) from its mass and a seed.
+    const persistent = d.name === 'Cygnus X-1' || d.name === 'GRS 1915+105';
+    const h = (k: string) => hash(d.name + k);
+    this.diskState = this.diskOuter === 0 ? 'none' : this.supermassive ? 'illustrative' : persistent ? 'persistent' : 'quiescent';
+    this.diskTmax = this.supermassive ? (d.name.startsWith('M87') ? 5200 : 6200)
+      : persistent ? (d.name === 'GRS 1915+105' ? 1.6e7 : 1.0e7)
+      : 9000 * (8 / d.massSun) ** 0.25 * (0.7 + 0.6 * h('T'));
+    this.jet = d.name.startsWith('M87') ? 'optical' : persistent ? 'radio' : null;
+    const binary = !!d.companion && !this.supermassive;
+    this.diskLook = {
+      seed: h('s') * 100,
+      // tidal two-armed spiral shocks in binary disks; looser, random structure around the giants
+      spiral: binary ? 0.35 + 0.45 * h('sp') : 0.15 * h('sp'),
+      arms: binary ? 2 : 1 + Math.floor(3 * h('a')),
+      streakFreq: 6 + 10 * h('f'),
+      angFreq: 1.4 + 2.6 * h('g'),
+      warp: 0.2 + 0.8 * h('w'),
+    };
     if (d.companion) {
       const c = d.companion;
       // V absolute magnitude consistent with the engine's radius estimate: R = Rsun (Tsun/T)^2 10^(-0.2 (M - Msun))
@@ -121,7 +146,11 @@ export class BlackHole implements SpaceObject {
     }
     rows.push(['Accretion disk', this.diskOuter === 0 ? 'none (dormant: the companion is too far to feed it)'
       : this.supermassive ? 'illustrative (the real flow is faint, hot gas seen mainly in radio)'
-      : `shown in outburst, inner edge ~10 million K, ${((2 * this.diskOuter) / 1e9).toPrecision(2)} million km across`]);
+      : this.diskState === 'persistent'
+        ? `bright, near its Eddington limit: inner edge ~${(this.diskTmax / 1e6).toFixed(0)} million K, ${((2 * this.diskOuter) / 1e9).toPrecision(2)} million km across`
+        : `quiet (between outbursts): ~${Math.round(this.diskTmax / 100) * 100} K at its hottest, ${((2 * this.diskOuter) / 1e9).toPrecision(2)} million km across`]);
+    if (this.jet) rows.push(['Jets', this.jet === 'optical' ? 'relativistic jet, visible light (synchrotron); the counter-jet is too faint to see'
+      : 'relativistic radio jets (drawn faintly: invisible to the eye)']);
     if (d.aliases.length) rows.push(['Also known as', d.aliases.join(', ')]);
     rows.push(['Data', d.ref]);
     return rows;

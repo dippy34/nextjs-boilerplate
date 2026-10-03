@@ -66,13 +66,14 @@ export class BlackHoleLayer {
 
   private material(): ShaderMaterial {
     return new ShaderMaterial({
-      vertexShader: BH_VERT, fragmentShader: BH_FRAG,
+      name: 'black-hole', vertexShader: BH_VERT, fragmentShader: BH_FRAG,
       uniforms: {
         uEnv: { value: this.env.texture }, uLut: { value: this.lut },
         uO: { value: new Vector3() }, uRs: { value: 1 },
         uN: { value: new Vector3(0, 0, 1) }, uE1: { value: new Vector3(1, 0, 0) }, uE2: { value: new Vector3(0, 1, 0) },
         uRin: { value: 3 }, uRout: { value: 0 }, uTmax: { value: 1e4 }, uSunDisk: { value: SUN_DISK }, uExposure: this.exposure, uTime: { value: 0 },
         uMaxSteps: { value: 220 }, uStepK: { value: 1 },
+        uDiskSeed: { value: 0 }, uSpiral: { value: 0 }, uArms: { value: 2 }, uStreakFreq: { value: 9 }, uAngFreq: { value: 2.2 }, uWarp: { value: 0.5 },
         uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       // drawn after the stars and point sources it replaces, before nearby sprites that may be in front
@@ -159,6 +160,9 @@ export class BlackHoleLayer {
       u.uRin.value = bh.diskInner / rs;
       u.uRout.value = bh.diskOuter / rs;
       u.uTmax.value = bh.diskTmax;
+      const L = bh.diskLook;
+      u.uDiskSeed.value = L.seed; u.uSpiral.value = L.spiral; u.uArms.value = L.arms;
+      u.uStreakFreq.value = L.streakFreq; u.uAngFreq.value = L.angFreq; u.uWarp.value = L.warp;
       u.uTime.value = time;
       u.uMaxSteps.value = this.vr ? 90 : 220;
       u.uStepK.value = this.vr ? 1.5 : 1;
