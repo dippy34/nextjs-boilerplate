@@ -277,7 +277,8 @@ Known limitations (planned for later phases unless noted):
   four shadowing bodies at a time), and the coppery light in Earth's shadow is a simple tint.
 * VR has no bloom pass (a glare sprite around the Sun stands in) and starts at a lower star magnitude
   limit (6.8, adjustable in Settings) to protect frame rate.
-* Atmospheres are single scattering (no multiple scattering) and ignore terrain height. The Milky
+* Atmospheres are single scattering (no multiple scattering); over the landing terrain the haze is
+  marched to the real ground, elsewhere to the reference sphere. The Milky
   Way map is Earth-centred and fades out beyond ~1 kpc.
 * Black holes are non-spinning (Schwarzschild).
 * Performance has been verified only under software rendering (≈20–30 fps at 720p; ~3–5 ms JS per

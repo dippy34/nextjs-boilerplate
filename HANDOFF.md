@@ -61,7 +61,9 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     is the Sun's clearance over the relief in penumbra widths (ray-marched per vertex, signed),
     and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`. Earth: the map's `"sea": 0` makes
     lower ground flat water and limits generated hills to land (more on high ground); the painted
-    clouds fade out on descent (`uCloudVis`, set in `Bodies`).
+    clouds fade out on descent (`uCloudVis`, set in `Bodies`). Draw order: atmosphere shell (19.8),
+    terrain (19.9, transparent pass but opaque), terrain haze (19.95: `ATMO_HAZE_FRAG` on the
+    terrain geometry, marching to the real ground), then cockpit/HUD (20+).
   - Cockpit HUD (`src/game/HudMarkers.ts`): target bracket, flight-path marker, boresight.
   - Generated planets: `src/universe/ExoTerrain.ts` (CPU copy of EXO_FRAG `terrain()` so ground matches
     colours), Earth-like atmosphere shells for temperate/ocean types (`Atmospheres.updateExo`).
