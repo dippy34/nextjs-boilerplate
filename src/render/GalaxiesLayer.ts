@@ -1,6 +1,6 @@
 import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, Points, Quaternion, ShaderMaterial, Vector2, Vector3, Vector4 } from 'three';
 import type { UPos } from '../core/upos';
-import { discFrame, type Galaxy, type GalaxyShape } from '../universe/Galaxies';
+import { discFrame, type Galaxy } from '../universe/Galaxies';
 import { noise3D, sampleNoise } from './Noise3D';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, POINT_CLIP, PROJECT_PARS } from './shaders/xr';
 
@@ -58,7 +58,7 @@ void discNoise(vec3 p, float lod) {
   vec4 nB = nz(p * 0.3 + uSeed * 0.53, lod - 1.7);
   gwid = nB.g;
   float lr = log(max(gr, 0.03));
-  gpsi = atan(p.y, p.x) - lr * uArmP.y + uArmP.w + uArmP.z * ((nB.r - 0.5) * 3.0 + (gA.r - 0.5) * 0.8);
+  gpsi = atan(p.y, p.x) - lr * uArmP.y + uArmP.w + uArmP.z * ((nB.r - 0.5) * 2.0 + (gA.r - 0.5) * 0.25);
   gsc = vec3(cos(gpsi) * 0.45, sin(gpsi) * 0.45, lr * uBarP.z + p.z * 1.2) + uSeed * 0.37;
   glodS = lod + log2(0.45 * (1.0 + uArmP.y) / max(gr, 0.05));
   // in the middle, where the spiral winds ever tighter, plain 3D noise instead of spiral streaks
@@ -338,11 +338,11 @@ function lookFor(g: Galaxy, all: Galaxy[] = []): Look {
   }
   const named: Record<string, Partial<Look>> = {
     // a tightly wound, ring-like spiral: the 10 kpc ring of young stars and dust dominates
-    'Andromeda Galaxy': { pitchDeg: 7, irreg: 0.9, ring: [0.47, 0.07, 2.2, 3.0], dust: 1.3, dustHr: 0.6, bulge: 0.3, bulgeRe: 0.05, bulgeN: 2.2, bulgeQ: 0.75, young: 0.1, knots: 0.012 },
+    'Andromeda Galaxy': { pitchDeg: 13, irreg: 0.35, ring: [0.47, 0.09, 1.0, 0.6], dust: 1.4, dustHr: 0.6, bulge: 0.3, bulgeRe: 0.05, bulgeN: 2.2, bulgeQ: 0.75, young: 0.1, knots: 0.012 },
     // flocculent, patchy, with the giant H II region NGC 604
     'Triangulum Galaxy': { pitchDeg: 28, irreg: 1.3, clumpy: 0.35, spot: [0.28, 0.33, 0, 0.012] },
     // the grand-design spiral
-    'Whirlpool Galaxy': { pitchDeg: 19, irreg: 0.4, young: 0.25, knots: 0.07, dust: 1.4, bulge: 0.12, bulgeRe: 0.04 },
+    'Whirlpool Galaxy': { pitchDeg: 19, irreg: 0.25, young: 0.25, knots: 0.07, dust: 1.4, bulge: 0.12, bulgeRe: 0.04 },
     // edge-on discs: a dark lane, with dust filaments rising out of NGC 891's plane
     'NGC 891': { dust: 2.2, extra: 0.6, hz: 0.014 },
     'Needle Galaxy': { dust: 1.6, extra: 0.2, bulge: 0.22, bulgeRe: 0.05, bulgeQ: 0.6 },
@@ -533,7 +533,7 @@ class GalaxyModel {
     this.dA.set(this.nz(px * 0.9 + s * 0.71, py * 0.9 + s * 0.71, pz * 0.9 + s * 0.71));
     const B = this.nz(px * 0.3 + s * 0.53, py * 0.3 + s * 0.53, pz * 0.3 + s * 0.53);
     const lr = Math.log(Math.max(r, 0.03));
-    const psi = Math.atan2(py, px) - lr / this.tanP + this.phase + l.irreg * ((B[0] - 0.5) * 3 + (this.dA[0] - 0.5) * 0.8);
+    const psi = Math.atan2(py, px) - lr / this.tanP + this.phase + l.irreg * ((B[0] - 0.5) * 2 + (this.dA[0] - 0.5) * 0.25);
     return { r, psi, wid: B[1] };
   }
 
@@ -889,4 +889,3 @@ export class GalaxiesLayer {
   }
 }
 
-export type { GalaxyShape };
