@@ -73,15 +73,26 @@ void main() {
     vec3 p = uCam + d * (t + ds * (first > 0.5 ? jit : 0.5));
     first = 0.0;
     populations(p, pop, dust, arms);
-    float cl = gNoise(p / 140.0) * 0.65 + gNoise(p / 47.0) * 0.35;
-    dust *= 0.15 + 3.0 * cl * cl;
-    float big = gNoise(p / vec3(700.0, 700.0, 300.0) + 5.0);
-    pop.y *= 0.3 + 1.4 * big;
-    dust *= 0.4 + 1.2 * big;
-    float knots = pow(gNoise(p / 70.0 + 17.0), 6.0) * 9.0;
+    // structure seen from outside (mostly in the plane: the patterns are stretched vertically so a
+    // face-on ray through the disc keeps their contrast)
+    vec3 pf = p / vec3(1.0, 1.0, 4.0);
+    float cl = gNoise(pf / 140.0) * 0.65 + gNoise(pf / 47.0) * 0.35;
+    float big = gNoise(pf / 700.0 + 5.0);
+    // dust lanes: on the inner (leading) edge of each arm, as in other spirals, plus feathers
+    // (spurs) crossing between the arms at a steep angle
+    float c1 = cos(0.09), s1 = sin(0.09);
+    float lane = armFactor(vec2(c1 * p.x - s1 * p.y, s1 * p.x + c1 * p.y));
+    vec2 rad = p.xy / max(length(p.xy), 1.0);
+    float spur = gNoise(vec3(dot(p.xy, rad) / 90.0, dot(p.xy, vec2(-rad.y, rad.x)) / 900.0, p.z / 200.0) + 31.0);
+    dust *= (0.12 + 2.6 * cl * cl) * (0.35 + 1.0 * big) * (0.5 + 1.6 * lane + 0.8 * smoothstep(0.55, 0.85, spur));
+    // young stars: clustered into OB associations and star clouds along the arms
+    float assoc = pow(gNoise(pf / 260.0 + 9.0), 3.0) * 4.0;
+    pop.y *= (0.25 + 1.5 * big) * (0.35 + assoc);
+    // H II regions: compact pink knots where the young disc is dense
+    float knots = pow(gNoise(pf / 55.0 + 17.0), 8.0) * 40.0 + pow(gNoise(pf / 140.0 + 3.0), 10.0) * 25.0;
     vec3 j = ${f(LUM.thin)} * pop.x * (0.8 + 0.35 * arms) * C_OLD + ${f(LUM.young)} * pop.y * C_YOUNG * (0.6 + 0.8 * cl)
            + ${f(LUM.thick)} * pop.z * C_OLD + ${f(LUM.bulge)} * pop.w * C_BULGE
-           + 0.012 * pop.y * knots * C_HII;
+           + 0.02 * pop.y * knots * C_HII;
     vec3 dt = 0.921 * AV_PC * dust * EXT * ds;
     L += T * j * ds * exp(-0.5 * dt);
     T *= exp(-dt);
