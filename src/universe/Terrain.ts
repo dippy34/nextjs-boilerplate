@@ -158,10 +158,14 @@ export function craterField(px: number, py: number, pz: number, cell: number, s:
     const rc = 0.1 + 0.32 * t * t;
     const d = Math.sqrt((x - ox) ** 2 + (y - oy) ** 2 + (z - oz) ** 2) / rc;
     if (d > 1.7) continue;
+    // most craters are old (shallow, worn-down rims), a few fresh
+    const age = hash3(cx, cy, cz, s + 7);
+    const k = 1 - 0.7 * age * age * (3 - 2 * age);
+    const rw = 0.28 + 0.2 * age;
     // bowl (parabolic floor), rim crest at d = 1 and an ejecta apron outside
     const bowl = d < 1 ? d * d - 1 : 0;
-    const rim = 0.32 * Math.exp(-(((d - 1) / 0.28) ** 2));
-    h += (bowl + rim) * depth * rc * cell;
+    const rim = 0.32 * k * Math.exp(-(((d - 1) / rw) ** 2));
+    h += (bowl * k + rim) * depth * rc * cell;
   }
   return h;
 }

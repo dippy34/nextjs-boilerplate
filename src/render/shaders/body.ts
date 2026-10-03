@@ -200,15 +200,19 @@ vec4 cratersAtG(vec3 ci, vec3 r, float density, out float fresh) {
     float d = lv / rc;
     if (d > 1.35) continue;
     // bowl with a slightly flattened floor, sharp raised rim, ejecta apron fading outwards
-    float bowl = d < 1.0 ? (d * d - 1.0) * 0.55 : 0.0;
-    float dbowl = d < 1.0 ? 1.1 * d : 0.0;
-    float e = (d - 1.0) / 0.22;
-    float rim = 0.22 * exp(-e * e);
-    float drim = rim * (-2.0 * e / 0.22);
+    // most craters are old: shallower, with low, broad rims (only a few are fresh and sharp)
+    float age = bh3(c + 31.0);
+    float dep = mix(0.42, 0.1, age * age * (3.0 - 2.0 * age));
+    float rw = mix(0.2, 0.42, age);
+    float bowl = d < 1.0 ? (d * d - 1.0) * dep : 0.0;
+    float dbowl = d < 1.0 ? 2.0 * dep * d : 0.0;
+    float e = (d - 1.0) / rw;
+    float rim = mix(0.2, 0.05, age) * exp(-e * e);
+    float drim = rim * (-2.0 * e / rw);
     float fade = 1.0 - smoothstep(1.1, 1.35, d);
     h.x += (bowl + rim) * rc * fade;
     h.yzw -= (dbowl + drim) * fade * v / max(lv, 1e-5);
-    fresh = max(fresh, bh3(c + 23.0) * (1.0 - smoothstep(0.7, 1.5, d)));
+    fresh = max(fresh, bh3(c + 23.0) * (1.0 - age) * (1.0 - smoothstep(0.7, 1.5, d)));
   }
   return h;
 }
@@ -244,6 +248,42 @@ float sunVisible(vec3 p, out float red) {
     red = max(red, f * uOccRed[i]);
   }
   return vis;
+}
+// Earth's clouds: the cloud map (~20 km per texel) broken up below its resolution by warped fractal
+// billows and scattered small cumulus, each octave only while it spans a few pixels (no flicker).
+// nc: body-fixed direction rotated with the clouds' drift; pix: radians per pixel. Returns the
+// cover (0..1); thick: optical thickness proxy (0..1) for shading.
+float cloudField(vec3 nc, vec2 uv, float pix, float lite, out float thick) {
+  float c = texture2D(uClouds, uv).r;
+  thick = c;
+  float oct = lite > 0.5 ? 2.0 : 5.0;
+  // warp so the billows are not lattice-aligned blobs
+  vec3 q = nc * 300.0;
+  vec3 wq = vec3(bn3(q * 0.5 + 3.1), bn3(q * 0.5 + 7.7), bn3(q * 0.5 + 13.3)) - 0.5;
+  q += wq * 1.6;
+  float n = 0.0, a = 0.55, wsum = 0.0, f = 300.0;
+  for (int i = 0; i < 5; i++) {
+    if (float(i) >= oct) break;
+    float w = smoothstep(0.45, 0.15, f * pix);       // drawn while one billow spans > ~3 pixels
+    n += a * w * (bn3(q) - 0.5);
+    wsum += a * w;
+    q = q * 2.7 + 5.3;
+    f *= 2.7;
+    a *= 0.55;
+  }
+  // edges eaten away, thin cloud broken into cells; thick decks stay closed
+  float edge = 1.0 - smoothstep(0.55, 0.95, c);
+  float cov = c + n * 1.25 * (0.3 + 0.7 * edge);
+  // fair-weather cumulus where the map shows thin haze (cells of ~2-4 km)
+  if (lite < 0.5) {
+    float wc = smoothstep(0.35, 0.12, 2400.0 * pix);
+    if (wc > 0.0) {
+      float cu = bn3(nc * 2400.0 + wq * 3.0) * 0.7 + bn3(nc * 6100.0) * 0.3;
+      cov = max(cov, smoothstep(0.62, 0.8, cu) * smoothstep(0.05, 0.3, c) * wc * 0.9);
+    }
+  }
+  thick = clamp(c + n * 0.8, 0.0, 1.0);
+  return smoothstep(0.26, 0.56, cov);
 }
 // Normal of a surface displaced by height h (metres) along n, from screen-space derivatives
 // (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU").
@@ -411,7 +451,13 @@ void main() {
     } else if (uMatMode < 1.5) {
       // Earth: plants where the map is green, bare soil where it is brown, snow where it is white
       mix2 = smoothstep(0.0, 0.03, albedo.g - 0.85 * albedo.r) * (1.0 - water);
-      snowW = smoothstep(0.32, 0.5, min(albedo.r, albedo.b) / max(uAlbedoScale, 1e-3));
+      float white = smoothstep(0.32, 0.5, min(albedo.r, albedo.b) / max(uAlbedoScale, 1e-3));
+      // snow sheds from slopes steeper than ~35-45 degrees (a ragged snowline): the map's white
+      // there is bare rock
+      float sl = 1.0 - dot(normalize(vTerrN), nB) + (patchN - 0.5) * 0.12;
+      float keep = 1.0 - smoothstep(0.17, 0.3, sl);
+      snowW = white * keep;
+      albedo = mix(albedo, vec3(0.13, 0.12, 0.11) * (0.8 + 0.4 * patchN), white * (1.0 - keep) * uHScale);
     } else if (uMatMode < 2.5) {
       // Mars: dark basaltic sand in the dark regions and drifts, dusty soil elsewhere, frost on the polar caps
       float rel = lumA / max(uAlbedoScale, 1e-3);
@@ -444,40 +490,42 @@ void main() {
   }
   float cloud = 0.0;
   float cloudShadow = 1.0;
-  if (uHasClouds > 0.5) {
-    cloud = texture2D(uClouds, vec2(vUv.x + uCloudShift, vUv.y)).r;
-    // the map's clouds are ~20 km per texel: generated billows break up their edges up close
-    float texC = fwidth(vUv.x) * 2048.0;
-    float wc = smoothstep(0.9, 0.25, texC) * (uLite > 0.5 ? 0.6 : 1.0);
-    if (wc > 0.0) {
-      float ang = uCloudShift * 6.2831853;
-      vec3 nc = vec3(cos(ang) * nB.x - sin(ang) * nB.y, sin(ang) * nB.x + cos(ang) * nB.y, nB.z);
-      float bill = 0.6 * bn3(nc * 900.0) + 0.4 * (uLite > 0.5 ? 0.5 : bn3(nc * 2600.0 + 7.0));
-      cloud += (bill - 0.5) * 0.55 * wc * smoothstep(0.02, 0.25, cloud);
-    }
-    cloud = smoothstep(0.08, 0.9, cloud) * uCloudVis;
-    albedo = mix(albedo, vec3(0.75), cloud);
-    // the clouds' shadows on the ground: the cloud (tops ~7 km up) between this point and the Sun
+  vec3 nCloud = nW;
+  float pixAng = length(fwidth(nB));
+  if (uHasClouds > 0.5 && uCloudVis > 0.001) {
+    float ang = uCloudShift * 6.2831853;
+    mat2 rz = mat2(cos(ang), sin(ang), -sin(ang), cos(ang));
+    vec3 nc = vec3(rz * nB.xy, nB.z);
+    float thick;
+    cloud = cloudField(nc, vec2(vUv.x + uCloudShift, vUv.y), pixAng, uLite, thick) * uCloudVis;
+    // cloud tops: billowed relief lit by the Sun (heights ~1-2 km over the cover)
+    if (cloud > 0.01) nCloud = bumpNormal(vPosView, nW, (cloud * 200.0 + thick * 650.0) * limbFade);
+    // thin cloud lets the ground show through; thick decks are bright
+    albedo = mix(albedo, vec3(0.72 + 0.2 * thick), cloud);
+    // the clouds' shadows on the ground: the cloud (tops ~2-8 km up) between this point and the Sun
     vec3 sB = uSunDir * uBodyToWorld;
     float m0 = dot(nB, sB);
     if (m0 > 0.0) {
-      vec3 eastB = normalize(vec3(-nB.y, nB.x, 0.0) + vec3(1e-6, 0.0, 0.0));
-      vec3 northB = cross(nB, eastB);
       vec3 ts = sB - nB * m0;
-      float k = 0.0011 / max(m0, 0.08);
-      float dlon = dot(ts, eastB) * k / max(sqrt(1.0 - nB.z * nB.z), 0.05), dlat = dot(ts, northB) * k;
-      float cs = texture2D(uClouds, vec2(vUv.x + uCloudShift + dlon / 6.2831853, vUv.y + dlat / 3.14159265)).r;
-      cloudShadow = 1.0 - 0.55 * smoothstep(0.08, 0.9, cs) * uCloudVis * (1.0 - cloud);
+      vec3 ns = normalize(nB + ts * (0.0008 / max(m0, 0.08)));
+      vec3 ncs = vec3(rz * ns.xy, ns.z);
+      vec2 uvS = vec2(atan(ns.y, ns.x) / 6.2831853, 0.5 + asin(clamp(ns.z, -1.0, 1.0)) / 3.14159265);
+      float dl = uvS.x - atan(nB.y, nB.x) / 6.2831853;
+      uvS.x = vUv.x + uCloudShift + (fract(dl + 0.5) - 0.5);
+      float th2;
+      float cs = uLite > 0.5 ? smoothstep(0.28, 0.52, texture2D(uClouds, uvS).r) : cloudField(ncs, uvS, pixAng, 1.0, th2);
+      cloudShadow = 1.0 - 0.6 * cs * uCloudVis * (1.0 - cloud);
     }
   }
-
   // Terrain shading only on the day side (no light leaking past the geometric terminator)
   float dayside = smoothstep(-0.04, 0.06, mu0g);
   float light;
   if (uAirless > 0.5) {
     light = mu0 > 0.0 ? 2.0 * mu0 / (mu0 + mu + 1e-4) : 0.0; // Lommel-Seeliger
   } else {
-    light = max(mix(mu0, mu0g, cloud), 0.0);                // Lambert (clouds hide the relief)
+    // Lambert (clouds hide the relief; their own billows show, softly: light diffuses through cloud)
+    float muC = mix(mu0g, (dot(nCloud, uSunDir) + 0.3 * mu0g) / 1.3, 0.8);
+    light = max(mix(mu0, muC, cloud), 0.0);
   }
   light *= dayside * cloudShadow * grainShadow;
   if (uTerrain > 0.5) light *= mix(1.0, clamp(0.5 + vSun, 0.0, 1.0), uHScale);   // shadows of the relief
