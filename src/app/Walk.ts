@@ -846,8 +846,11 @@ export class Walk {
     let lift: number;
     if (app.vr.active) {
       // the dolly stands on the ground; seated (or no floor-level tracking): lift to a standing eye
+      // a headset that tracks the floor puts its own height on top (the dolly stands on the ground);
+      // seated, or a pose with no floor height (3-DoF, or a runtime whose origin is at the eyes),
+      // is lifted to a standing eye instead
       const headY = app.renderer.camera.position.y;
-      lift = this.settings.height === 'seated' || headY < 0.5 ? Math.max(0, this.eye - headY) : this.eye - EYE_STAND;
+      lift = this.settings.height === 'seated' || headY < 0.5 ? this.eye - Math.max(0, Math.min(this.eye, headY)) : this.eye - EYE_STAND;
     } else {
       lift = this.eye + eyeExtra;
     }

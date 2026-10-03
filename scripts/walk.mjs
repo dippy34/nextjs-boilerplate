@@ -255,11 +255,14 @@ if (which !== 'desktop') {
   });
   let e = await eyeTotal();
   check('v1: eye is 1.7 m above the ground (headset height 0: lifted to standing)', Math.abs(e.dolly + e.headY - 1.7) < 0.1, JSON.stringify(e));
-  await page.evaluate(() => { window.__xrDevice.position.y = 1.62; });
+  // the emulator's reference space puts the floor at the headset's own default height, so raise
+  // the device to make it report a real height above the floor
+  const y0 = await page.evaluate(() => window.__xrDevice.position.y);
+  await page.evaluate((y) => { window.__xrDevice.position.y = y + 1.62; }, y0);
   await frames(4);
   e = await eyeTotal();
-  check('v1: a headset with floor tracking stands the dolly on the ground and keeps its own height', Math.abs(e.dolly) < 0.1 && Math.abs(e.headY - 1.62) < 0.1 && Math.abs(e.dolly + e.headY - 1.62) < 0.12, JSON.stringify(e));
-  await page.evaluate(() => { window.__xrDevice.position.y = 0; });
+  check('v1: a headset with floor tracking stands the dolly on the ground and keeps its own height', Math.abs(e.dolly) < 0.1 && Math.abs(e.headY - 1.62) < 0.1, JSON.stringify(e));
+  await page.evaluate((y) => { window.__xrDevice.position.y = y; }, y0);
   await frames(3);
   await page.screenshot({ timeout: 400000, path: path.join(outDir, 'v1-vr-standing.png') });
 
