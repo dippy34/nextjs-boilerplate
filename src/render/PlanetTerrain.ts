@@ -738,6 +738,14 @@ export class PlanetTerrain {
   }
 
   /** Ground radius (m from the centre of the current world) below body-fixed direction `n`, as drawn. */
+  /**
+   * The world's albedo for the exposure near its ground. (TerrainPatch adapts it to the map's
+   * brightness around the explorer; until that is ported here the world's mean albedo is used.)
+   */
+  exposureAlbedo(mean: number): number {
+    return mean;
+  }
+
   groundRadius(n: Vector3): number {
     const w = this.world;
     if (!w || !this.current) return 0;
