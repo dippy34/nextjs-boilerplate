@@ -19,7 +19,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
 // ground; allow it the time, as the screenshot calls already do (a real GPU is far faster).
 // software GL (SwiftShader) renders planet-wide terrain at a few frames per second close to the
 // ground, so a batch of frames can take minutes; allow it the time (a real GPU / Quest is far faster).
-const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 360000 }); };
+const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 480000 }); };
 
 await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });

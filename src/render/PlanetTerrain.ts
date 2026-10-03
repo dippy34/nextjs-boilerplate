@@ -165,7 +165,7 @@ export class PlanetTerrain {
   inFlight = 8;
   inFlightVr = 4;
   /** most tiles drawn at once: bounds the draw count (and so the per-frame cost) at any altitude */
-  drawCap = 64;
+  drawCap = 52;
   drawCapVr = 44;
   /** most tiles kept (desktop, headset) */
   maxTiles = 420;
