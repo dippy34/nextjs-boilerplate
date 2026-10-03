@@ -122,3 +122,35 @@ describe('planet terrain tiles', () => {
     }
   });
 });
+
+describe('elevation hookup', () => {
+  const R = 1737.4e3;
+  const spec = {
+    kind: 'body' as const, name: 'Moon', radius: R, radii: [R, R, R], craters: 0.8,
+    key: null, manifestMap: null, map: null, patches: [], elevation: null,
+  };
+  it('sharper elevation replaces the base; generated relief only fills in below its spacing', () => {
+    const plain = heightFromSpec(spec);
+    const withE = heightFromSpec(spec, () => ({ h: 1234, mpp: 60 }));
+    let eLo = Infinity, eHi = -Infinity, pLo = Infinity, pHi = -Infinity;
+    for (let i = 0; i < 60; i++) {
+      const n = new Vector3(Math.sin(i), Math.cos(i * 1.7), Math.sin(i * 0.3)).normalize();
+      const he = withE(n, 10);
+      // dominated by the elevation value, with only metre-scale generated relief on top
+      expect(Math.abs(he - 1234)).toBeLessThan(120);
+      eLo = Math.min(eLo, he); eHi = Math.max(eHi, he);
+      const hp = plain(n, 10); pLo = Math.min(pLo, hp); pHi = Math.max(pHi, hp);
+    }
+    // elevation pins the base (small spread); the generated-only base roams over hundreds of metres
+    expect(eHi - eLo).toBeLessThan(240);
+    expect(pHi - pLo).toBeGreaterThan(500);
+  });
+  it('falls back to generated relief where no elevation tile covers the point (sampler returns null)', () => {
+    const plain = heightFromSpec(spec);
+    const withE = heightFromSpec(spec, () => null);
+    for (let i = 0; i < 20; i++) {
+      const n = new Vector3(Math.cos(i), Math.sin(i * 2.1), Math.cos(i * 0.7)).normalize();
+      expect(withE(n, 10)).toBe(plain(n, 10));
+    }
+  });
+});

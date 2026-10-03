@@ -188,6 +188,7 @@ export class PlanetTerrain {
   private jobs = new Map<number, { node: Node; world: World; worker: number; serialAtStart: number }>();
   private jobSeq = 0;
   private frame = 0;
+  private elevVersion = 0;
   private groundKey = '';
   private drawn: Node[] = [];
   private lastT = performance.now();
@@ -203,7 +204,11 @@ export class PlanetTerrain {
         try {
           const w = new Worker(new URL('../workers/terrainTiles.worker.ts', import.meta.url), { type: 'module', name: `terrain-${workerSeq++}` });
           const k = i;
-          w.onmessage = (ev) => this.receive(k, ev.data as { job: number; data: TileData | null });
+          w.onmessage = (ev) => {
+            const d = ev.data as { type?: string; version?: number; job?: number; data?: TileData | null };
+            if (d.type === 'elev') { this.onElevation(d.version ?? 0); return; }
+            this.receive(k, d as { job: number; data: TileData | null });
+          };
           this.workers.push(w);
           this.busy.push(0);
         } catch { /* no workers: built on the main thread */ }
@@ -622,6 +627,15 @@ export class PlanetTerrain {
       this.jobs.set(job, { node: n, world: w, worker: k, serialAtStart: 0 });
       this.workers[k].postMessage({ type: 'tile', job, id: w.id, req: this.reqOf(w, n, sunBF, c.lonLeft) });
     }
+  }
+
+  /** A worker loaded sharper global elevation: rebuild the current world's tiles to pick it up. */
+  private onElevation(version: number): void {
+    if (version <= this.elevVersion) return;
+    this.elevVersion = version;
+    const w = this.world;
+    if (!w) return;
+    for (const n of w.tiles) n.stale = true;
   }
 
   private receive(worker: number, msg: { job: number; data: TileData | null }): void {

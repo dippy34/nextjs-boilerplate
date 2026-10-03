@@ -16,6 +16,8 @@ export type HeightSpec =
       key: string | null; manifestMap: unknown; map: unknown;
       /** sharper regional patches loaded so far (with their filtered levels) */
       patches: unknown[];
+      /** sharper global elevation pyramid (universe/Elevation.ts), if the body has one */
+      elevation: { base: string; bodyKey: string } | null;
     }
   | { kind: 'exo'; name: string; radius: number; type: number; seed: number; seaLevel: number; craters: number; lite: boolean };
 
@@ -38,14 +40,28 @@ export function heightSpec(g: Ground, source: TerrainSource | null): HeightSpec 
     map = { ...m, levels: undefined };
   }
   const patches = key ? [...(s.patches.get(key) ?? [])] : [];
+  // elevation pyramid: body name lower-cased, at <terrain-source base>/elevation (absolute for the worker)
+  let elevation: { base: string; bodyKey: string } | null = null;
+  if (typeof location !== 'undefined') {
+    try {
+      elevation = { base: new URL(`${s.base}/elevation`, location.href).href, bodyKey: body.name.toLowerCase() };
+    } catch { elevation = null; }
+  }
   return {
     kind: 'body', name: body.name, radius: body.radius, radii: [...body.radii], craters: source.craters.get(body) ?? 0.8,
-    key, manifestMap: key ? s.manifest.maps[key] : null, map, patches,
+    key, manifestMap: key ? s.manifest.maps[key] : null, map, patches, elevation,
   };
 }
 
-/** Rebuild the height function of a spec (in a worker, or on the main thread for tests). */
-export function heightFromSpec(spec: HeightSpec): HeightFn {
+/**
+ * Rebuild the height function of a spec (in a worker, or on the main thread for tests). `elevSample`
+ * (the tile worker's wrapper over its ElevationStore) plugs sharper global elevation into the body
+ * heights when it answers; omitted, the coarse global maps and generated relief are used.
+ */
+export function heightFromSpec(
+  spec: HeightSpec,
+  elevSample?: (n: Vector3, spacing: number) => { h: number; mpp: number } | null,
+): HeightFn {
   if (spec.kind === 'exo') {
     const g = new ExoGround({ name: spec.name, radius: spec.radius } as ExoPlanet, spec.type, spec.seed, spec.seaLevel, spec.craters);
     g.lite = spec.lite;
@@ -58,5 +74,6 @@ export function heightFromSpec(spec: HeightSpec): HeightFn {
   src.patches = new Map(spec.key ? [[spec.key, spec.patches]] : []);
   src.craters = new Map([[body, spec.craters]]);
   src.versions = new Map();
+  src.elevSample = elevSample ?? null;
   return (n: Vector3, sp: number) => (src as TerrainSource).height(body as any, n, sp);
 }
