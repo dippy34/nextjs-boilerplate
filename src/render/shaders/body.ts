@@ -244,15 +244,21 @@ void main() {
   // procedural surface (bodies without a map) or fine detail beyond a map's resolution
   float freshAll = 0.0;
   float hProc = 0.0;
-  if (uProc > 0.5) {
+  // Up close on the terrain the orbital-scale craters below (computed from the body-fixed direction,
+  // good to only a few centimetres in float32) would turn into per-pixel noise: they fade out where a
+  // pixel spans less than a couple of metres (and are not computed at all there), and the precise
+  // local lattices further down take over.
+  float mppT = length(fwidth(vPosView));
+  float wT = uTerrain > 0.5 ? smoothstep(0.4, 2.5, mppT) : 1.0;
+  float texPerPx = fwidth(vUv.x) * uMapW;   // (derivatives outside the branches below)
+  if (uProc > 0.5 && wT > 0.0) {
     float f1, f2, f3;
     float f0;
     hProc = 1.6 * craters(nB, 1.4, uSeed + 3.0, 0.3 * uCraters, f0)
           + craters(nB, 3.0, uSeed, 0.55 * uCraters, f1) + craters(nB, 8.0, uSeed + 17.0, 0.7 * uCraters, f2)
           + (uLite > 0.5 ? 0.0 : craters(nB, 21.0, uSeed + 41.0, 0.85 * uCraters, f3)) + 0.015 * (bfbm(nB * 5.0 + uSeed) - 0.5);
     freshAll = max(f1, max(f2 * 0.8, f3 * 0.6));
-  } else if (uMapW > 0.0) {
-    float texPerPx = fwidth(vUv.x) * uMapW;
+  } else if (uMapW > 0.0 && wT > 0.0) {
     float w = smoothstep(0.7, 0.2, texPerPx);           // fades in when a texel covers > ~1.5 pixels
     if (w > 0.0) {
       float fd;
@@ -262,12 +268,8 @@ void main() {
       hProc = w * 0.55 * (craters(nB, fq, uSeed, 0.12 + 0.45 * patchy, fd) + (uLite > 0.5 ? 0.0 : 0.5 * craters(nB, fq * 2.7, uSeed + 9.0, 0.2 + 0.45 * patchy, fd)));
     }
   }
+  hProc *= wT;
   // relief fades towards the limb, where it would only alias into a ragged silhouette
-  // Up close on the terrain the orbital-scale craters above (computed from the body-fixed direction,
-  // good to only a few centimetres in float32) would turn into per-pixel noise: they fade out where a
-  // pixel spans less than a couple of metres, and the precise local lattices below take over.
-  float mppT = length(fwidth(vPosView));
-  if (uTerrain > 0.5) hProc *= smoothstep(0.4, 2.5, mppT);
   // (the terrain is seen at grazing angles all the time: only the very edge-on parts fade)
   float limbFade = uTerrain > 0.5 ? smoothstep(0.0, 0.12, dot(nP, V)) : smoothstep(0.05, 0.4, dot(nP, V));
   float hBump = hProc * uRadiusM * (uProc > 0.5 ? 1.0 : 0.6);
