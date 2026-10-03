@@ -269,16 +269,17 @@ requests from:
 
 - **Moon**: LRO LOLA gridded elevation `LDEM_128` (128 pixels per degree, about 237 m), PDS
   Geosciences Node, <https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/>
-  (Apollo 11 site, Tycho, Copernicus).
+  (Apollo 11, 15 and 17 sites, Chang'e 4, Tycho, Copernicus).
 - **Mars**: the MOLA 463 m DEM above at full or half resolution (Olympus Mons, Valles Marineris,
-  Gale and Jezero craters).
+  Gale and Jezero craters, the Opportunity and Spirit sites).
 - **Earth**: ETOPO 2022 15 arc-second (about 460 m) surface elevation tiles, NOAA NCEI,
   <https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/15s_surface_elev_gtif/>
   (Mount Everest, the Grand Canyon, Kilimanjaro, the Matterhorn, Mauna Kea, Mount Fuji, Denali).
 
 Landmark coordinates (`src/universe/Landmarks.ts`): the USGS/IAU Gazetteer of Planetary Nomenclature
 (<https://planetarynames.wr.usgs.gov/>) for feature centres; the Apollo 11, Curiosity and Perseverance
-landing sites as published by NASA and the mission teams; on Earth, the summits' commonly published
+landing sites (Apollo 11, 15, 17, Chang'e 4, Spirit, Opportunity, Curiosity, Perseverance) as
+published by NASA, CNSA and the mission teams; on Earth, the summits' commonly published
 positions and heights (Everest 8,849 m, the 2020 China-Nepal survey). Their ground elevations are
 rounded values read from the elevation models above.
 

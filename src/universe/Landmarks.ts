@@ -20,15 +20,22 @@ interface LandmarkDef {
  * Places worth visiting on the landing terrain. Coordinates: USGS Gazetteer of Planetary
  * Nomenclature (IAU WGPSN) feature centres; landing sites from the mission teams' published
  * coordinates (Apollo 11: 0.674 N, 23.473 E; Curiosity's Bradbury Landing: 4.589 S, 137.441 E;
- * Perseverance's Octavia E. Butler Landing: 18.445 N, 77.451 E). Earth: the summits' surveyed
+ * Perseverance's Octavia E. Butler Landing: 18.445 N, 77.451 E; Apollo 15: 26.1322 N, 3.6339 E;
+ * Apollo 17: 20.1908 N, 30.7717 E; Chang'e 4: 45.4446 S, 177.5991 E; Opportunity: 1.9462 S,
+ * 354.4734 E; Spirit: 14.5684 S, 175.4726 E). Earth: the summits' surveyed
  * positions and heights, and the Grand Canyon at Grand Canyon Village (South Rim).
  */
 export const LANDMARKS: LandmarkDef[] = [
   { name: 'Olympus Mons', body: 'Mars', lat: 18.65, lon: -133.8, h: 21e3, view: 70e3, about: 'the tallest volcano known, about 22 km above the Martian datum' },
   { name: 'Valles Marineris', body: 'Mars', lat: -13.9, lon: -59.2, h: -4e3, view: 45e3, about: 'a canyon system 4,000 km long and up to 7 km deep' },
   { name: 'Gale Crater (Curiosity)', body: 'Mars', lat: -4.589, lon: 137.441, h: -4.5e3, view: 8e3, about: 'where NASA\'s Curiosity rover landed in 2012' },
+  { name: 'Opportunity (Eagle crater)', body: 'Mars', lat: -1.9462, lon: -5.5266, h: -1.4e3, view: 6e3, about: 'where NASA\'s Opportunity rover landed in 2004; it drove 45 km in 14 years' },
+  { name: 'Spirit (Gusev crater)', body: 'Mars', lat: -14.5684, lon: 175.4726, h: -1.9e3, view: 8e3, about: 'where NASA\'s Spirit rover landed in 2004' },
   { name: 'Jezero Crater (Perseverance)', body: 'Mars', lat: 18.445, lon: 77.451, h: -2.6e3, view: 8e3, about: 'where NASA\'s Perseverance rover landed in 2021' },
   { name: 'Apollo 11 landing site', body: 'Moon', lat: 0.674, lon: 23.473, h: -1.9e3, view: 4e3, about: 'Tranquility Base, 20 July 1969' },
+  { name: 'Apollo 15 landing site', body: 'Moon', lat: 26.1322, lon: 3.6339, h: -1.9e3, view: 15e3, about: 'Hadley Rille below the Apennine mountains, July 1971 (the first lunar rover)' },
+  { name: 'Apollo 17 landing site', body: 'Moon', lat: 20.1908, lon: 30.7717, h: -2.6e3, view: 12e3, about: 'the Taurus-Littrow valley, December 1972, the last Apollo landing' },
+  { name: "Chang'e 4 (far side)", body: 'Moon', lat: -45.4446, lon: 177.5991, h: -5.9e3, view: 8e3, about: 'the first landing on the Moon\'s far side, January 2019, in Von Kármán crater' },
   { name: 'Tycho', body: 'Moon', lat: -43.31, lon: -11.36, h: -2e3, view: 70e3, about: 'a young crater 85 km across with bright rays' },
   { name: 'Copernicus', body: 'Moon', lat: 9.62, lon: -20.08, h: -3e3, view: 75e3, about: 'a 93 km crater with terraced walls and central peaks' },
   { name: 'Shackleton (lunar south pole)', body: 'Moon', lat: -89.67, lon: 129.78, h: -1e3, view: 30e3, about: 'a crater whose floor never sees the Sun, near the Artemis landing regions' },

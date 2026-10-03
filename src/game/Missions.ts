@@ -60,6 +60,10 @@ const DEFS: Def[] = [
     const o = over(a, 'Earth');
     return !!o && o.alt < 12e3 && arc(o.lat, o.lon, 27.988, 86.925) < 0.18;
   } },
+  { id: 'canyon', title: 'Fly through the Grand Canyon', detail: 'Below the rim: under 1.6 km altitude, within 15 km of Grand Canyon Village (36.06° N 112.14° W)', check: (a) => {
+    const o = over(a, 'Earth');
+    return !!o && o.alt < 1.6e3 && arc(o.lat, o.lon, 36.06, -112.14) < 0.135;
+  } },
   { id: 'southpole', title: "Land at the Moon's south pole", detail: 'Ship mode: touch down south of 80° S, where Artemis astronauts are headed', check: (a) => {
     const o = over(a, 'Moon');
     return !!o && a.game?.landed?.name === 'Moon' && o.lat < -80;

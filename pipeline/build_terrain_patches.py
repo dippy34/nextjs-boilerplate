@@ -40,6 +40,11 @@ PATCHES = [
     ("valles", "mars", -13.9, -59.2, 1024, 2),
     ("gale", "mars", -4.589, 137.441, 512, 1),
     ("jezero", "mars", 18.445, 77.451, 512, 1),
+    ("apollo15", "moon", 26.1322, 3.6339, 512, 1),
+    ("apollo17", "moon", 20.1908, 30.7717, 512, 1),
+    ("change4", "moon", -45.4446, 177.5991, 512, 1),
+    ("opportunity", "mars", -1.9462, -5.5266, 512, 1),
+    ("spirit", "mars", -14.5684, 175.4726, 512, 1),
 ]
 
 # (name, lat, lon, size in output pixels): Earth, from ETOPO 2022 15" tiles (240 samples per degree)
@@ -145,6 +150,25 @@ def cut_earth(lat: float, lon: float, size: int) -> tuple[np.ndarray, dict]:
 
 def main() -> None:
     import sys
+    if sys.argv[1:2] == ["only"]:
+        # add (or redo) only the named Moon/Mars patches, keeping the others
+        names = set(sys.argv[2:])
+        manifest_path = DIR / "terrain.json"
+        manifest = json.loads(manifest_path.read_text())
+        sources = {}
+        done = []
+        for name, body, lat, lon, size, step in PATCHES:
+            if name not in names:
+                continue
+            if body not in sources:
+                sources[body] = LolaImg() if body == "moon" else MolaTif()
+            h, b = cut(sources[body], lat, lon, size, step)
+            done.append(save(name, h) | b | {"name": name, "body": body,
+                                             "credit": "LRO LOLA LDEM_128 (PDS Geosciences)" if body == "moon" else "MGS MOLA DEM 463 m (USGS)"})
+        manifest["patches"] = [p for p in manifest.get("patches", []) if p["name"] not in names] + done
+        manifest_path.write_text(json.dumps(manifest, indent=1))
+        print(f"wrote {len(done)} patches into terrain.json")
+        return
     if sys.argv[1:] == ["earth"]:
         # add (or redo) only the Earth patches, keeping the others
         manifest_path = DIR / "terrain.json"
