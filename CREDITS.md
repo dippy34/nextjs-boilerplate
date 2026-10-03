@@ -219,9 +219,12 @@ are used. Mission descriptions summarise public NASA/ESA mission facts.
 | **SIMBAD** astronomical database (CDS, Strasbourg; Wenger et al. 2000, *A&AS* 143, 9), via TAP | Positions, apparent sizes, position angles and morphological types of 47 nearby galaxies; distances (median of the published redshift-independent measurements in SIMBAD's `mesDistance` table); V magnitudes | Free for scientific and educational use with acknowledgement | `public/data/galaxies.json` |
 
 Acknowledgement: *This research has made use of the SIMBAD database, operated at CDS, Strasbourg,
-France.* Each galaxy is drawn procedurally (`src/render/GalaxiesLayer.ts`): a disc with spiral arms,
-bar, dust and star-forming knots chosen from its type, plus a bulge; ellipticals and dwarfs as a
-soft spheroid. The inclination follows from the catalogued axis ratio. No galaxy images are used.
+France.* Total V magnitudes of NGC 4565, M49, the Cartwheel and NGC 5195 (SIMBAD's are partial) come
+from the RC3 (de Vaucouleurs et al. 1991, *Third Reference Catalogue of Bright Galaxies*: B_T and
+(B-V)_T), and published disc inclinations of about 25 galaxies (M31 77°, NGC 891 89.5°, M104 84°, ...)
+from the literature. Each galaxy is drawn procedurally (`src/render/GalaxiesLayer.ts`) as a 3D volume:
+a Sérsic spheroid and a disc (old, thick and young discs, spiral arms, bar, star-forming knots, dust)
+chosen from its type, as bright as its catalogued magnitude and size say. No galaxy images are used.
 
 ## Nebulae and star clusters (`public/data/deepsky.json`, `pipeline/build_deepsky.py`)
 
