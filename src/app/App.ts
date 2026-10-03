@@ -5,7 +5,8 @@ import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/un
 import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
-import { TerrainPatch } from '../render/TerrainPatch';
+import { PlanetTerrain } from '../render/PlanetTerrain';
+import type { TerrainPatch } from '../render/TerrainPatch';
 import { RingSpot } from '../universe/RingSpot';
 import { Landmark, LANDMARKS } from '../universe/Landmarks';
 import { CometTails } from '../render/CometTails';
@@ -113,7 +114,7 @@ export class App {
   private photoMode = false;
   private labelsBeforePhoto = true;
   /** real 3D ground under the explorer near solid worlds */
-  readonly terrain = new TerrainPatch();
+  readonly terrain = new PlanetTerrain();
   /** the Milky Way drawn per pixel from outside it */
   readonly mwVolume = new MilkyWayVolume();
   /** rocks on the ground around the explorer (on the landing terrain) */
@@ -205,7 +206,8 @@ export class App {
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
     // scanned ground materials for close-up surfaces (loaded in the background)
     void loadMaterials(DATA, xrCapable).catch((e) => console.warn('materials', e));
-    app.rocks = new Rocks(app.terrain, xrCapable);
+    app.rocks = new Rocks(app.terrain as unknown as TerrainPatch, xrCapable);
+    app.terrain.source = bodies.terrainSource;
     app.cometTails = new CometTails(bodies.surfaceExposure);
     const earthBody = system.byId.get(399)!;
     const craft = await loadSpacecraft(DATA, system.sun, earthBody).catch((e) => { console.warn('spacecraft', e); return [] as Spacecraft[]; });
@@ -1634,6 +1636,7 @@ export class App {
       const c = cands[0] ?? null;
       if (c) c.air = this.atmospheres.material(c.ground.owner);
       this.terrain.vr = this.vr.active;
+      this.terrain.view = this.view;
       this.terrain.update(c);
       this.rocks.update(this.rig.upos, this.renderer.gl);
     }
