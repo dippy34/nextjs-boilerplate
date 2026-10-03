@@ -14,11 +14,12 @@ positions (ISS, Hubble, JWST, Voyager 1 & 2, New Horizons, Parker Solar Probe, E
 Lucy, Psyche) · **47 nearby galaxies** (Andromeda, Triangulum, the Magellanic Clouds, the Whirlpool,
 the Sombrero, Centaurus A, M87 …) · **41 nebulae and star clusters** (the Orion, Carina, Eagle,
 Ring, Helix and Crab nebulae, the Pleiades, Omega Centauri, 47 Tucanae …) · the Milky Way from outside ·
-**real 3D ground to land on**: NASA elevation models for the Moon, Mars and Mercury and NOAA's for
-Earth, with a tour of landmarks to fly to (Mount Everest, the Grand Canyon, Kilimanjaro, the
+**real 3D ground to land on**: NASA elevation models for the Moon, Mars, Mercury and Ceres and
+NOAA's for Earth, with a tour of landmarks to fly to (Mount Everest, the Grand Canyon, Kilimanjaro, the
 Matterhorn, Mauna Kea, Mount Fuji, Denali, Olympus Mons, Valles Marineris, the Curiosity, Perseverance,
 Spirit and Opportunity sites, the Apollo 11, 15 and 17 sites, Chang'e 4 on the far side, Tycho,
-Copernicus, Shackleton at the lunar south pole, the Caloris Basin), generated hills, craters
+Copernicus, Shackleton at the lunar south pole, the Caloris Basin, Occator and Ahuna Mons on
+Ceres), generated hills, craters
 and shadows on other moons, and on rocky planets of other stars (their mountains and seas match their
 colours; temperate worlds have blue skies) · **inside Saturn's
 rings** among their ice (search "rings") · comets near the Sun with comas, tails and (up close) a
@@ -245,7 +246,7 @@ Checked with `npm test` and the headless-browser suites (`scripts/verify.mjs`, `
 Known limitations (planned for later phases unless noted):
 
 * Close to a solid world the ground becomes real 3D terrain: elevation models for the Moon, Mars,
-  Mercury and Earth (about 5–20 km per sample) with generated relief below that, generated relief on
+  Mercury, Ceres and Earth (about 5–20 km per sample) with generated relief below that, generated relief on
   other round moons, dwarf planets and rocky planets of other stars. Venus, Titan and small
   irregular bodies keep smooth surfaces with relief shading. Earth's clouds are painted on the
   surface from orbit; below 150 km they become a layer 7 km up (the same map, with generated

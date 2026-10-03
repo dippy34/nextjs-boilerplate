@@ -46,7 +46,7 @@ const GALAXIES = ['Andromeda Galaxy', 'Triangulum Galaxy', 'Large Magellanic Clo
 const PLANETS = ['Sun', 'Mercury', 'Venus', 'Earth', 'Moon', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Ceres'];
 const MOON_PARENTS = ['Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
 /** Places tab: the groups on the left, and the landmarks shown under Highlights */
-const PLACE_GROUPS = ['Highlights', 'Earth', 'Moon', 'Mars', 'Mercury'];
+const PLACE_GROUPS = ['Highlights', 'Earth', 'Moon', 'Mars', 'Mercury', 'Ceres'];
 const HIGHLIGHTS = ['Mount Everest', 'Grand Canyon', 'Olympus Mons', 'Valles Marineris', 'Apollo 11 landing site', 'Tycho'];
 const STARS = ['Proxima Centauri', 'Rigil Kentaurus', 'Sirius', 'Betelgeuse', 'Rigel', 'Vega', 'Polaris', 'Arcturus', 'Antares', 'Aldebaran',
   'Canopus', 'Deneb', "Barnard's Star", 'Tau Ceti', 'Altair', 'Capella', 'Spica', 'Fomalhaut', 'Procyon', 'Mira'];

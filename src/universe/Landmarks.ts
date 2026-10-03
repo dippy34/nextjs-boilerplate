@@ -40,6 +40,8 @@ export const LANDMARKS: LandmarkDef[] = [
   { name: 'Tycho', body: 'Moon', lat: -43.31, lon: -11.36, h: -2e3, view: 70e3, about: 'a young crater 85 km across with bright rays' },
   { name: 'Copernicus', body: 'Moon', lat: 9.62, lon: -20.08, h: -3e3, view: 75e3, about: 'a 93 km crater with terraced walls and central peaks' },
   { name: 'Shackleton (lunar south pole)', body: 'Moon', lat: -89.67, lon: 129.78, h: -1e3, view: 30e3, about: 'a crater whose floor never sees the Sun, near the Artemis landing regions' },
+  { name: 'Occator crater (Ceres)', body: 'Ceres', lat: 19.82, lon: -120.67, h: -1.2e3, view: 60e3, about: 'a 92 km crater holding the brightest spots on Ceres: salts left by briny water from below' },
+  { name: 'Ahuna Mons (Ceres)', body: 'Ceres', lat: -10.48, lon: -43.8, h: 3.3e3, view: 25e3, elev: 12, about: 'a lone ice volcano about 4 km high' },
   { name: 'Caloris Basin', body: 'Mercury', lat: 31.5, lon: 162.7, h: 0, view: 300e3, about: 'an impact basin 1,550 km across' },
   { name: 'Mount Everest', body: 'Earth', lat: 27.988, lon: 86.925, h: 8.8e3, view: 25e3, elev: 9, about: 'the highest mountain above sea level, 8,849 m, in the Himalaya' },
   { name: 'Grand Canyon', body: 'Earth', lat: 36.06, lon: -112.14, h: 2.1e3, view: 14e3, elev: 25, about: 'a canyon 446 km long and up to 1.8 km deep, cut by the Colorado River' },

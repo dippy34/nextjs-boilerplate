@@ -259,6 +259,9 @@ heights in PNG files; all are public domain (U.S. Government work):
   (`Mars_MGS_MOLA_DEM_mosaic_global_463m.tif`).
 - **Mercury**: MESSENGER USGS global DEM 665 m v2 (NASA/JHUAPL/CIW), via USGS Astrogeology
   (`Mercury_Messenger_USGS_DEM_Global_665m_v2.tif`).
+- **Ceres**: NASA/JPL-Caltech/UCLA/MPS/DLR/IDA Dawn Framing Camera HAMO DTM (DLR), 60 pixels per
+  degree, via USGS Astrogeology (`Ceres_Dawn_FC_HAMO_DTM_DLR_Global_60ppd_Oct2016.tif`), converted
+  from heights above a 470 km sphere to heights above the IAU ellipsoid.
 - **Earth**: NOAA NCEI ETOPO 2022 60 arc-second Global Relief Model (surface elevation),
   DOI 10.25921/fd45-gt74. Water (height at or below 0) is drawn as flat sea at sea level, so
   depressions such as the Dead Sea and the Caspian are flattened to 0 m.

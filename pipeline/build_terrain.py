@@ -7,6 +7,8 @@ relief (and all relief on other bodies) is generated.
   Moon     NASA SVS CGI Moon Kit, LRO LOLA LDEM 16 ppd (half-metres, offset 20000, vs 1737.4 km)  public domain
   Mars     NASA/JPL/GSFC MGS MOLA global DEM 463 m, via USGS Astrogeology (m vs the areoid)        public domain
   Mercury  MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology (m vs 2439.4 km)              public domain
+  Ceres    NASA/JPL/DLR Dawn FC HAMO DTM 60 ppd, via USGS Astrogeology (m vs a 470 km sphere,
+           converted here to the IAU ellipsoid 482.2 x 482.1 x 445.9 km the engine measures from)  public domain
   Earth    NOAA NCEI ETOPO 2022 60" surface elevation (m vs the EGM2008 geoid)                     public domain
            Water (height <= 0) is stored as -200 m: the engine draws it flat at sea level ("sea": 0),
            and the shallow fill keeps the coastline near the right place after resampling.
@@ -53,13 +55,28 @@ def earth() -> dict:
         "credit": "NOAA NCEI, ETOPO 2022 60 arc-second Global Relief Model (surface), DOI 10.25921/fd45-gt74", "source": ETOPO}
 
 
+CERES = USGS + "Ceres_Dawn_FC_HAMO_DTM_DLR_Global_60ppd_Oct2016.tif"
+
+
+def ceres() -> dict:
+    h = fill_nan_zonal(StripTiff(CERES).decimated(W, H, rows_per_out=2, nodata=-32768)[..., :1])[..., 0].astype(np.float64)
+    # heights above a 470 km sphere -> above the ellipsoid (a, b, c) of the body's rotation model
+    a, b, c = 482.2e3, 482.1e3, 445.9e3
+    lat = np.radians(90.0 - (np.arange(H) + 0.5) * 180.0 / H)[:, None]
+    lon = np.radians((np.arange(W) + 0.5) * 360.0 / W)[None, :]            # this map starts at 0 deg E
+    nx, ny, nz = np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat) * np.ones_like(lon)
+    ell = 1.0 / np.sqrt((nx / a) ** 2 + (ny / b) ** 2 + (nz / c) ** 2)
+    return save("ceres", (470e3 + h - ell).astype(np.float32)) | {"lonLeft": 0,
+        "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA, Dawn FC HAMO DTM (DLR) 60 ppd, via USGS Astrogeology", "source": CERES}
+
+
 def main() -> None:
     import json
     import sys
-    if sys.argv[1:] == ["earth"]:
-        # rebuild only the Earth map, keeping the rest of terrain.json (and its patches)
+    if sys.argv[1:] and sys.argv[1] in ("earth", "ceres"):
+        # rebuild only one map, keeping the rest of terrain.json (and its patches)
         man = json.loads((DIR / "terrain.json").read_text())
-        man["maps"]["earth"] = earth()
+        man["maps"][sys.argv[1]] = earth() if sys.argv[1] == "earth" else ceres()
         (DIR / "terrain.json").write_text(json.dumps(man, indent=1))
         return
     out: dict[str, dict] = {}
@@ -78,6 +95,7 @@ def main() -> None:
     out["mercury"] = save("mercury", h) | {"credit": "NASA/JHUAPL/CIW, MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology", "source": url}
 
     out["earth"] = earth()
+    out["ceres"] = ceres()
 
     write_json(DIR / "terrain.json", {"license": "Public domain (U.S. Government work)", "maps": out}, compact=False)
 
