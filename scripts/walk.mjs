@@ -245,16 +245,22 @@ if (which !== 'desktop') {
   await frames(4);
   let st = await page.evaluate(() => window.app.walk.debug());
   check('v1: VR wrist WALK button lands and walks on the Moon', st.state === 'walk' && st.world === 'Moon', '');
-  const headY = await page.evaluate(() => window.app.renderer.camera.position.y);
-  const eyeVR = await page.evaluate(() => {
-    const a = window.app; const cam = a.renderer.camera; cam.updateMatrixWorld(true);
-    const w = cam.getWorldPosition(cam.position.clone());
-    const d = a.walk.debug();
-    // head above the ground = dolly height above ground + the head's height along the vertical
-    const up = a.rig.upos.sub(a.walk.centre ?? a.rig.upos).normalize();
-    return { dolly: d.eyeH, headUp: w.dot(up) };
+  // eye height above the ground = the dolly's height + the headset's own height above the floor.
+  // A headset reporting no floor height (the emulator, a seated 3-DoF device) is lifted to a
+  // standing eye; one with floor-level tracking stands the dolly on the ground and keeps its height.
+  const eyeTotal = () => page.evaluate(() => {
+    const a = window.app;
+    const cam = a.renderer.camera;
+    return { dolly: a.walk.debug().eyeH, headY: cam.position.y };
   });
-  check('v1: headset height carries the eye (dolly on the ground)', Math.abs(eyeVR.dolly) < 0.15 && Math.abs(eyeVR.dolly + eyeVR.headUp - headY) < 0.2 && headY > 1.2, JSON.stringify({ ...eyeVR, headY }));
+  let e = await eyeTotal();
+  check('v1: eye is 1.7 m above the ground (headset height 0: lifted to standing)', Math.abs(e.dolly + e.headY - 1.7) < 0.1, JSON.stringify(e));
+  await page.evaluate(() => { window.__xrDevice.position.y = 1.62; });
+  await frames(4);
+  e = await eyeTotal();
+  check('v1: a headset with floor tracking stands the dolly on the ground and keeps its own height', Math.abs(e.dolly) < 0.1 && Math.abs(e.headY - 1.62) < 0.1 && Math.abs(e.dolly + e.headY - 1.62) < 0.12, JSON.stringify(e));
+  await page.evaluate(() => { window.__xrDevice.position.y = 0; });
+  await frames(3);
   await page.screenshot({ timeout: 400000, path: path.join(outDir, 'v1-vr-standing.png') });
 
   // left stick forward: walks where the head looks; vignette comes on
@@ -266,7 +272,7 @@ if (which !== 'desktop') {
   st = walk[walk.length - 1];
   const moved = Math.hypot(st.pos[0] - p0[0], st.pos[1] - p0[1], st.pos[2] - p0[2]);
   check('v2: left stick walks', moved > 1 && walk.every((s) => s.finite), `moved ${moved.toFixed(2)} m`);
-  check('v2: dolly stays on the ground while walking', walk.filter((s) => s.onGround).every((s) => Math.abs(s.eyeH) < 0.15), JSON.stringify(stats(walk.map((s) => s.eyeH))));
+  check('v2: eye height stays 1.7 ± 0.1 m while walking', walk.filter((s) => s.onGround).every((s) => Math.abs(s.eyeH - 1.7) < 0.1), JSON.stringify(stats(walk.map((s) => s.eyeH))));
   check('v2: comfort vignette while moving', vig > 0.1, vig.toFixed(2));
   await page.screenshot({ timeout: 400000, path: path.join(outDir, 'v2-vr-walking.png') });
 
