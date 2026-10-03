@@ -45,6 +45,9 @@ const HOLES = ['Sagittarius A*', 'M87*', 'Cygnus X-1', 'Gaia BH1', 'Gaia BH2', '
 const GALAXIES = ['Andromeda Galaxy', 'Triangulum Galaxy', 'Large Magellanic Cloud', 'Small Magellanic Cloud', 'Whirlpool Galaxy', 'Sombrero Galaxy', 'Centaurus A', 'Pinwheel Galaxy', 'M87'];
 const PLANETS = ['Sun', 'Mercury', 'Venus', 'Earth', 'Moon', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Ceres'];
 const MOON_PARENTS = ['Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
+/** Places tab: the groups on the left, and the landmarks shown under Highlights */
+const PLACE_GROUPS = ['Highlights', 'Earth', 'Moon', 'Mars', 'Mercury'];
+const HIGHLIGHTS = ['Mount Everest', 'Grand Canyon', 'Olympus Mons', 'Valles Marineris', 'Apollo 11 landing site', 'Tycho'];
 const STARS = ['Proxima Centauri', 'Rigil Kentaurus', 'Sirius', 'Betelgeuse', 'Rigel', 'Vega', 'Polaris', 'Arcturus', 'Antares', 'Aldebaran',
   'Canopus', 'Deneb', "Barnard's Star", 'Tau Ceti', 'Altair', 'Capella', 'Spica', 'Fomalhaut', 'Procyon', 'Mira'];
 const COMETS = ['Halley', 'Hale-Bopp', 'Churyumov', 'Encke', 'Tempel 1', 'Wild 2', 'Hartley 2', 'Swift-Tuttle'];
@@ -54,6 +57,7 @@ export class VRMenu {
   readonly panel: Panel;
   private tab: Tab = 'planets';
   private moonParent = 'Jupiter';
+  private placeGroup = 'Highlights';
   private query = '';
   private thumbs: HTMLImageElement | null = null;
   private thumbIndex: { cell: number; bodies: Record<string, [number, number]> } | null = null;
@@ -113,15 +117,7 @@ export class VRMenu {
         if (!this.exoList.length) p.text('Loading the exoplanet catalogue…', area.x + 20, area.y + 40, 28, COLORS.dim);
         break;
       case 'craft': this.paintGrid(p, area, app.craft.craft.filter((c) => c.valid), 4, 3); break;
-      case 'places': {
-        const jup = app.findByName('Jupiter'), moon = app.findByName('Moon');
-        const events = [
-          jup ? new TourEvent('shadow', "Moon shadow on Jupiter", jup, 'jumps to the next shadow transit') : null,
-          moon ? new TourEvent('eclipse', 'Total lunar eclipse', moon, '3 March 2026, the Moon in Earth\'s shadow') : null,
-        ];
-        this.paintGrid(p, area, [app.findByName("Saturn's rings"), ...app.landmarks, ...events].filter(nonNull), 3, 4);
-        break;
-      }
+      case 'places': this.paintPlaces(p, area); break;
       case 'nebulae': this.paintGrid(p, area, NEBULAE.map((n) => app.findByName(n)).filter(nonNull), 4, 3); break;
       case 'holes': this.paintGrid(p, area, [app.milkyWay, ...GALAXIES.map((n) => app.findByName(n)).filter(nonNull), ...HOLES.slice(0, 6).map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull)], 4, 4); break;
       case 'search': this.paintSearch(p, area); break;
@@ -245,6 +241,27 @@ export class VRMenu {
     const w = (a.w - gap * (cols - 1)) / cols;
     const h = (a.h - gap * (rows - 1)) / rows;
     items.slice(0, cols * rows).forEach((o, i) => this.tile(p, o, a.x + (i % cols) * (w + gap), a.y + Math.floor(i / cols) * (h + gap), w, h));
+  }
+
+  /** Places: highlights (events and the best-known landmarks), or every landmark of one world. */
+  private paintPlaces(p: Panel, a: { x: number; y: number; w: number; h: number }): void {
+    const app = this.host.app;
+    PLACE_GROUPS.forEach((n, i) => {
+      p.button(`places:${n}`, a.x, a.y + i * 104, 250, 90, n, () => { this.placeGroup = n; p.dirty = true; }, { active: this.placeGroup === n, size: 30 });
+    });
+    let items: (SpaceObject | null)[];
+    if (this.placeGroup === 'Highlights') {
+      const jup = app.findByName('Jupiter'), moon = app.findByName('Moon');
+      items = [
+        app.findByName("Saturn's rings"),
+        jup ? new TourEvent('shadow', 'Moon shadow on Jupiter', jup, 'jumps to the next shadow transit') : null,
+        moon ? new TourEvent('eclipse', 'Total lunar eclipse', moon, '3 March 2026, the Moon in Earth\'s shadow') : null,
+        ...HIGHLIGHTS.map((n) => app.landmarks.find((l) => l.name === n) ?? null),
+      ];
+    } else {
+      items = app.landmarks.filter((l) => l.def.body === this.placeGroup);
+    }
+    this.paintGrid(p, { x: a.x + 280, y: a.y, w: a.w - 280, h: a.h }, items.filter(nonNull), 3, 4);
   }
 
   private paintMoons(p: Panel, a: { x: number; y: number; w: number; h: number }): void {

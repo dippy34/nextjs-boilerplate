@@ -50,6 +50,7 @@ uniform float uHasNight;
 uniform sampler2D uClouds;
 uniform float uHasClouds;
 uniform float uCloudShift;    // texture-space longitude offset of the cloud layer
+uniform float uCloudVis;      // 1 from orbit, 0 below the clouds
 uniform sampler2D uRelief;    // R,G = tangent-space normal (east, north); B = water mask
 uniform float uHasRelief;
 uniform float uWater;         // 1 if the relief map's B channel is a water mask
@@ -330,7 +331,7 @@ void main() {
   float cloud = 0.0;
   if (uHasClouds > 0.5) {
     cloud = texture2D(uClouds, vec2(vUv.x + uCloudShift, vUv.y)).r;
-    cloud = smoothstep(0.08, 0.9, cloud);
+    cloud = smoothstep(0.08, 0.9, cloud) * uCloudVis;
     albedo = mix(albedo, vec3(0.75), cloud);
   }
 

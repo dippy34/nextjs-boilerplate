@@ -7,8 +7,10 @@ row by row with HTTP range requests (no full download):
   Moon  LRO LOLA LDEM_128 (128 pixels/degree, ~237 m), PDS Geosciences Node,
         lro-l-lola-3-rdr-v1 / lola_gdr / cylindrical  (16-bit LSB, 0.5 m per unit, vs 1737.4 km)
   Mars  MGS MOLA global DEM 463 m (the same source as the global map), via USGS Astrogeology
+  Earth NOAA NCEI ETOPO 2022 15 arc-second surface elevation (~460 m), 15-degree GeoTIFF tiles
+        (downloaded whole); water (height <= 0) stored as -200 m like the global Earth map
 
-Both are public domain (U.S. Government work). Same encoding as the global maps: RGB PNG,
+All are public domain (U.S. Government work). Same encoding as the global maps: RGB PNG,
 height = (R * 256 + G) * scale + offset; bounds in degrees (planetocentric, east longitude).
 """
 from __future__ import annotations
@@ -16,11 +18,14 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 
+import math
+
 import numpy as np
+import rasterio
 from PIL import Image
 
 from common import OUT
-from fetch_hires import USGS, StripTiff, range_get
+from fetch_hires import HI, USGS, StripTiff, download, range_get
 
 DIR = OUT / "terrain"
 LOLA = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_128.img"
@@ -36,6 +41,16 @@ PATCHES = [
     ("gale", "mars", -4.589, 137.441, 512, 1),
     ("jezero", "mars", 18.445, 77.451, 512, 1),
 ]
+
+# (name, lat, lon, size in output pixels): Earth, from ETOPO 2022 15" tiles (240 samples per degree)
+EARTH_PATCHES = [
+    ("everest", 27.988, 86.925, 768),
+    ("grandcanyon", 36.10, -112.11, 768),
+    ("kilimanjaro", -3.0674, 37.3556, 512),
+    ("matterhorn", 45.976, 7.658, 768),
+    ("maunakea", 19.82, -155.47, 768),
+]
+ETOPO15 = "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/15s_surface_elev_gtif/"
 
 PPD = 128  # both sources: 128 samples per degree
 
@@ -99,7 +114,57 @@ def save(name: str, h: np.ndarray) -> dict:
     return {"file": f"patches/{name}.png", "width": int(h.shape[1]), "height": int(h.shape[0]), "offset": lo, "scale": scale}
 
 
+def etopo_tile(lat_top: int, lon_left: int):
+    name = f"ETOPO_2022_v1_15s_{'N' if lat_top >= 0 else 'S'}{abs(lat_top):02d}{'E' if lon_left >= 0 else 'W'}{abs(lon_left):03d}_surface.tif"
+    return download(ETOPO15 + name, HI / "etopo15" / name, min_size=1_000_000)
+
+
+def cut_earth(lat: float, lon: float, size: int) -> tuple[np.ndarray, dict]:
+    ppd = 240
+    half = size / 2 / ppd
+    lat0, lon0 = round((lat - half) * ppd) / ppd, round((lon - half) * ppd) / ppd
+    lat1, lon1 = lat0 + size / ppd, lon0 + size / ppd
+    # mosaic of the 15-degree tiles (named by their north-west corner) on the common 1/240 degree grid
+    h = np.zeros((size, size), np.float32)
+    for top in range(math.ceil((lat0 + 1e-9) / 15) * 15, math.ceil((lat1 - 1e-9) / 15) * 15 + 1, 15):
+        for left in range(math.floor(lon0 / 15) * 15, math.floor((lon1 - 1e-9) / 15) * 15 + 1, 15):
+            r0 = round((top - lat1) * ppd)          # output row 0 in tile rows
+            c0 = round((lon0 - left) * ppd)
+            ra, rb = max(0, -r0), min(size, 15 * ppd - r0)
+            ca, cb = max(0, -c0), min(size, 15 * ppd - c0)
+            if ra >= rb or ca >= cb:
+                continue
+            with rasterio.open(etopo_tile(top, left)) as ds:
+                h[ra:rb, ca:cb] = ds.read(1, window=((r0 + ra, r0 + rb), (c0 + ca, c0 + cb)))
+    h[h < -20000] = 0
+    h[h <= 0] = -200.0
+    return h, {"lat0": lat0, "lat1": lat1, "lon0": lon0, "lon1": lon1}
+
+
 def main() -> None:
+    import sys
+    if sys.argv[1:] == ["earth"]:
+        # add (or redo) only the Earth patches, keeping the others
+        manifest_path = DIR / "terrain.json"
+        manifest = json.loads(manifest_path.read_text())
+        patches = [p for p in manifest.get("patches", []) if p["body"] != "earth"] + earth_patches()
+        manifest["patches"] = patches
+        manifest_path.write_text(json.dumps(manifest, indent=1))
+        print(f"wrote {len(patches)} patches into terrain.json")
+        return
+    _all()
+
+
+def earth_patches() -> list[dict]:
+    out = []
+    for name, lat, lon, size in EARTH_PATCHES:
+        h, b = cut_earth(lat, lon, size)
+        out.append(save(name, h) | b | {"name": name, "body": "earth",
+                                         "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"})
+    return out
+
+
+def _all() -> None:
     sources = {"moon": LolaImg(), "mars": MolaTif()}
     manifest_path = DIR / "terrain.json"
     manifest = json.loads(manifest_path.read_text())
@@ -109,6 +174,7 @@ def main() -> None:
         entry = save(name, h) | b | {"name": name, "body": body,
                                      "credit": "LRO LOLA LDEM_128 (PDS Geosciences)" if body == "moon" else "MGS MOLA DEM 463 m (USGS)"}
         patches.append(entry)
+    patches += earth_patches()
     manifest["patches"] = patches
     manifest_path.write_text(json.dumps(manifest, indent=1))
     print(f"wrote {len(patches)} patches into terrain.json")

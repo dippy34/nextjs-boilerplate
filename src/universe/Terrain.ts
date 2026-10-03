@@ -34,9 +34,11 @@ interface HeightMap {
   data: Uint16Array; offset: number; scale: number;
   /** metres per pixel at the equator */
   pixelM: number;
+  /** sea level (m) of a world with oceans: lower ground is drawn as flat water */
+  sea?: number;
 }
 interface TerrainManifest {
-  maps: Record<string, { file: string; width: number; height: number; lonLeft: number; offset: number; scale: number; credit: string }>;
+  maps: Record<string, { file: string; width: number; height: number; lonLeft: number; offset: number; scale: number; credit: string; sea?: number }>;
   /** sharper regional elevation around landmarks (pipeline/build_terrain_patches.py) */
   patches?: PatchInfo[];
 }
@@ -220,7 +222,7 @@ export class TerrainSource {
     const m = this.manifest!.maps[k];
     const p = loadHeights(`${this.base}/terrain/${m.file}`)
       .then(({ w, h, data }) => {
-        const hm: HeightMap = { width: w, height: h, lonLeft: m.lonLeft, data, offset: m.offset, scale: m.scale, pixelM: (2 * Math.PI * radius) / w };
+        const hm: HeightMap = { width: w, height: h, lonLeft: m.lonLeft, data, offset: m.offset, scale: m.scale, pixelM: (2 * Math.PI * radius) / w, sea: m.sea };
         this.maps.set(k, hm);
         // keep at most two elevation models in memory
         this.order = this.order.filter((o) => o !== k).concat(k);
@@ -298,7 +300,13 @@ export class TerrainSource {
     const minL = Math.max(spacing * 2.5, 6);
     const px = n.x * R, py = n.y * R, pz = n.z * R;
     // fractal hills: amplitude proportional to wavelength (slopes of a few percent)
-    const slope = m ? 0.012 : Math.min(0.03, TerrainSource.amplitude(b) / (R / 3));
+    let slope = m ? 0.012 : Math.min(0.03, TerrainSource.amplitude(b) / (R / 3));
+    // a world with oceans: no generated relief at sea, little on lowlands, the most in high mountains
+    const sea = m?.sea;
+    if (sea !== undefined) {
+      const t = Math.min(1, Math.max(0, (h - sea) / 150));
+      slope *= t * t * (3 - 2 * t) * Math.min(1, Math.max(0.08, (h - sea) / 2500));
+    }
     let o = 0;
     for (let L = top; L > minL && o < 16; L *= 0.5, o++) {
       h += (vnoise(px / L, py / L, pz / L, s + o * 7) - 0.5) * 2 * slope * L * (L > topP ? 1 - wP : 1);
@@ -318,6 +326,7 @@ export class TerrainSource {
         h += craterField(px, py, pz, cell, s + 100 * i, d, depth) * (cell > topP * 1.2 ? 1 - wP : 1);
       }
     }
+    if (sea !== undefined) h = Math.max(h, sea);
     return Number.isFinite(h) ? h : 0;
   }
 

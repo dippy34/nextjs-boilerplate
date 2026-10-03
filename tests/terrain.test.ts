@@ -57,6 +57,30 @@ describe('landing terrain', () => {
     expect(maxStep).toBeLessThan(5);           // no cliffs from the generator over 2 m
   });
 
+  it('a world with oceans: flat sea at sea level, generated hills only on land', () => {
+    const earth = world('Earth', 6371e3);
+    const w = 2048, hgt = 1024;   // the real map's size (~20 km per pixel)
+    // west half sea (stored at -200 m), east half a 3 km high plateau
+    const data = new Uint16Array(w * hgt).map((_, i) => ((i % w) < w / 2 ? 0 : 3200));
+    const s2 = new TerrainSource('http://localhost/none') as unknown as { manifest: unknown; maps: Map<string, unknown>; craters: Map<Body, number> };
+    s2.manifest = { maps: { earth: { file: 'earth.png', width: w, height: hgt, lonLeft: -180, offset: -200, scale: 1, sea: 0, credit: '' } } };
+    s2.maps.set('earth', { width: w, height: hgt, lonLeft: -180, data, offset: -200, scale: 1, pixelM: (2 * Math.PI * 6371e3) / w, sea: 0 });
+    s2.craters.set(earth, 0);
+    const t = s2 as unknown as TerrainSource;
+    const at = (lonDeg: number, latDeg: number) => {
+      const la = (latDeg * Math.PI) / 180, lo = (lonDeg * Math.PI) / 180;
+      return new Vector3(Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la));
+    };
+    const sea: number[] = [], land: number[] = [];
+    for (let i = 0; i < 200; i++) {
+      sea.push(t.height(earth, at(-150 + i * 0.5, -20 + (i % 40)), 100));
+      land.push(t.height(earth, at(30 + i * 0.5, -20 + (i % 40)), 100));
+    }
+    expect(sea.every((h) => h === 0)).toBe(true);
+    expect(Math.min(...land)).toBeGreaterThan(1500);
+    expect(Math.max(...land) - Math.min(...land)).toBeGreaterThan(50);   // generated relief on land
+  });
+
   it('coarse spacing leaves out the fine layers', () => {
     const b = world('Rhea', 763e3);
     let diff = 0;

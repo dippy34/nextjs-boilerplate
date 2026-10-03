@@ -390,6 +390,8 @@ export class App {
     const idx = (arr: { name: string }[], n: string) => arr.findIndex((o) => o.name === n);
     const items: { label: string; detail: string; id: string }[] = [
       { label: "Inside Saturn's rings", detail: 'float among the ice of the B ring', id: 'place:rings' },
+      { label: 'Mount Everest', detail: 'Earth · the top of the world (real elevation data)', id: `lm:${lm('Mount Everest')}` },
+      { label: 'Grand Canyon', detail: 'Earth · fly down into the canyon', id: `lm:${lm('Grand Canyon')}` },
       { label: 'Olympus Mons', detail: 'Mars · the tallest volcano known (real elevation data)', id: `lm:${lm('Olympus Mons')}` },
       { label: 'Valles Marineris', detail: 'Mars · a canyon 4,000 km long', id: `lm:${lm('Valles Marineris')}` },
       { label: 'Apollo 11 landing site', detail: 'the Moon · fly down and walk', id: `lm:${lm('Apollo 11 landing site')}` },

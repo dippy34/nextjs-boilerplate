@@ -53,13 +53,15 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     (display-referred `litMaterial`), `WarpFx.ts`, `Traffic.ts` + `Station.ts`, `Missions.ts`, `Audio.ts`
     (Web Audio synthesis). CameraRig got `inertia`, `braking`, `thrust`, `stop()`, `gotoRemaining`.
   - VR quality tier: `LITE.uLite` (1 while presenting) trims the heavy procedural shaders.
-  - Landing terrain: `pipeline/build_terrain.py` -> `public/data/terrain/` (Moon/Mars/Mercury heights
+  - Landing terrain: `pipeline/build_terrain.py` -> `public/data/terrain/` (Moon/Mars/Mercury/Earth heights
     as 16-bit-in-RGB PNG), `src/universe/Terrain.ts` (heights: elevation model + generated hills and
     craters), `src/render/TerrainPatch.ts` (polar grid under the explorer, built a few rings per
     frame, drawn with the body's material; the sphere gets a hole via `uHoleDir`/`uHoleCos`).
     `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`. Shadows: `aSun`
     is the Sun's clearance over the relief in penumbra widths (ray-marched per vertex, signed),
-    and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`.
+    and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`. Earth: the map's `"sea": 0` makes
+    lower ground flat water and limits generated hills to land (more on high ground); the painted
+    clouds fade out on descent (`uCloudVis`, set in `Bodies`).
   - Cockpit HUD (`src/game/HudMarkers.ts`): target bracket, flight-path marker, boresight.
   - Generated planets: `src/universe/ExoTerrain.ts` (CPU copy of EXO_FRAG `terrain()` so ground matches
     colours), Earth-like atmosphere shells for temperate/ocean types (`Atmospheres.updateExo`).
@@ -85,8 +87,8 @@ procedural generation for the rest. Never use SpaceEngine's own files.
 
 1. Quest performance pass on a real headset (cockpit, planet/galaxy/nebula shaders, tile atlas size,
    black hole steps).
-2. Terrain: stream sharper elevation tiles everywhere (the full LOLA/MOLA resolution; today only
-   the landmark patches have it), Earth; OpenNGC for more deep-sky objects, a sharper galaxy
+2. Terrain: stream sharper elevation tiles everywhere (the full LOLA/MOLA/ETOPO resolution; today
+   only the landmark patches have it), a real cloud layer for Earth; OpenNGC for more deep-sky objects, a sharper galaxy
    impostor from outside.
 3. Unity port planning (the data pipeline outputs are engine-agnostic JSON/JPEG).
 

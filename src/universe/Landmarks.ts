@@ -18,7 +18,8 @@ interface LandmarkDef {
  * Places worth visiting on the landing terrain. Coordinates: USGS Gazetteer of Planetary
  * Nomenclature (IAU WGPSN) feature centres; landing sites from the mission teams' published
  * coordinates (Apollo 11: 0.674 N, 23.473 E; Curiosity's Bradbury Landing: 4.589 S, 137.441 E;
- * Perseverance's Octavia E. Butler Landing: 18.445 N, 77.451 E).
+ * Perseverance's Octavia E. Butler Landing: 18.445 N, 77.451 E). Earth: the summits' surveyed
+ * positions and heights, and the Grand Canyon at Grand Canyon Village (South Rim).
  */
 export const LANDMARKS: LandmarkDef[] = [
   { name: 'Olympus Mons', body: 'Mars', lat: 18.65, lon: -133.8, h: 21e3, view: 70e3, about: 'the tallest volcano known, about 22 km above the Martian datum' },
@@ -30,6 +31,11 @@ export const LANDMARKS: LandmarkDef[] = [
   { name: 'Copernicus', body: 'Moon', lat: 9.62, lon: -20.08, h: -3e3, view: 75e3, about: 'a 93 km crater with terraced walls and central peaks' },
   { name: 'Shackleton (lunar south pole)', body: 'Moon', lat: -89.67, lon: 129.78, h: -1e3, view: 30e3, about: 'a crater whose floor never sees the Sun, near the Artemis landing regions' },
   { name: 'Caloris Basin', body: 'Mercury', lat: 31.5, lon: 162.7, h: 0, view: 300e3, about: 'an impact basin 1,550 km across' },
+  { name: 'Mount Everest', body: 'Earth', lat: 27.988, lon: 86.925, h: 8.8e3, view: 45e3, about: 'the highest mountain above sea level, 8,849 m, in the Himalaya' },
+  { name: 'Grand Canyon', body: 'Earth', lat: 36.06, lon: -112.14, h: 2.1e3, view: 30e3, about: 'a canyon 446 km long and up to 1.8 km deep, cut by the Colorado River' },
+  { name: 'Kilimanjaro', body: 'Earth', lat: -3.0674, lon: 37.3556, h: 5.9e3, view: 40e3, about: 'the highest mountain in Africa, 5,895 m, a dormant volcano' },
+  { name: 'Matterhorn (Alps)', body: 'Earth', lat: 45.9763, lon: 7.6586, h: 4.5e3, view: 35e3, about: 'a 4,478 m peak of the Alps on the Swiss-Italian border' },
+  { name: 'Mauna Kea (Hawaii)', body: 'Earth', lat: 19.8207, lon: -155.468, h: 4.2e3, view: 70e3, about: 'a volcano 4,207 m above the sea and over 10 km from its base on the ocean floor' },
 ];
 
 /** A landmark as a destination: a point on the ground there, turning with its world. */

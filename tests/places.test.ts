@@ -35,7 +35,7 @@ describe('places', () => {
 
   it('every landmark names a real body and lies on the map', () => {
     for (const d of LANDMARKS) {
-      expect(['Moon', 'Mars', 'Mercury']).toContain(d.body);
+      expect(['Moon', 'Mars', 'Mercury', 'Earth']).toContain(d.body);
       expect(Math.abs(d.lat)).toBeLessThanOrEqual(90);
       expect(Math.abs(d.lon)).toBeLessThanOrEqual(180);
     }

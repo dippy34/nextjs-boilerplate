@@ -14,9 +14,10 @@ positions (ISS, Hubble, JWST, Voyager 1 & 2, New Horizons, Parker Solar Probe, E
 Lucy, Psyche) · **47 nearby galaxies** (Andromeda, Triangulum, the Magellanic Clouds, the Whirlpool,
 the Sombrero, Centaurus A, M87 …) · **41 nebulae and star clusters** (the Orion, Carina, Eagle,
 Ring, Helix and Crab nebulae, the Pleiades, Omega Centauri, 47 Tucanae …) · the Milky Way from outside ·
-**real 3D ground to land on**: NASA elevation models for the Moon, Mars and Mercury, with a tour of
-landmarks to fly to (Olympus Mons, Valles Marineris, the Curiosity and Perseverance sites, the Apollo 11
-site, Tycho, Copernicus, Shackleton at the lunar south pole, the Caloris Basin), generated hills, craters
+**real 3D ground to land on**: NASA elevation models for the Moon, Mars and Mercury and NOAA's for
+Earth, with a tour of landmarks to fly to (Mount Everest, the Grand Canyon, Kilimanjaro, the
+Matterhorn, Mauna Kea, Olympus Mons, Valles Marineris, the Curiosity and Perseverance sites, the
+Apollo 11 site, Tycho, Copernicus, Shackleton at the lunar south pole, the Caloris Basin), generated hills, craters
 and shadows on other moons, and on rocky planets of other stars (their mountains and seas match their
 colours; temperate worlds have blue skies) · **inside Saturn's
 rings** among their ice (search "rings") · comets near the Sun with comas, tails and (up close) a
@@ -97,7 +98,8 @@ SteamVR headset) and press **ENTER VR**. The view fades in and the **menu** open
 
 * **Menu** (Y on the left controller, or MENU on your wrist): tabs for Planets, Moons (by planet),
   Small worlds (dwarf planets, big asteroids, famous comets), Stars, Exoplanets, Nebulae, Galaxies,
-  Craft, **Places** (landmarks on the Moon, Mars and Mercury, and Saturn's rings), **Search** (virtual keyboard over
+  Craft, **Places** (highlights, then landmarks by world: Earth, the Moon, Mars, Mercury; Saturn's
+  rings, eclipses), **Search** (virtual keyboard over
   every planet, moon, asteroid, comet and 12,585 named stars) and Settings. Every item shows a
   thumbnail rendered from the real map and its live distance; **point and pull the trigger** to fly there.
 * **Travel** blinks, turns the view so the destination is straight ahead, then flies there in a
@@ -231,7 +233,7 @@ Checked with `npm test` and the headless-browser suites (`scripts/verify.mjs`, `
 * Beyond the Solar System: 6,333 confirmed exoplanets placed around their catalogued stars, a generated
   system around almost every other star, 47 nearby galaxies, 41 nebulae and clusters, and real
   spacecraft on their trajectories.
-* Landing: real 3D ground from NASA elevation models (sharper patches around landmarks), generated
+* Landing: real 3D ground from NASA and NOAA elevation models (sharper patches around landmarks), generated
   hills, craters and shadows elsewhere, walking at eye height, rocky planets of other stars with
   matching terrain and Earth-like skies.
 * Saturn's rings from the inside, comets with comas, tails and nuclei, eclipses and moon shadows at
@@ -241,10 +243,12 @@ Checked with `npm test` and the headless-browser suites (`scripts/verify.mjs`, `
 
 Known limitations (planned for later phases unless noted):
 
-* Close to a solid world the ground becomes real 3D terrain: elevation models for the Moon, Mars and
-  Mercury (about 5–10 km per sample) with generated relief below that, generated relief on other
-  round moons, dwarf planets and rocky planets of other stars. Earth, Venus, Titan and small
-  irregular bodies keep smooth surfaces with relief shading.
+* Close to a solid world the ground becomes real 3D terrain: elevation models for the Moon, Mars,
+  Mercury and Earth (about 5–20 km per sample) with generated relief below that, generated relief on
+  other round moons, dwarf planets and rocky planets of other stars. Venus, Titan and small
+  irregular bodies keep smooth surfaces with relief shading. Earth's clouds are painted on the
+  surface, so they fade out below about 50 km (no cloud layer to fly through yet), and its ground
+  colours come from the 8k Blue Marble map (blurry at eye level).
 * Venus uses procedural banding tinted with the Mariner 10 disk colour; the Viking Mars mosaic is
   somewhat over-saturated; OPAL maps miss the latitudes Hubble could not see (filled zonally).
 * The Milky Way model is smooth and idealised (arm positions, a clumpy noise for dust and star
@@ -253,7 +257,7 @@ Known limitations (planned for later phases unless noted):
   (billboards from afar, a ray-marched volume up close; their shapes are not the real ones);
   globular-cluster stars are generated.
 * Terrain shadows are ray-marched per mesh vertex, with the edge placed per pixel (features
-  smaller than the mesh spacing cast none). The global elevation models are coarse (5–10 km per
+  smaller than the mesh spacing cast none). The global elevation models are coarse (5–20 km per
   sample; 0.24–0.9 km in the patches around the landmarks) with generated relief below that, which
   is plausible, not mapped. Generated planets' atmospheres are Earth-like for every temperate world.
 * Generated planets are labelled as such; their counts and sizes follow occurrence statistics, not
@@ -284,7 +288,8 @@ Known limitations (planned for later phases unless noted):
 2. Planet rendering: cube-sphere quadtree terrain from real DEMs, Bruneton atmospheric scattering,
    oceans, clouds, space-to-surface descent and surface walking.
 3. Nebulae and star clusters (OpenNGC), a finer Milky Way seen from outside.
-4. Sharper terrain everywhere (streamed elevation tiles), Earth terrain; more stations and ship types.
+4. Sharper terrain everywhere (streamed elevation tiles), a cloud layer you can fly through; more
+   stations and ship types.
 5. Full UI: search panel, bookmarks, settings and quality presets.
 6. Polish: lens flares, spinning (Kerr) black holes, performance tuning.
 

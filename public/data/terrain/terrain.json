@@ -30,6 +30,17 @@
    "scale": 1.0,
    "credit": "NASA/JHUAPL/CIW, MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology",
    "source": "https://planetarymaps.usgs.gov/mosaic/Mercury_Messenger_USGS_DEM_Global_665m_v2.tif"
+  },
+  "earth": {
+   "file": "earth.png",
+   "width": 2048,
+   "height": 1024,
+   "lonLeft": -180,
+   "offset": -200.0,
+   "scale": 1.0,
+   "sea": 0,
+   "credit": "NOAA NCEI, ETOPO 2022 60 arc-second Global Relief Model (surface), DOI 10.25921/fd45-gt74",
+   "source": "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif"
   }
  },
  "patches": [
@@ -130,6 +141,76 @@
    "name": "jezero",
    "body": "mars",
    "credit": "MGS MOLA DEM 463 m (USGS)"
+  },
+  {
+   "file": "patches/everest.png",
+   "width": 768,
+   "height": 768,
+   "offset": 51.36466598510742,
+   "scale": 0.5,
+   "lat0": 26.3875,
+   "lat1": 29.5875,
+   "lon0": 85.325,
+   "lon1": 88.525,
+   "name": "everest",
+   "body": "earth",
+   "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
+  },
+  {
+   "file": "patches/grandcanyon.png",
+   "width": 768,
+   "height": 768,
+   "offset": 398.8193664550781,
+   "scale": 0.5,
+   "lat0": 34.5,
+   "lat1": 37.7,
+   "lon0": -113.70833333333333,
+   "lon1": -110.50833333333333,
+   "name": "grandcanyon",
+   "body": "earth",
+   "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
+  },
+  {
+   "file": "patches/kilimanjaro.png",
+   "width": 512,
+   "height": 512,
+   "offset": 447.3400573730469,
+   "scale": 0.5,
+   "lat0": -4.133333333333334,
+   "lat1": -2.0000000000000004,
+   "lon0": 36.2875,
+   "lon1": 38.420833333333334,
+   "name": "kilimanjaro",
+   "body": "earth",
+   "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
+  },
+  {
+   "file": "patches/matterhorn.png",
+   "width": 768,
+   "height": 768,
+   "offset": -200.0,
+   "scale": 0.5,
+   "lat0": 44.375,
+   "lat1": 47.575,
+   "lon0": 6.058333333333334,
+   "lon1": 9.258333333333333,
+   "name": "matterhorn",
+   "body": "earth",
+   "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
+  },
+  {
+   "file": "patches/maunakea.png",
+   "width": 768,
+   "height": 768,
+   "offset": -200.0,
+   "scale": 0.5,
+   "lat0": 18.220833333333335,
+   "lat1": 21.420833333333334,
+   "lon0": -157.07083333333333,
+   "lon1": -153.87083333333334,
+   "name": "maunakea",
+   "body": "earth",
+   "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
   }
  ]
 }

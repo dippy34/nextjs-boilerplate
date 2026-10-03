@@ -259,6 +259,9 @@ heights in PNG files; all are public domain (U.S. Government work):
   (`Mars_MGS_MOLA_DEM_mosaic_global_463m.tif`).
 - **Mercury**: MESSENGER USGS global DEM 665 m v2 (NASA/JHUAPL/CIW), via USGS Astrogeology
   (`Mercury_Messenger_USGS_DEM_Global_665m_v2.tif`).
+- **Earth**: NOAA NCEI ETOPO 2022 60 arc-second Global Relief Model (surface elevation),
+  DOI 10.25921/fd45-gt74. Water (height at or below 0) is drawn as flat sea at sea level, so
+  depressions such as the Dead Sea and the Caspian are flattened to 0 m.
 
 Around the landmarks, sharper regional patches (`public/data/terrain/patches/`,
 `pipeline/build_terrain_patches.py`) take over from the global maps, cut row by row with HTTP range
@@ -269,11 +272,15 @@ requests from:
   (Apollo 11 site, Tycho, Copernicus).
 - **Mars**: the MOLA 463 m DEM above at full or half resolution (Olympus Mons, Valles Marineris,
   Gale and Jezero craters).
+- **Earth**: ETOPO 2022 15 arc-second (about 460 m) surface elevation tiles, NOAA NCEI,
+  <https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/15s_surface_elev_gtif/>
+  (Mount Everest, the Grand Canyon, Kilimanjaro, the Matterhorn, Mauna Kea).
 
 Landmark coordinates (`src/universe/Landmarks.ts`): the USGS/IAU Gazetteer of Planetary Nomenclature
 (<https://planetarynames.wr.usgs.gov/>) for feature centres; the Apollo 11, Curiosity and Perseverance
-landing sites as published by NASA and the mission teams. Their ground elevations are rounded values
-read from the elevation models above.
+landing sites as published by NASA and the mission teams; on Earth, the summits' commonly published
+positions and heights (Everest 8,849 m, the 2020 China-Nepal survey). Their ground elevations are
+rounded values read from the elevation models above.
 
 Relief finer than these models, and all relief on other solid moons and dwarf planets, is
 generated: fractal hills and crater fields (bowls with raised rims; depth-to-diameter 0.16 for small

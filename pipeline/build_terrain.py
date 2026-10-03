@@ -7,6 +7,9 @@ relief (and all relief on other bodies) is generated.
   Moon     NASA SVS CGI Moon Kit, LRO LOLA LDEM 16 ppd (half-metres, offset 20000, vs 1737.4 km)  public domain
   Mars     NASA/JPL/GSFC MGS MOLA global DEM 463 m, via USGS Astrogeology (m vs the areoid)        public domain
   Mercury  MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology (m vs 2439.4 km)              public domain
+  Earth    NOAA NCEI ETOPO 2022 60" surface elevation (m vs the EGM2008 geoid)                     public domain
+           Water (height <= 0) is stored as -200 m: the engine draws it flat at sea level ("sea": 0),
+           and the shallow fill keeps the coastline near the right place after resampling.
 
 Format: 8-bit RGB PNG, height = (R * 256 + G) * scale + offset (metres), so a browser canvas reads it
 back exactly; equirectangular, row 0 at +90 deg latitude, column 0 at longitude `lonLeft`.
@@ -18,7 +21,7 @@ import rasterio
 from PIL import Image
 
 from common import OUT, write_json
-from fetch_hires import HI, SVS, USGS, StripTiff, download, fill_nan_zonal
+from fetch_hires import ETOPO, HI, SVS, USGS, StripTiff, download, fill_nan_zonal
 
 W, H = 2048, 1024
 DIR = OUT / "terrain"
@@ -39,7 +42,26 @@ def save(name: str, h: np.ndarray) -> dict:
             "offset": lo, "scale": scale}
 
 
+def earth() -> dict:
+    et = download(ETOPO, HI / "etopo2022_60s_surface.tif", min_size=100_000_000)
+    with rasterio.open(et) as ds:
+        h = ds.read(1).astype(np.float32)
+    h[h < -20000] = 0
+    h[h <= 0] = -200.0
+    h = np.asarray(Image.fromarray(h, "F").resize((W, H), Image.BOX))     # area average
+    return save("earth", h) | {"sea": 0,
+        "credit": "NOAA NCEI, ETOPO 2022 60 arc-second Global Relief Model (surface), DOI 10.25921/fd45-gt74", "source": ETOPO}
+
+
 def main() -> None:
+    import json
+    import sys
+    if sys.argv[1:] == ["earth"]:
+        # rebuild only the Earth map, keeping the rest of terrain.json (and its patches)
+        man = json.loads((DIR / "terrain.json").read_text())
+        man["maps"]["earth"] = earth()
+        (DIR / "terrain.json").write_text(json.dumps(man, indent=1))
+        return
     out: dict[str, dict] = {}
     d = download(SVS + "ldem_16_uint.tif", HI / "ldem_16_uint.tif", min_size=10_000_000)
     with rasterio.open(d) as ds:
@@ -54,6 +76,8 @@ def main() -> None:
     url = USGS + "Mercury_Messenger_USGS_DEM_Global_665m_v2.tif"
     h = fill_nan_zonal(StripTiff(url).decimated(W, H, rows_per_out=2, nodata=-32768)[..., :1])[..., 0]
     out["mercury"] = save("mercury", h) | {"credit": "NASA/JHUAPL/CIW, MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology", "source": url}
+
+    out["earth"] = earth()
 
     write_json(DIR / "terrain.json", {"license": "Public domain (U.S. Government work)", "maps": out}, compact=False)
 

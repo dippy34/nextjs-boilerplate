@@ -5,6 +5,7 @@ import { Body, type SpaceObject } from '../universe/Body';
 import { Galaxy } from '../universe/Galaxies';
 import { ExoPlanet } from '../universe/Planets';
 import { Spacecraft } from '../universe/Spacecraft';
+import { baseRadius } from '../universe/Terrain';
 import { CatalogStar } from '../universe/Stars';
 import { cameraBodyFixed } from '../render/TerrainPatch';
 
@@ -20,7 +21,8 @@ function over(app: App, name: string): { lat: number; lon: number; alt: number }
   if (!(b instanceof Body)) return null;
   const bf = cameraBodyFixed(b.upos.sub(app.rig.upos, new Vector3()), b.orientation);
   const r = bf.length();
-  return { lat: (Math.asin(bf.z / r) * 180) / Math.PI, lon: (Math.atan2(bf.y, bf.x) * 180) / Math.PI, alt: r - b.radius };
+  // altitude above the reference ellipsoid (what elevation models and summit heights are measured from)
+  return { lat: (Math.asin(bf.z / r) * 180) / Math.PI, lon: (Math.atan2(bf.y, bf.x) * 180) / Math.PI, alt: r - baseRadius(b, bf.divideScalar(r)) };
 }
 /** great-circle distance (degrees) between two latitude/longitude points */
 function arc(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -53,6 +55,10 @@ const DEFS: Def[] = [
   { id: 'olympus', title: 'Fly over Olympus Mons', detail: 'Below 40 km over the tallest volcano known (Mars, 18.7° N 226° E)', check: (a) => {
     const o = over(a, 'Mars');
     return !!o && o.alt < 40e3 && arc(o.lat, o.lon, 18.65, -133.8) < 5;
+  } },
+  { id: 'everest', title: 'Fly past Mount Everest', detail: 'Below 12 km altitude within 20 km of the 8,849 m summit (27.99° N 86.93° E)', check: (a) => {
+    const o = over(a, 'Earth');
+    return !!o && o.alt < 12e3 && arc(o.lat, o.lon, 27.988, 86.925) < 0.18;
   } },
   { id: 'southpole', title: "Land at the Moon's south pole", detail: 'Ship mode: touch down south of 80° S, where Artemis astronauts are headed', check: (a) => {
     const o = over(a, 'Moon');

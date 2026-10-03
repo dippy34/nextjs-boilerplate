@@ -344,7 +344,7 @@ export class BodiesLayer {
       uniforms: {
         uMap: { value: null }, uHasMap: { value: 0 }, uMapGray: { value: mapInfo?.channels === 'L' ? 1 : 0 },
         uNight: { value: null }, uHasNight: { value: 0 },
-        uClouds: { value: null }, uHasClouds: { value: 0 }, uCloudShift: { value: 0 },
+        uClouds: { value: null }, uHasClouds: { value: 0 }, uCloudShift: { value: 0 }, uCloudVis: { value: 1 },
         uColor: { value: new Vector3(...b.color) },
         uAlbedoScale: { value: 1 },
         uAirless: { value: b.isAirless ? 1 : 0 },
@@ -605,6 +605,12 @@ export class BodiesLayer {
           u.uSunDir.value.copy(toSun).divideScalar(rSun);
           u.uSunIrr.value = sunIrradianceAt(rSun);
         }
+        // the cloud layer is painted on the surface: below ~15 km it would lie on the ground, so it
+        // fades out on descent (the explorer is under the clouds)
+        if (u.uHasClouds.value) {
+          const t = Math.min(1, Math.max(0, (view.dist - b.radius - 15e3) / 65e3));
+          u.uCloudVis.value = t * t * (3 - 2 * t);
+        }
         const ring = this.rings.get(b);
         if (ring) {
           ring.visible = true;
@@ -695,7 +701,7 @@ export class BodiesLayer {
 
   /** Can the body have landing terrain? Solid, round (not lumpy) and without a thick atmosphere. */
   private terrainOk(b: Body): boolean {
-    if (b.kind === 'star' || b.isGasGiant || ['Earth', 'Venus', 'Titan'].includes(b.name) || b.radius < 150e3) return false;
+    if (b.kind === 'star' || b.isGasGiant || ['Venus', 'Titan'].includes(b.name) || b.radius < 150e3) return false;
     const m = this.meshes.get(b);
     return !!m && ((m.material as ShaderMaterial).uniforms.uLumpy.value as number) === 0;
   }
