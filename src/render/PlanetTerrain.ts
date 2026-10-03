@@ -629,13 +629,14 @@ export class PlanetTerrain {
     }
   }
 
-  /** A worker loaded sharper global elevation: rebuild the current world's tiles to pick it up. */
+  /**
+   * A worker loaded sharper global elevation: rebuild the drawn tiles to pick it up (bounded churn;
+   * tiles that are not in view rebuild from the current data when they next come into view).
+   */
   private onElevation(version: number): void {
     if (version <= this.elevVersion) return;
     this.elevVersion = version;
-    const w = this.world;
-    if (!w) return;
-    for (const n of w.tiles) n.stale = true;
+    for (const n of this.drawn) n.stale = true;
   }
 
   private receive(worker: number, msg: { job: number; data: TileData | null }): void {
