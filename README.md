@@ -247,7 +247,7 @@ Known limitations (planned for later phases unless noted):
   Mercury and Earth (about 5–20 km per sample) with generated relief below that, generated relief on
   other round moons, dwarf planets and rocky planets of other stars. Venus, Titan and small
   irregular bodies keep smooth surfaces with relief shading. Earth's clouds are painted on the
-  surface, so they fade out below about 50 km (no cloud layer to fly through yet), and its ground
+  surface, so they fade out between 150 and 50 km up (no cloud layer to fly through yet), and its ground
   colours come from the 8k Blue Marble map (blurry at eye level).
 * Venus uses procedural banding tinted with the Mariner 10 disk colour; the Viking Mars mosaic is
   somewhat over-saturated; OPAL maps miss the latitudes Hubble could not see (filled zonally).

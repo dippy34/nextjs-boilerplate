@@ -12,6 +12,8 @@ interface LandmarkDef {
   h: number;
   view: number;
   about: string;
+  /** elevation (degrees) of the viewpoint seen from the place: low for mountains (seen against the sky); default 37 */
+  elev?: number;
 }
 
 /**
@@ -31,13 +33,13 @@ export const LANDMARKS: LandmarkDef[] = [
   { name: 'Copernicus', body: 'Moon', lat: 9.62, lon: -20.08, h: -3e3, view: 75e3, about: 'a 93 km crater with terraced walls and central peaks' },
   { name: 'Shackleton (lunar south pole)', body: 'Moon', lat: -89.67, lon: 129.78, h: -1e3, view: 30e3, about: 'a crater whose floor never sees the Sun, near the Artemis landing regions' },
   { name: 'Caloris Basin', body: 'Mercury', lat: 31.5, lon: 162.7, h: 0, view: 300e3, about: 'an impact basin 1,550 km across' },
-  { name: 'Mount Everest', body: 'Earth', lat: 27.988, lon: 86.925, h: 8.8e3, view: 45e3, about: 'the highest mountain above sea level, 8,849 m, in the Himalaya' },
-  { name: 'Grand Canyon', body: 'Earth', lat: 36.06, lon: -112.14, h: 2.1e3, view: 30e3, about: 'a canyon 446 km long and up to 1.8 km deep, cut by the Colorado River' },
-  { name: 'Kilimanjaro', body: 'Earth', lat: -3.0674, lon: 37.3556, h: 5.9e3, view: 40e3, about: 'the highest mountain in Africa, 5,895 m, a dormant volcano' },
-  { name: 'Matterhorn (Alps)', body: 'Earth', lat: 45.9763, lon: 7.6586, h: 4.5e3, view: 35e3, about: 'a 4,478 m peak of the Alps on the Swiss-Italian border' },
-  { name: 'Mauna Kea (Hawaii)', body: 'Earth', lat: 19.8207, lon: -155.468, h: 4.2e3, view: 70e3, about: 'a volcano 4,207 m above the sea and over 10 km from its base on the ocean floor' },
-  { name: 'Mount Fuji', body: 'Earth', lat: 35.3606, lon: 138.7274, h: 3.7e3, view: 35e3, about: 'Japan\'s highest mountain, 3,776 m, a near-symmetrical volcanic cone' },
-  { name: 'Denali', body: 'Earth', lat: 63.0695, lon: -151.0074, h: 6.1e3, view: 45e3, about: 'the highest mountain in North America, 6,190 m, in the Alaska Range' },
+  { name: 'Mount Everest', body: 'Earth', lat: 27.988, lon: 86.925, h: 8.8e3, view: 25e3, elev: 9, about: 'the highest mountain above sea level, 8,849 m, in the Himalaya' },
+  { name: 'Grand Canyon', body: 'Earth', lat: 36.06, lon: -112.14, h: 2.1e3, view: 14e3, elev: 25, about: 'a canyon 446 km long and up to 1.8 km deep, cut by the Colorado River' },
+  { name: 'Kilimanjaro', body: 'Earth', lat: -3.0674, lon: 37.3556, h: 5.9e3, view: 35e3, elev: 9, about: 'the highest mountain in Africa, 5,895 m, a dormant volcano' },
+  { name: 'Matterhorn (Alps)', body: 'Earth', lat: 45.9763, lon: 7.6586, h: 4.5e3, view: 25e3, elev: 10, about: 'a 4,478 m peak of the Alps on the Swiss-Italian border' },
+  { name: 'Mauna Kea (Hawaii)', body: 'Earth', lat: 19.8207, lon: -155.468, h: 4.2e3, view: 60e3, elev: 7, about: 'a volcano 4,207 m above the sea and over 10 km from its base on the ocean floor' },
+  { name: 'Mount Fuji', body: 'Earth', lat: 35.3606, lon: 138.7274, h: 3.7e3, view: 30e3, elev: 6, about: 'Japan\'s highest mountain, 3,776 m, a near-symmetrical volcanic cone' },
+  { name: 'Denali', body: 'Earth', lat: 63.0695, lon: -151.0074, h: 6.1e3, view: 35e3, elev: 9, about: 'the highest mountain in North America, 6,190 m, in the Alaska Range' },
 ];
 
 /** A landmark as a destination: a point on the ground there, turning with its world. */
@@ -59,11 +61,20 @@ export class Landmark implements SpaceObject {
   /** world-space unit vertical at the place */
   up(): Vector3 { return this.dirBF.clone().transformDirection(this.world.orientation); }
 
-  /** Direction (world) to view the place from: above it, on the side lit by the Sun at `sunWorld`. */
+  /**
+   * Direction (world) to view the place from: above it, on the side lit by the Sun at `sunWorld`.
+   * Low viewpoints (mountains) look across the sunlight a little, so slopes show light and shade.
+   */
   approachDir(sunWorld: Vector3): Vector3 {
     const up = this.up();
     const side = sunWorld.clone().addScaledVector(up, -sunWorld.dot(up));
-    return up.clone().multiplyScalar(0.6).addScaledVector(side.lengthSq() > 1e-6 ? side.normalize() : up, 0.8).normalize();
+    if (side.lengthSq() < 1e-6) return up;
+    side.normalize();
+    const e = ((this.def.elev ?? 36.87) * Math.PI) / 180;
+    const across = side.clone().cross(up);
+    const k = this.def.elev === undefined ? 0 : 0.8;
+    const horiz = side.multiplyScalar(1).addScaledVector(across, k).normalize();
+    return up.clone().multiplyScalar(Math.sin(e)).addScaledVector(horiz, Math.cos(e)).normalize();
   }
 
   /** on the ground at the place */

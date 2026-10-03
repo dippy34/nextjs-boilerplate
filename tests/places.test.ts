@@ -33,6 +33,16 @@ describe('places', () => {
     expect(dir.dot(l.up())).toBeGreaterThan(0.4);
   });
 
+  it('mountains are seen from a low viewpoint, across the sunlight', () => {
+    const def = LANDMARKS.find((d) => d.name === 'Mount Everest')!;
+    const l = new Landmark(def, moon);
+    const sun = new Vector3(0.3, -0.2, 1).normalize();
+    const dir = l.approachDir(sun);
+    expect((Math.asin(dir.dot(l.up())) * 180) / Math.PI).toBeCloseTo(def.elev!, 6);
+    const side = sun.clone().addScaledVector(l.up(), -sun.dot(l.up())).normalize();
+    expect(dir.dot(side)).toBeGreaterThan(0.3);   // still on the sunlit side
+  });
+
   it('every landmark names a real body and lies on the map', () => {
     for (const d of LANDMARKS) {
       expect(['Moon', 'Mars', 'Mercury', 'Earth']).toContain(d.body);

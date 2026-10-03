@@ -605,10 +605,10 @@ export class BodiesLayer {
           u.uSunDir.value.copy(toSun).divideScalar(rSun);
           u.uSunIrr.value = sunIrradianceAt(rSun);
         }
-        // the cloud layer is painted on the surface: below ~15 km it would lie on the ground, so it
-        // fades out on descent (the explorer is under the clouds)
+        // the cloud layer is painted on the surface: close up it would lie on the mountains, so it
+        // fades out on descent, between 150 and 50 km up (no cloud layer to fly through yet)
         if (u.uHasClouds.value) {
-          const t = Math.min(1, Math.max(0, (view.dist - b.radius - 15e3) / 65e3));
+          const t = Math.min(1, Math.max(0, (view.dist - b.radius - 50e3) / 100e3));
           u.uCloudVis.value = t * t * (3 - 2 * t);
         }
         const ring = this.rings.get(b);

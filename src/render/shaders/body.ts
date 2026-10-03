@@ -123,6 +123,12 @@ float bn3(vec3 p) {
              mix(mix(bh3(i + vec3(0,0,1)), bh3(i + vec3(1,0,1)), f.x), mix(bh3(i + vec3(0,1,1)), bh3(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 float bfbm(vec3 p) { return 0.5 * bn3(p) + 0.3 * bn3(p * 2.03 + 3.1) + 0.2 * bn3(p * 4.1 + 7.7); }
+// value noise on a lattice given as integer cells ci plus a local offset r (precise far from the origin)
+float bnAt(vec3 ci, vec3 r) {
+  vec3 i = ci + floor(r); vec3 f = fract(r); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(bh3(i), bh3(i + vec3(1,0,0)), f.x), mix(bh3(i + vec3(0,1,0)), bh3(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(bh3(i + vec3(0,0,1)), bh3(i + vec3(1,0,1)), f.x), mix(bh3(i + vec3(0,1,1)), bh3(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
 // One scale of craters on the unit sphere: height (radius units) and freshness (bright ejecta).
 // Only the 2x2x2 block of cells nearest to the point is visited (crater influence stays within
 // half a cell: radius <= 0.36, rim out to 1.35 radii), 8 cells instead of 27.
@@ -292,6 +298,20 @@ void main() {
     if (w3 > 0.0) { hBump += w3 * 4.5 * 0.5 * cratersAt(uOI3, uOF3 + vLocal / 4.5, d, fr); frT = max(frT, fr * w3); }
     freshAll = max(freshAll, frT * 0.6 * uHScale);
   }
+  float groundVar = 0.0;
+  if (uTerrain > 0.5 && uCraters < 0.05) {
+    // ground without craters (Earth): uneven, rocky detail below the mesh and map resolution, on
+    // land only, each scale faded in once its cells span many pixels
+    float land = 1.0 - water;
+    float n;
+    float w0 = smoothstep(400.0 / 6.0, 400.0 / 20.0, mppT);
+    if (w0 > 0.0) { n = bnAt(uOI0, uOF0 + vLocal / 400.0) - 0.5; hBump += w0 * land * 400.0 * 0.1 * n; groundVar += w0 * n; }
+    float w1 = smoothstep(90.0 / 6.0, 90.0 / 20.0, mppT);
+    if (w1 > 0.0) { n = bnAt(uOI1, uOF1 + vLocal / 90.0) - 0.5; hBump += w1 * land * 90.0 * 0.1 * n; groundVar += w1 * n * 0.7; }
+    float w2 = uLite > 0.5 ? 0.0 : smoothstep(20.0 / 6.0, 20.0 / 20.0, mppT);
+    if (w2 > 0.0) { n = bnAt(uOI2, uOF2 + vLocal / 20.0) - 0.5; hBump += w2 * land * 20.0 * 0.1 * n; groundVar += w2 * n * 0.5; }
+    groundVar *= land * uHScale;
+  }
   if (hBump != 0.0) nP = bumpNormal(vPosView, nP, hBump * limbFade);
   float mu0 = dot(nP, uSunDir);
   float mu = max(dot(nP, V), 0.0);
@@ -323,6 +343,8 @@ void main() {
   }
   // fresh, bright ejecta around the terrain's small craters
   if (uTerrain > 0.5 && uProc < 0.5) albedo *= 1.0 + freshAll * 0.35;
+  // patchy ground (rock, soil, plants) below the map's resolution
+  albedo *= 1.0 + 0.45 * groundVar;
   if (uBands > 0.5) {
     float lat = asin(clamp(vNormalBF.z, -1.0, 1.0));
     float b = noise1(lat * 18.0 + uSeed) * 0.6 + noise1(lat * 45.0 + uSeed * 1.7) * 0.4;
