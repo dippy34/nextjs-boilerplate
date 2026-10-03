@@ -202,13 +202,13 @@ console.log('fps', JSON.stringify(st));
 await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
-for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8-olympus-patch', 'Olympus Mons', 'Mars', 'mars']]) {
+for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8-olympus-patch', 'Olympus Mons', 'Mars', 'mars'], ['t9-everest', 'Mount Everest', 'Earth', 'earth']]) {
   await page.evaluate((n) => {
     const a = window.app;
     const l = a.findByName(n);
     const jd0 = a.clock.jdTdb;
     let best = jd0, err = Infinity;
-    for (let h = 0; h < 30 * 24; h += 1) {   // the Moon turns slowly: search a month in hours
+    for (let h = 0; h < 30 * 24; h += 1) {   // the Moon turns slowly: search a month in hours (Earth: the first day matches)
       a.system.update(jd0 + h / 24);
       const el = Math.asin(a.system.sun.upos.sub(l.world.upos).normalize().dot(l.up())) * 57.3;
       if (Math.abs(el - 20) < err) { err = Math.abs(el - 20); best = jd0 + h / 24; }
@@ -229,8 +229,10 @@ for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8
   await page.waitForFunction((k) => (window.app.bodies.terrainSource.versions.get(k) ?? 0) > 0, key, { timeout: 120000 }).catch(() => undefined);
   await page.waitForFunction((b) => window.app.terrain.owner?.name === b, body, { timeout: 120000 }).catch(() => undefined);
   await frames(30);
-  st = await page.evaluate((k) => ({ version: window.app.bodies.terrainSource.versions.get(k) ?? 0, owner: window.app.terrain.owner?.name ?? null }), key);
+  st = await page.evaluate((k) => ({ version: window.app.bodies.terrainSource.versions.get(k) ?? 0, owner: window.app.terrain.owner?.name ?? null,
+    haze: window.app.terrain.group.children.find((m) => m.name === 'terrain haze')?.visible ?? false }), key);
   check(`${id}: sharper elevation patch loaded and drawn`, st.version > 0 && st.owner === body, JSON.stringify(st));
+  if (body !== 'Moon') check(`${id}: the atmosphere is drawn over the terrain`, st.haze);
   await page.screenshot({ path: path.join(outDir, `${id}.png`), timeout: 180000 });
 }
 
