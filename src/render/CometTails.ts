@@ -1,4 +1,4 @@
-import { AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, Group, IcosahedronGeometry, Mesh, Quaternion, ShaderMaterial, Vector3 } from 'three';
+import { AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, Group, IcosahedronGeometry, Matrix3, Matrix4, Mesh, Quaternion, ShaderMaterial, Vector3 } from 'three';
 import { magToIrradiance } from '../astro/photometry';
 import { AU } from '../core/units';
 import type { UPos } from '../core/upos';
@@ -61,8 +61,10 @@ const NUC_VERT = /* glsl */ `
 ${PROJECT_PARS}
 varying vec3 vN;
 varying vec3 vPos;
+varying vec3 vLocal;
 void main() {
   vN = normalize(mat3(modelMatrix) * normal);
+  vLocal = position;
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vPos = wp.xyz;
   gl_Position = projectView(viewMatrix * wp);
@@ -75,13 +77,29 @@ const NUC_FRAG = /* glsl */ `
 uniform vec3 uSunDir;
 uniform float uSunIrr;
 uniform float uExposure;
+uniform mat3 uRot;        // local -> world rotation of the nucleus
 varying vec3 vN;
 varying vec3 vPos;
+varying vec3 vLocal;
+float nh(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float nn(vec3 p) {
+  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(nh(i), nh(i + vec3(1,0,0)), f.x), mix(nh(i + vec3(0,1,0)), nh(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(nh(i + vec3(0,0,1)), nh(i + vec3(1,0,1)), f.x), mix(nh(i + vec3(0,1,1)), nh(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float rough(vec3 p) { return 0.55 * nn(p * 6.0) + 0.3 * nn(p * 14.0 + 3.0) + 0.15 * nn(p * 31.0 + 7.0); }
 void main() {
-  vec3 n = normalize(vN);
+  // rough, pitted ground (generated): the normal tilted by the slope of a noise relief
+  vec3 q = vLocal;
+  float e = 0.01;
+  float h0 = rough(q);
+  vec3 g = vec3(rough(q + vec3(e, 0, 0)) - h0, rough(q + vec3(0, e, 0)) - h0, rough(q + vec3(0, 0, e)) - h0) / e;
+  vec3 n = normalize(normalize(vN) - uRot * g * 0.035);
   float mu0 = max(dot(n, uSunDir), 0.0);
-  // very dark, slightly reddish organic-rich dust (albedo ~0.05, as measured for 67P and others)
-  vec3 rad = vec3(0.055, 0.05, 0.045) * (mu0 + 0.03) * (uSunIrr / 3.14159265);
+  // very dark, slightly reddish organic-rich dust (albedo ~0.05, as measured for 67P and others),
+  // with smoother, slightly brighter dust-covered patches
+  float patchy = 0.75 + 0.5 * smoothstep(0.45, 0.7, nn(q * 3.0 + 11.0));
+  vec3 rad = vec3(0.055, 0.05, 0.045) * patchy * (mu0 + 0.03) * (uSunIrr / 3.14159265);
   gl_FragColor = vec4(min(rad * uExposure, vec3(6.0e4)), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
@@ -157,7 +175,8 @@ export class CometTails {
     this.group.name = 'comet-tails';
     this.nucleus = new Mesh(nucleusGeometry(), new ShaderMaterial({
       name: 'comet-nucleus', vertexShader: NUC_VERT, fragmentShader: NUC_FRAG,
-      uniforms: { uSunDir: { value: new Vector3(1, 0, 0) }, uSunIrr: { value: Math.PI }, uExposure: surfaceExposure, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+      uniforms: { uSunDir: { value: new Vector3(1, 0, 0) }, uSunIrr: { value: Math.PI }, uExposure: surfaceExposure, uRot: { value: new Matrix3() },
+        uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
     }));
     this.nucleus.frustumCulled = false;
     this.nucleus.visible = false;
@@ -217,6 +236,7 @@ export class CometTails {
     const q = new Quaternion().setFromAxisAngle(new Vector3(Math.sin(h), Math.cos(h * 0.7), Math.sin(h * 1.3)).normalize(), (h % 628) / 100);
     this.nucleus.position.copy(rel);
     this.nucleus.quaternion.copy(q);
+    ((this.nucleus.material as ShaderMaterial).uniforms.uRot.value as Matrix3).setFromMatrix4(new Matrix4().makeRotationFromQuaternion(q));
     this.nucleus.scale.setScalar(R);
     const u = (this.nucleus.material as ShaderMaterial).uniforms;
     (u.uSunDir.value as Vector3).copy(toSun);

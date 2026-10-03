@@ -1094,7 +1094,8 @@ export class App {
       diskCap = Math.min(diskCap, 1.6 / ((0.6 * sunIrradianceAt(Math.max(cv.craft.upos.sub(this.system.sun.upos, new Vector3()).length(), 1))) / Math.PI));
     }
     const nuc = this.cometTails.nucleusView;
-    if (nuc && onScreen(nuc.rel)) diskCap = Math.min(diskCap, 1.6 / nuc.radiance);
+    // (a comet nucleus is very dark rock: shown grey, not as bright as a planet disk)
+    if (nuc && onScreen(nuc.rel)) diskCap = Math.min(diskCap, 1.0 / nuc.radiance);
     for (const ev of this.exo.views) {
       if (ev.pixelRadius <= 1.5 || ev.radiance <= 0 || (!onScreen(ev.rel) && this.bigCoverage(ev.rel, ev.planet.radius) < 0.02)) continue;
       diskCap = Math.min(diskCap, 1.6 / ev.radiance);
