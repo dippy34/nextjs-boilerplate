@@ -267,6 +267,8 @@ function lookFor(g: Galaxy): Look {
     dwarf: { arms: 0, pitchDeg: 0, bar: 0, bulge: 0, clumpy: 0, dust: 0, blob: 1, sersic: 0.9 },
   };
   const l = looks[g.shape];
+  // Magellanic types (Sm, SBm): a bar and one stubby arm, patchy
+  if (stage === 'm' && l.arms > 0) return { ...l, arms: 1, clumpy: 0.6, dust: 0.3 };
   // Sombrero-like: a big bulge and a dark lane
   if (/Sombrero/.test(g.name)) return { ...l, bulge: 1.4, blob: 0.7, dust: 1 };
   return l;
