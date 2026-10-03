@@ -4,7 +4,8 @@ import { UPos } from '../src/core/upos';
 import { Rocks } from '../src/render/Rocks';
 import { TerrainPatch } from '../src/render/TerrainPatch';
 import type { Body } from '../src/universe/Body';
-import { ExoGround, exoQuantile, exoTerrain } from '../src/universe/ExoTerrain';
+import { EXO_CRATER_CELLS, ExoGround, exoQuantile, exoQuantiles, exoTerrain } from '../src/universe/ExoTerrain';
+import { EXO_FRAG } from '../src/render/shaders/planet';
 import type { ExoPlanet } from '../src/universe/Planets';
 import { TerrainSource } from '../src/universe/Terrain';
 import { ATMO_FRAG, ATMO_HAZE_FRAG } from '../src/render/shaders/atmosphere';
@@ -265,5 +266,28 @@ describe('generated planets', () => {
     expect(land).toBeGreaterThan(700);
     expect(maxH).toBeGreaterThan(500);
     expect(maxH).toBeLessThan(20e3);
+  });
+
+  it('quantiles of the height field rise with the fraction', () => {
+    const q = exoQuantiles(41, [0.1, 0.5, 0.9]);
+    expect(q[0]).toBeLessThan(q[1]);
+    expect(q[1]).toBeLessThan(q[2]);
+    expect(Math.abs(q[1] - exoQuantile(41, 0.5))).toBeLessThan(1e-12);
+  });
+
+  it('cratered worlds have craters on the ground, others none', () => {
+    const planet = { name: 'Test c', radius: 2.4e6 } as unknown as ExoPlanet;
+    const smooth = new ExoGround(planet, 1, 7, 0, 0);
+    const pitted = new ExoGround(planet, 1, 7, 0, 1);
+    let diff = 0;
+    for (let i = 0; i < 400; i++) diff = Math.max(diff, Math.abs(pitted.height(dir(i), 500) - smooth.height(dir(i), 500)));
+    expect(diff).toBeGreaterThan(200);
+  });
+
+  it('the shader mirrors the CPU noise and crater cells (see scripts/exoterrain-gpu.mjs for the numbers)', () => {
+    for (const k of ['73856093u', '19349663u', '83492791u', '73244475u']) expect(EXO_FRAG).toContain(k);
+    expect(EXO_FRAG).toContain(`float cellS[3] = float[3](${EXO_CRATER_CELLS.map((c) => c[0].toFixed(1)).join(', ')});`);
+    expect(EXO_FRAG).toContain(`float densS[3] = float[3](${EXO_CRATER_CELLS.map((c) => String(c[1])).join(', ')});`);
+    expect(EXO_FRAG).toContain(`float depS[3] = float[3](${EXO_CRATER_CELLS.map((c) => String(c[2])).join(', ')});`);
   });
 });

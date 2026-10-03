@@ -5,12 +5,13 @@ import type { ExoPlanet } from './Planets';
 // ------------------------------------------------------------------ CPU copy of shaders/planet.ts
 // The generated planets are coloured on the GPU by `terrain()` in EXO_FRAG; the landing terrain
 // raises the ground by the same function, so mountains, coasts and seas match their colours.
-const fract = (x: number) => x - Math.floor(x);
-function ph(x: number, y: number, z: number): number {
-  x = fract(x * 0.1031); y = fract(y * 0.1031); z = fract(z * 0.1031);
-  const d = x * (z + 31.32) + y * (y + 31.32) + z * (x + 31.32);
-  x += d; y += d; z += d;
-  return fract((x + y) * z);
+// value noise on an integer lattice hash: exact in both (a float hash differs between float32 and
+// float64 wherever its fract() wraps)
+function lh(x: number, y: number, z: number): number {
+  let h = Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791);
+  h = Math.imul(h ^ (h >>> 16), 73244475);
+  h = Math.imul(h ^ (h >>> 16), 73244475);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 function pn(x: number, y: number, z: number): number {
   const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
@@ -18,8 +19,8 @@ function pn(x: number, y: number, z: number): number {
   fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy); fz = fz * fz * (3 - 2 * fz);
   const m = (a: number, b: number, t: number) => a + (b - a) * t;
   return m(
-    m(m(ph(ix, iy, iz), ph(ix + 1, iy, iz), fx), m(ph(ix, iy + 1, iz), ph(ix + 1, iy + 1, iz), fx), fy),
-    m(m(ph(ix, iy, iz + 1), ph(ix + 1, iy, iz + 1), fx), m(ph(ix, iy + 1, iz + 1), ph(ix + 1, iy + 1, iz + 1), fx), fy), fz);
+    m(m(lh(ix, iy, iz), lh(ix + 1, iy, iz), fx), m(lh(ix, iy + 1, iz), lh(ix + 1, iy + 1, iz), fx), fy),
+    m(m(lh(ix, iy, iz + 1), lh(ix + 1, iy, iz + 1), fx), m(lh(ix, iy + 1, iz + 1), lh(ix + 1, iy + 1, iz + 1), fx), fy), fz);
 }
 function fbmN(x: number, y: number, z: number, n: number): number {
   let s = 0, a = 0.5;
@@ -68,6 +69,19 @@ export function exoTerrain(n: Vector3, seed: number, lite: boolean): number {
   return 0.7 * cont + 0.3 * mount * (0.3 + 0.7 * belt) * (0.35 + 0.65 * land);
 }
 
+/** Heights of the terrain function at several quantiles of the surface. */
+export function exoQuantiles(seed: number, qs: number[], samples = 600): number[] {
+  const v: number[] = [];
+  const n = new Vector3();
+  const ga = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < samples; i++) {
+    const z = 1 - (2 * (i + 0.5)) / samples, r = Math.sqrt(1 - z * z), th = ga * i;
+    v.push(exoTerrain(n.set(r * Math.cos(th), r * Math.sin(th), z), seed, false));
+  }
+  v.sort((a, b) => a - b);
+  return qs.map((q) => v[Math.min(samples - 1, Math.max(0, Math.round(q * (samples - 1))))]);
+}
+
 /** Height of the terrain function at `quantile` of the surface (for a sea covering that fraction). */
 export function exoQuantile(seed: number, quantile: number, samples = 600): number {
   const v: number[] = [];
@@ -85,7 +99,7 @@ export function exoQuantile(seed: number, quantile: number, samples = 600): numb
  * Crater fields of generated planets, largest first: cell size (m), density and depth (x crater
  * radius). EXO_FRAG shades the first three from orbit (`craters()`), the landing ground has them all.
  */
-export const EXO_CRATER_CELLS: [number, number, number][] = [[846400, 0.3, 0.025], [184000, 0.35, 0.06], [40000, 0.4, 0.18]];
+export const EXO_CRATER_CELLS: [number, number, number][] = [[846400, 0.5, 0.04], [184000, 0.5, 0.06], [40000, 0.4, 0.18]];
 
 /** Crater seed of a generated planet (cells of EXO_FRAG's uCSeed and the landing ground). */
 export function exoCraterSeed(name: string): number {
@@ -113,7 +127,9 @@ export class ExoGround implements Ground {
   private readonly seedN: number;
 
   /** `craters`: crater density (EXO_FRAG uCraters; 0 = none) */
-  constructor(readonly owner: ExoPlanet, private type: number, private seed: number, private seaLevel: number, private craters = 0) {
+  /** `hMid`, `hSpan`: median and 10-90 % spread of the terrain function (EXO_FRAG uHMid, uHSpan) */
+  constructor(readonly owner: ExoPlanet, private type: number, private seed: number, private seaLevel: number, private craters = 0,
+    private hMid = 0.4, private hSpan = 0.15) {
     this.name = owner.name;
     this.radius = owner.radius;
     this.radii = [owner.radius, owner.radius, owner.radius];
@@ -134,10 +150,16 @@ export class ExoGround implements Ground {
     const R = this.radius;
     const px = n.x * R, py = n.y * R, pz = n.z * R;
     const minL = Math.max(spacing * 2.5, 6);
-    // the colour noise's finest octave is about R / 300 across: generated hills below that
+    // the colour noise's finest octave is about R / 300 across: generated relief below that, as
+    // EXO_FRAG's detail(): ridged crests in rough country (mountains, highlands), gentle rolling
+    // ground on plains and lowlands
+    const rough = seas ? 0.25 + 0.75 * smooth(this.seaLevel + 0.01, this.seaLevel + 0.2, t) : 0.5 + 0.5 * smooth(-0.2, 0.45, (t - this.hMid) / this.hSpan);
+    const amp = (0.008 + 0.03 * rough * rough) * 2 * land;
     let o = 0;
     for (let L = R / 300; L > minL && o < 16; L *= 0.5, o++) {
-      h += (vnoise(px / L, py / L, pz / L, this.seedN + o * 7) - 0.5) * 2 * 0.012 * L * land;
+      const v = vnoise(px / L, py / L, pz / L, this.seedN + o * 7);
+      const r = 1 - Math.abs(2 * v - 1);
+      h += ((r * r - 0.45) * rough + (v - 0.5) * (1 - rough)) * amp * L;
     }
     // crater fields (airless and thin-aired worlds): the large ones are also drawn from orbit
     if (this.craters > 0) {
