@@ -36,6 +36,9 @@ const vec3 C_HII = vec3(1.0, 0.38, 0.55);
 // extinction relative to V at the red, green and blue primaries
 const vec3 EXT = vec3(0.83, 1.0, 1.25);
 float sq(float x) { return x * x; }
+// smoothstep(a, b, n) of noise read at mip level l: as the noise blurs (towards 0.5) the threshold
+// eases to its mean over sharp noise, so thresholded features keep their light at any distance
+float thr(float n, float a, float b, float l) { return mix(smoothstep(a, b, n), 1.0 - b + 0.5 * (b - a), clamp(l * 0.5, 0.0, 1.0)); }
 vec4 nz(vec3 p, float lod) { return textureLod(uNoise, p, max(lod, 0.0)); }
 float armMaskF(float r) { return smoothstep(0.04, 0.16, r) * (1.0 - smoothstep(1.0, 1.3, r)); }
 // warp of the disc plane (Centaurus A)
@@ -165,9 +168,8 @@ void main() {
       float hy = 0.45 * hz;
       float yv = exp(-r / (1.5 * hr) - az / hy) / (2.0 * hy);
       float armY = m > 0.5 ? pow(wave, armPow(4.0)) * 3.66 * am * (0.2 + 2.4 * gS.g * gS.g) : am;
-      float ym = mix(armY, smoothstep(0.35, 0.85, gA.b) * 2.8 * (0.5 + gI.g), uDiscS.z) + uRing.z * ring;
-      float kn = hi ? nz(pd * 7.0 + uSeed * 5.3, lod + 2.8).a : gS.a;
-      float knots = smoothstep(0.75, 0.95, kn) * 10.0;
+      float ym = mix(armY, thr(gA.b, 0.35, 0.85, lod - 0.15) * 2.8 * (0.5 + gI.g), uDiscS.z) + uRing.z * ring;
+      float knots = (hi ? thr(nz(pd * 7.0 + uSeed * 5.3, lod + 2.8).a, 0.75, 0.95, lod + 2.8) : thr(gS.a, 0.75, 0.95, glodS)) * 10.0;
       float bar = uDiscS.w > 0.0 ? exp(-sq(pd.x / uBarP.x) - sq(pd.y / (0.25 * uBarP.x)) - sq(pd.z / 0.04)) : 0.0;
       j += win * (C_OLD * (uDiscW.x * old + uDiscW.y * thick + uDiscS.w * bar) + yv * ym * (C_YOUNG * uDiscW.z + C_HII * uDiscW.w * knots) * uYoungW);
       if (uSpot.w > 0.0) {

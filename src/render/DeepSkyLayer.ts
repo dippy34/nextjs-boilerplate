@@ -127,6 +127,9 @@ varying vec3 vPos;
 float sq(float x) { return x * x; }
 vec4 nz(vec3 p, float lod) { return textureLod(uNoise, p, max(lod, 0.0)); }
 float ridge(float n) { return 1.0 - abs(2.0 * n - 1.0); }
+// smoothstep(a, b, n) of noise read at mip level l: blurred noise sits near 0.5, so as it blurs the
+// threshold eases to its mean over sharp noise (features fade into an even glow, not to nothing)
+float thr(float n, float a, float b, float l) { return mix(smoothstep(a, b, n), 1.0 - b + 0.5 * (b - a), clamp(l * 0.5, 0.0, 1.0)); }
 vec3 sd;
 bool hi;
 
@@ -173,7 +176,7 @@ void emission(vec3 p, float lod, out vec3 e, out float dust) {
     float len = 0.08 + 0.14 * np.b;
     float x = (rp - tip) / len;                         // 0 at the tip, 1 at the base
     float width = 0.9 - 0.05 * clamp(x, 0.0, 1.0);
-    float inCol = smoothstep(width, width + 0.025, np.r) * site;
+    float inCol = thr(np.r, width, width + 0.025, lod + log2(uQ.y / max(rp, 0.1))) * site;
     float along = smoothstep(0.0, 0.05, x) * (1.0 - smoothstep(0.7, 1.1, x));
     dust += inCol * along * uP.y * 90.0 * (0.6 + 0.8 * n1.g);
     float rim = inCol * exp(-sq(x / 0.07)) + 0.25 * (smoothstep(width - 0.02, width, np.r) * site - inCol) * along;
@@ -181,7 +184,7 @@ void emission(vec3 p, float lod, out vec3 e, out float dust) {
   }
   if (uP.z > 0.0) {
     // dark lanes and clouds, mostly in front and around
-    float lane = smoothstep(0.58, 0.7, n0.b * 0.6 + n1.g * 0.4) * smoothstep(0.1, 0.4, r) * (1.0 - smoothstep(0.85, 1.0, r));
+    float lane = thr(n0.b * 0.6 + n1.g * 0.4, 0.58, 0.7, lod - 0.15) * smoothstep(0.1, 0.4, r) * (1.0 - smoothstep(0.85, 1.0, r));
     dust += lane * uP.z * 14.0 * (hi ? 0.5 + n2.b : 1.0);
     // starlight scattered by dust near the stars (reflection nebula, blue)
     e += vec3(0.35, 0.5, 1.0) * lane * ion * uQ.w * 0.25;
@@ -209,7 +212,7 @@ void planetary(vec3 p, float lod, out vec3 e) {
       float re2 = length(vec2(length(p - ax2 * ca2), ca2 / 1.5));
       dens += exp(-sq((re2 - 0.68 - wob) / 0.09)) * 0.7;
       vec4 nk = nz(u * 9.0 + sd, lod + log2(9.0 / max(r, 0.1)));
-      float knot = smoothstep(0.8, 0.9, nk.r) * smoothstep(0.3, 0.38, r) * (1.0 - smoothstep(0.38, 0.62, r));
+      float knot = thr(nk.r, 0.8, 0.9, lod + log2(9.0 / max(r, 0.1))) * smoothstep(0.3, 0.38, r) * (1.0 - smoothstep(0.38, 0.62, r));
       dens += knot * 2.5;
     }
   } else if (uShape < 1.5) {
@@ -241,7 +244,7 @@ void planetary(vec3 p, float lod, out vec3 e) {
   }
   // knots and radial spokes
   float spokes = 0.8 + 0.4 * pow(nz(u * 8.0 + sd, lod + log2(8.0 / max(r, 0.1)) + 0.5).g, 2.0);
-  float knots = 0.65 + 0.9 * smoothstep(0.5, 0.85, n2.r);
+  float knots = 0.65 + 0.9 * thr(n2.r, 0.5, 0.85, lod + 2.32);
   dens *= spokes * knots;
   vec3 tint = mix(vec3(0.25, 0.95, 0.85), vec3(1.0, 0.22, 0.3), smoothstep(0.38, 0.6, re));
   float halo = 0.08 * exp(-sq((r - 0.86) / 0.08)) * (0.3 + 1.4 * ridge(n1.a));
@@ -277,7 +280,7 @@ void remnant(vec3 p, float lod, out vec3 e) {
   } else {
     // Cassiopeia A: a shell of bright knots of ejecta (sulphur, oxygen, neon) and a faint shock outside
     float shell = exp(-sq((r - 0.72 - 0.1 * (n0.r - 0.5)) / 0.08));
-    float kn = smoothstep(0.72, 0.92, hi ? n2.r : n1.r) * (0.3 + pow(ridge(n1.b), 3.0)) * smoothstep(0.35, 0.6, n0.a);
+    float kn = (hi ? thr(n2.r, 0.72, 0.92, lod + 2.0) : thr(n1.r, 0.72, 0.92, lod + 0.68)) * (0.3 + pow(ridge(n1.b), 3.0)) * smoothstep(0.35, 0.6, n0.a);
     vec3 col = mix(mix(vec3(0.45, 1.0, 0.55), vec3(1.0, 0.3, 0.25), smoothstep(0.3, 0.6, n1.g)), vec3(0.5, 0.6, 1.0), smoothstep(0.7, 0.9, n0.g));
     e = col * shell * kn * 9.0 + vec3(0.45, 0.6, 1.0) * exp(-sq((r - 0.95) / 0.04)) * 0.25 * (0.5 + n1.a);
   }
@@ -361,7 +364,7 @@ const LOOKS: Record<string, NebLook> = {
   'Orion Nebula': { shape: 2, axes: [1, 1, 0.7], p: [0.15, 0, 0.8, 0.3], q: [1.2, 3, 0, 0.4], bright: 1.6 },
   'Eagle Nebula': { shape: 0, axes: [1, 1.1, 0.85], p: [0.3, 1.0, 0.3, 0.3], q: [1.0, 2.2, 0, 0] },
   'Lagoon Nebula': { shape: 0, axes: [1, 0.6, 0.7], p: [0.2, 0.3, 1.1, 0.2], q: [1.0, 3, 0, 0.2] },
-  'Carina Nebula': { shape: 0, axes: [1, 0.85, 0.8], p: [0.25, 0.8, 1.1, 0.35], q: [1.1, 2.6, 0, 0.1], bright: 1.3 },
+  'Carina Nebula': { shape: 0, axes: [1, 0.85, 0.8], p: [0.25, 0.8, 1.1, 0.35], q: [1.1, 2.6, 0, 0.1], bright: 2.2 },
   'Rosette Nebula': { shape: 1, axes: [1, 1, 1], p: [0.35, 0.35, 0.3, 0.45], q: [0.9, 5, 0, 0] },
   'Tarantula Nebula': { shape: 3, axes: [1, 0.9, 0.8], p: [0.15, 0.3, 0.4, 0.3], q: [1.8, 3, 0, 0], bright: 4 },
   'Trifid Nebula': { shape: 0, axes: [1, 1, 0.9], p: [0.2, 1.4, 0.2, 0.2], q: [0.9, 1.2, 0, 1.2] },
