@@ -239,6 +239,76 @@
    "name": "denali",
    "body": "earth",
    "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
+  },
+  {
+   "file": "patches/apollo15.png",
+   "width": 512,
+   "height": 512,
+   "offset": -3063.5,
+   "scale": 0.5,
+   "lat1": 28.1328125,
+   "lat0": 24.1328125,
+   "lon0": 1.6328125,
+   "lon1": 5.6328125,
+   "name": "apollo15",
+   "body": "moon",
+   "credit": "LRO LOLA LDEM_128 (PDS Geosciences)"
+  },
+  {
+   "file": "patches/apollo17.png",
+   "width": 512,
+   "height": 512,
+   "offset": -3787.5,
+   "scale": 0.5,
+   "lat1": 22.1953125,
+   "lat0": 18.1953125,
+   "lon0": 28.765625,
+   "lon1": 32.765625,
+   "name": "apollo17",
+   "body": "moon",
+   "credit": "LRO LOLA LDEM_128 (PDS Geosciences)"
+  },
+  {
+   "file": "patches/change4.png",
+   "width": 512,
+   "height": 512,
+   "offset": -6589.0,
+   "scale": 0.5,
+   "lat1": -43.4375,
+   "lat0": -47.4375,
+   "lon0": 175.59375,
+   "lon1": 179.59375,
+   "name": "change4",
+   "body": "moon",
+   "credit": "LRO LOLA LDEM_128 (PDS Geosciences)"
+  },
+  {
+   "file": "patches/opportunity.png",
+   "width": 512,
+   "height": 512,
+   "offset": -3005.0,
+   "scale": 0.5,
+   "lat1": 0.0546875,
+   "lat0": -3.9453125,
+   "lon0": -7.53125,
+   "lon1": -3.53125,
+   "name": "opportunity",
+   "body": "mars",
+   "credit": "MGS MOLA DEM 463 m (USGS)"
+  },
+  {
+   "file": "patches/spirit.png",
+   "width": 512,
+   "height": 512,
+   "offset": -2870.0,
+   "scale": 0.5,
+   "lat1": -12.5625,
+   "lat0": -16.5625,
+   "lon0": 173.46875,
+   "lon1": 177.46875,
+   "name": "spirit",
+   "body": "mars",
+   "credit": "MGS MOLA DEM 463 m (USGS)"
   }
  ]
 }
