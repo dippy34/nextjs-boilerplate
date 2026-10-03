@@ -156,6 +156,7 @@ float n3(vec3 p) {
              mix(mix(h31(i + vec3(0,0,1)), h31(i + vec3(1,0,1)), f.x), mix(h31(i + vec3(0,1,1)), h31(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 float fbm3(vec3 p) { float s = 0.0, a = 0.5; int n = uLite > 0.5 ? 3 : 4; for (int i = 0; i < 4; i++) { if (i >= n) break; s += a * n3(p); p = p * 2.07 + 5.3; a *= 0.5; } return s / (1.0 - pow(0.5, float(n))); }
+float ridge(vec3 p) { return 1.0 - abs(2.0 * n3(p) - 1.0); }
 void main() {
   vec3 dir = normalize(vPos);
   // the ray from the eye through the nebula's sphere (unit radius around its centre)
@@ -167,24 +168,37 @@ void main() {
   float sq = sqrt(disc);
   float t0 = max(-b - sq, 0.0), t1 = -b + sq;
   if (t1 <= t0) discard;
-  int N = uLite > 0.5 ? 12 : 22;
+  int N = uLite > 0.5 ? 16 : 40;
   float dt = (t1 - t0) / float(N);
+  // per-pixel jitter of the sample positions: no banding from the few steps
+  float jit = h31(vec3(gl_FragCoord.xy, uSeed * 3.1));
   vec3 col = vec3(0.0);
   float T = 1.0;
   vec3 sd = vec3(uSeed * 17.0, uSeed * 29.0, uSeed * 7.0);
-  for (int i = 0; i < 22; i++) {
-    if (i >= N) break;
-    vec3 p = oc + dir * (t0 + (float(i) + 0.5) * dt);
+  for (int i = 0; i < 40; i++) {
+    if (i >= N || T < 0.02) break;
+    vec3 p = oc + dir * (t0 + (float(i) + jit) * dt);
     float r = length(p);
     vec3 e = vec3(0.0);
     float dust = 0.0;
     if (uType < 0.5) {
-      vec3 q = p * 2.2 + sd;
-      float cloud = fbm3(q + 0.8 * vec3(fbm3(q + 3.1), fbm3(q + 8.7), 0.0) - 0.4);
-      float dens = smoothstep(0.42, 0.85, cloud) * (1.0 - smoothstep(0.45, 1.0, r));
-      float core = exp(-r * r * 6.0) * smoothstep(0.3, 0.7, fbm3(q * 1.7 + 1.0));
-      e = vec3(1.0, 0.22, 0.32) * dens * 1.3 + vec3(0.35, 0.95, 0.85) * core * 0.9;
-      dust = smoothstep(0.55, 0.72, fbm3(q * 2.3 + 9.0)) * (1.0 - smoothstep(0.3, 1.0, r)) * 3.0;
+      // an H II region: a cavity blown out by the young hot stars at its heart, its walls broken
+      // into glowing filaments and sheets, with dark dust pillars pointing at the stars
+      vec3 q = p * 2.3 + sd;
+      float big = fbm3(q * 0.7);
+      float walls = smoothstep(0.12, 0.4, r + 0.25 * (big - 0.5)) * (1.0 - smoothstep(0.7, 1.0, r));
+      float fil = pow(ridge(q * 1.6 + big), 6.0) + 0.7 * pow(ridge(q * 3.7 + 4.0), 9.0);
+      float dens = walls * (0.06 * smoothstep(0.4, 0.85, fbm3(q)) + 2.2 * fil * smoothstep(0.2, 0.55, big));
+      // lit from the centre: brighter walls facing the stars; teal (oxygen) near them, red (hydrogen) beyond
+      float ion = 0.12 / (0.06 + r * r);
+      vec3 tint = mix(vec3(0.25, 1.0, 0.8), mix(vec3(1.0, 0.16, 0.28), vec3(1.0, 0.38, 0.5), big), smoothstep(0.1, 0.4, r));
+      e = tint * dens * ion * 7.0;
+      // dust: lanes and pillars (dense, with lit rims)
+      vec3 u = normalize(p + 1e-4);
+      float pillar = smoothstep(0.66, 0.8, n3(u * 5.0 + sd)) * smoothstep(0.35, 0.55, r) * (1.0 - smoothstep(0.75, 0.95, r));
+      float lane = smoothstep(0.6, 0.78, fbm3(q * 1.3 + 9.0)) * smoothstep(0.3, 0.6, r);
+      dust = (pillar * 9.0 + lane * 3.5) * (0.6 + 0.8 * n3(q * 4.0));
+      e += vec3(1.0, 0.55, 0.35) * pillar * ion * 0.35;   // bright rims of the pillars
     } else if (uType < 1.5) {
       float wob = 0.06 * (fbm3(p * 3.0 + sd) - 0.5);
       float shell = exp(-pow((r - 0.55 - wob) / 0.12, 2.0));
@@ -197,6 +211,17 @@ void main() {
     }
     col += T * e * dt;
     T *= exp(-dust * dt);
+  }
+  // the young star cluster at the heart of an emission nebula: bright blue-white stars with halos
+  if (uType < 0.5) {
+    for (int k = 0; k < 6; k++) {
+      vec3 sp = (vec3(h31(sd + float(k)), h31(sd + float(k) + 11.0), h31(sd + float(k) + 23.0)) - 0.5) * 0.16;
+      float ts = dot(sp - oc, dir);
+      if (ts <= 0.0) continue;
+      float d = length(oc + dir * ts - sp) / max(ts, 1e-3);   // angular distance from the star (rad)
+      float L = 0.5 + h31(sd + float(k) * 3.7);
+      col += vec3(0.7, 0.82, 1.0) * L * (exp(-pow(d / 0.003, 2.0)) * 8.0 + 0.06 / (1.0 + pow(d / 0.015, 2.0)));
+    }
   }
   // a chord through the middle (length 2) gives about the billboards' brightness
   gl_FragColor = vec4(col * 0.7 * uGain * uFade, 1.0);
@@ -292,7 +317,7 @@ export class DeepSkyLayer {
       const k = o.upos.sub(cam, rel).length() / o.radius;
       if (k < nearK) { nearK = k; near = o; }
     }
-    const volW = near ? Math.min(1, Math.max(0, (3.2 - nearK) / 1.4)) : 0;   // fades in from 3.2 to 1.8 radii
+    const volW = near ? Math.min(1, Math.max(0, (8 - nearK) / 3)) : 0;   // fades in from 8 to 5 radii
     this.volume.visible = volW > 0.01;
     if (near && this.volume.visible) {
       near.upos.sub(cam, rel);
