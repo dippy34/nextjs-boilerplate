@@ -73,6 +73,8 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   - Eclipses: `BodiesLayer.updateEclipses` picks up to 4 occluders per body; `sunVisible()` in
     `shaders/body.ts` (disc-overlap penumbra, red glow in Earth's shadow); `sunlit` feeds the exposure.
   - Walking: `App.keepAboveGround` keeps eye height within 4 m of the ground unless climbing.
+  - Nebula volumes: `DeepSkyLayer` (VOL_FRAG ray-marches the nearest nebula within ~3 radii, cross-fading
+    with the billboards).
   - Tests: `scripts/terrain.mjs` (landing terrain, 9 checks), `scripts/places.mjs` (rings, comet,
     lunar eclipse, Jupiter moon shadow).
 
