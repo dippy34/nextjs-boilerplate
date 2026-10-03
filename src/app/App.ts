@@ -324,7 +324,7 @@ export class App {
   goTo(obj: SpaceObject): void {
     if (obj instanceof Body) this.bodies.prefetch(obj);
     if (obj instanceof BlackHole) {
-      this.rig.flyTo(obj, obj.radius * 22, undefined, true, obj.approachDir(this.rig.upos.sub(obj.upos, new Vector3())));
+      this.rig.flyTo(obj, obj.radius * 30, undefined, true, obj.approachDir(this.rig.upos.sub(obj.upos, new Vector3())));
       this.hud.toast(`Going to ${obj.name}`);
       return;
     }
@@ -580,7 +580,11 @@ export class App {
       else diskCap = Math.min(diskCap, 1.6 / ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI));
     }
     for (const hv of this.holes.views) {
-      if (hv.diskRadiance && hv.innerDiskPx > 1.5 && onScreen(hv.rel)) diskCap = Math.min(diskCap, 2 / hv.diskRadiance);
+      // a hot inner disk only takes over the eye's adaptation once it covers part of the view
+      if (!hv.diskRadiance || hv.innerDiskPx <= 1.5 || !onScreen(hv.rel)) continue;
+      const pr = hv.innerDiskPx / this.view.pixelRatio;
+      const w = smoothstep(0.0015, 0.08, Math.min(1, (Math.PI * pr * pr) / screen));
+      diskCap = Math.min(diskCap, 2 / (hv.diskRadiance * Math.max(w, 1e-6)));
     }
     // Unresolved point sources never drive the exposure (their displayed glare is capped in the PSF).
     for (const s of this.near.stars) {
@@ -780,9 +784,16 @@ export class App {
     return bestStar ? this.getStar(this.catalog, bestStar.node, bestStar.slot) : null;
   }
 
-  /** true if the segment camera -> rel is blocked by a resolved body (other than `self`). */
+  /** true if the segment camera -> rel is blocked by a resolved body or a black hole's shadow (other than `self`). */
   private occluded(rel: Vector3, self: SpaceObject | null): boolean {
     const dist = rel.length();
+    for (const v of this.holes.views) {
+      if (v.bh === self || v.dist > dist) continue;
+      // shadow seen from the eye: angular radius asin(3√3/2 rs / d); objects behind it out to ~3
+      // shadow radii are seen only as displaced, lensed images, so their labels would mislead
+      const ang = Math.asin(Math.min(1, (2.598 * v.bh.radius) / v.dist));
+      if (self !== v.bh.companion && rel.angleTo(v.rel) < 3 * ang) return true;
+    }
     for (const o of this.occluders) {
       if (o.body === self) continue;
       if (o.dist > dist) continue;
@@ -874,7 +885,7 @@ export class App {
     }
     for (const { bh, rel: r, shadowPx } of this.labelledHoles()) {
       const p = this.project(r);
-      if (p && !this.occluded(r, null)) out.push({ rel: r, key: bh.key, text: bh.name, x: p.x, y: p.y, radius: shadowPx / dpr, priority: bh === sel ? 1e4 : 420, cls: bh === sel ? 'selected' : 'blackhole' });
+      if (p && !this.occluded(r, bh)) out.push({ rel: r, key: bh.key, text: bh.name, x: p.x, y: p.y, radius: shadowPx / dpr, priority: bh === sel ? 1e4 : 420, cls: bh === sel ? 'selected' : 'blackhole' });
     }
     if (sel instanceof CatalogStar && !this.near.stars.includes(sel)) {
       const p = this.project(sel.upos.sub(this.rig.upos, rel));

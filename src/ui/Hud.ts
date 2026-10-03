@@ -60,7 +60,7 @@ export class Hud {
       <div class="hud-bottom"></div>
       <div class="hud-help hidden"><h3>Controls</h3><table>${HELP.map(([k, v]) => `<tr><td><kbd>${k}</kbd></td><td>${v}</td></tr>`).join('')}</table></div>
       <div class="hud-toast"></div>
-      <div class="hud-search hidden"><input type="text" placeholder="Find: planet, moon, star, comet…" spellcheck="false"/><div class="results"></div></div>`;
+      <div class="hud-search hidden"><input type="text" placeholder="Find: planet, moon, star, comet, black hole…" spellcheck="false"/><div class="results"></div></div>`;
     this.top = root.querySelector('.hud-top')!;
     this.time = root.querySelector('.hud-time')!;
     this.info = root.querySelector('.hud-info')!;

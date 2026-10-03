@@ -1,3 +1,4 @@
+import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { CameraRig } from '../src/app/CameraRig';
 import type { Input } from '../src/app/Input';
@@ -46,4 +47,33 @@ describe('autopilot approach', () => {
       expect(ds.length / 72).toBeLessThan(9);
     });
   }
+});
+
+describe('autopilot arrival direction', () => {
+  it('swings round to the requested side during the visible approach, distance still monotone, target kept in view', () => {
+    const rig = new CameraRig();
+    const rs = 62e3;
+    const t = target(rs);
+    rig.upos.set(7e19, 0, 0);
+    const arrive = new Vector3(0, Math.cos(0.17), Math.sin(0.17)); // 90 degrees away, just above a plane
+    rig.flyTo(t, rs * 22, undefined, true, arrive);
+    let prev = Infinity;
+    let worstAim = 0;
+    let swungAt = Infinity;
+    for (let i = 0; i < 72 * 20 && rig.autopilot; i++) {
+      rig.update(1 / 72, idle);
+      const p = rig.upos.toVector3();
+      const d = p.length();
+      expect(d).toBeLessThanOrEqual(prev * (1 + 1e-12));
+      prev = d;
+      if (swungAt === Infinity && p.clone().normalize().angleTo(new Vector3(1, 0, 0)) > 0.01) swungAt = d;
+      // once the initial turn is done (35 % of the trip), the camera keeps looking at the target
+      if (rig.autopilot && rig.gotoProgress >= 0.36) worstAim = Math.max(worstAim, rig.forward().angleTo(p.clone().negate().normalize()));
+    }
+    const end = rig.upos.toVector3();
+    expect(end.length()).toBeCloseTo(rs * 22, -3);
+    expect(end.clone().normalize().angleTo(arrive)).toBeLessThan(1e-3);
+    expect(swungAt).toBeLessThan(rs * 300 * Math.E ** 2 * 1.01); // only once the target is visible
+    expect(worstAim).toBeLessThan(1e-3);
+  });
 });

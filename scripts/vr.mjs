@@ -1,6 +1,6 @@
 // Drives the app inside an emulated Meta Quest 3 (IWER, Meta's WebXR emulator) in headless Chromium:
 // enters immersive VR, uses the in-headset menu with the controller laser, travels, searches with the
-// virtual keyboard, selects in the sky, flies, turns, uses hand tracking, exits.
+// virtual keyboard, selects in the sky, flies, turns, uses hand tracking, visits a black hole, exits.
 // Usage: node scripts/vr.mjs [baseUrl] [outDir]
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -217,7 +217,32 @@ st = await page.evaluate(() => ({ ap: !!window.app.rig.autopilot }));
 check('pinching empty sky stops the flight', !st.ap, JSON.stringify(st));
 await page.evaluate(() => { window.__xrDevice.primaryInputMode = 'controller'; });
 
-// 8. Exit VR (as the headset's system menu would): desktop rendering resumes with an un-rotated camera
+// 8. Black holes tab: fly to Gaia BH1; the lensing pass renders its environment and the headset image
+await press('left', 'y-button');
+await page.waitForFunction(() => window.app.vr.menu.isOpen, null, { timeout: 30000 });
+await aimRegion('a.vr.menu.panel', 'tab:holes');
+await frames(2);
+await press('right', 'trigger');
+const bhKey = await page.evaluate(() => window.app.blackHoles.find((h) => h.name === 'Gaia BH1').key);
+await aimRegion('a.vr.menu.panel', `go:${bhKey}`);
+await frames(2);
+await press('right', 'trigger');
+await waitTravel();
+st = await page.evaluate(() => { const a = window.app; const h = a.blackHoles.find((x) => x.name === 'Gaia BH1'); return { r: h.upos.sub(a.rig.upos).length() / h.radius, drawn: a.holes.views.some((v) => v.bh === h) }; });
+check('Black holes tab flies to Gaia BH1 and draws it', st.drawn && st.r > 15 && st.r < 21, `${st.r.toFixed(1)} rs, drawn=${st.drawn}`);
+const bhDraw = await page.evaluate(async () => {
+  const a = window.app; const gl = a.renderer.gl; const orig = gl.render.bind(gl); const main = []; let env = 0;
+  gl.render = (sc, cam) => { const t = gl.getRenderTarget(); if (cam === a.renderer.camera) main.push(!!t && t.isXRRenderTarget === true); else if (t && t.isWebGLCubeRenderTarget) env++; return orig(sc, cam); };
+  await new Promise((res) => { const s = a.frameCount; const t = setInterval(() => { if (a.frameCount >= s + 3) { clearInterval(t); res(); } }, 10); });
+  gl.render = orig;
+  return { main: main.length, intoXR: main.filter(Boolean).length, env };
+});
+check('environment captured without breaking the headset framebuffer', bhDraw.env > 0 && bhDraw.main > 0 && bhDraw.intoXR === bhDraw.main, JSON.stringify(bhDraw));
+const bhLum = await headsetBrightness();
+check('the black hole view is not black', bhLum.litFraction > 0.02, JSON.stringify(bhLum));
+await page.screenshot({ path: path.join(outDir, 'vr8-black-hole.png') });
+
+// 9. Exit VR (as the headset's system menu would): desktop rendering resumes with an un-rotated camera
 await page.evaluate(() => window.app.vr.session.end());
 await page.waitForFunction(() => !window.app.vr.active && !window.app.renderer.presenting, null, { timeout: 10000 });
 await frames(5);

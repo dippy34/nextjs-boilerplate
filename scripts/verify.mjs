@@ -24,7 +24,7 @@ export const scenarios = [
   { name: '10-galaxy-scale', query: `time=${T}&paused=1&campc=0,0,4000&fov=70` },
   { name: '11-asteroid-belt', query: `time=${T}&paused=1&target=Sun&dist=1100&az=0&el=55&fov=60` },
   { name: '12-pluto-charon', query: `time=${T}&paused=1&target=Pluto&dist=12&az=60&el=10` },
-  { name: '13-cygnus-x1', query: `time=${T}&paused=1&target=Cygnus X-1&dist=22` },
+  { name: '13-cygnus-x1', query: `time=${T}&paused=1&target=Cygnus X-1&dist=30` },
   { name: '14-sagittarius-a', query: `time=${T}&paused=1&target=Sagittarius A*&dist=20` },
   { name: '15-gaia-bh1', query: `time=${T}&paused=1&target=Gaia BH1&dist=25&fov=60` },
   { name: '16-cygnus-x1-far', query: `time=${T}&paused=1&target=Cygnus X-1&dist=3000` },

@@ -109,8 +109,11 @@ vec4 diskHit(vec3 P, vec3 k, float r) {
   float ang = atan(dot(P, uE2), dot(P, uE1));
   float tex = diskTexture(r, ang);
   float edge = smoothstep(uRin * 0.95, uRin * 1.25, r) * (1.0 - smoothstep(uRout * 0.45, uRout, r));
-  float a = clamp((0.35 + 0.75 * tex) * edge, 0.0, 1.0);
-  vec3 L = planck(T * g) * (0.55 + 0.9 * tex);
+  // dense near the hole, thinning outwards so the lensed sky shows through the outer disk
+  float tau = 7.0 * pow(x, -0.85) * (0.2 + 1.3 * tex);
+  float a = (1.0 - exp(-tau)) * edge;
+  vec3 L = planck(T * g) * (0.6 + 0.8 * tex);
+  L = max(mix(vec3(dot(L, vec3(0.2126, 0.7152, 0.0722))), L, 1.3), 0.0);  // a little more saturated, like the stars
   return vec4(L * (uSunDisk * uExposure), a);
 }
 

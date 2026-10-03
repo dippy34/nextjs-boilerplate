@@ -91,7 +91,7 @@ export class BlackHole implements SpaceObject {
 
   /**
    * Direction (unit, from the hole) to arrive from when coming from `from`: the nearest
-   * direction 8-25 degrees above or below the disk plane, so the disk is seen at a low angle
+   * direction 6-14 degrees above or below the disk plane, so the disk is seen at a low angle
    * with its far side lensed over the shadow.
    */
   approachDir(from: Vector3): Vector3 {
@@ -100,7 +100,7 @@ export class BlackHole implements SpaceObject {
     const s = f.dot(n);
     const side = s < 0 ? -1 : 1;
     const elev = Math.asin(Math.min(1, Math.abs(s)));
-    const want = Math.min(Math.max(elev, (8 * Math.PI) / 180), (25 * Math.PI) / 180);
+    const want = Math.min(Math.max(elev, (6 * Math.PI) / 180), (14 * Math.PI) / 180);
     let inPlane = f.clone().addScaledVector(n, -s);
     if (inPlane.lengthSq() < 1e-12) inPlane = this.orbitE1.clone();
     inPlane.normalize();

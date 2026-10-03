@@ -18,6 +18,7 @@ headset) and press **ENTER VR**.
 | ![Saturn](docs/img/03-saturn.jpg) | ![Orion from Earth orbit](docs/img/07-sky-from-earth-orion.jpg) |
 | ![40 pc above the Sun](docs/img/09-neighborhood.jpg) | ![Asteroid belt](docs/img/11-asteroid-belt.jpg) |
 | ![Pluto and Charon](docs/img/12-pluto-charon.jpg) | ![Sirius](docs/img/13-sirius.jpg) |
+| ![Gaia BH1 bending the Milky Way into an Einstein ring](docs/img/bh-gaia-bh1.jpg) | ![Cygnus X-1's accretion disk lensed over the shadow](docs/img/bh-cygnus-x1.jpg) |
 
 *Screenshots are from headless Chromium with software (SwiftShader) rendering — the automated
 verification run, not hand-picked renders.*
@@ -172,6 +173,11 @@ Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`, 
   sun glint on Earth's oceans; 8k maps of Earth, Moon, Mars and Mercury streamed on demand; Saturn,
   Uranus and Neptune from 2025 Hubble OPAL maps; giant-planet and Titan colours from measured albedo
   spectra.
+* Black holes: 23 real ones (every dynamically confirmed stellar black hole in BlackCAT, Cygnus X-1,
+  Gaia BH1–3, Sagittarius A\*, M87\*) with their companion stars on their real orbits. Light is traced
+  past each hole in the Schwarzschild metric per pixel, so the sky behind it bends into Einstein rings,
+  the far side of the accretion disk arcs over the shadow, and Doppler beaming brightens the side
+  coming towards you. Search for them, or open the **Black holes** tab in the VR menu.
 
 Known limitations (planned for later phases unless noted):
 
@@ -191,6 +197,8 @@ Known limitations (planned for later phases unless noted):
 * Atmospheres are single scattering (no multiple scattering), seen from space; there is no terrain
   geometry or landing yet (relief is shading only). The Milky Way map is Earth-centred and fades out
   beyond ~1 kpc.
+* Black holes are non-spinning (Schwarzschild). Near Sagittarius A\* the sky is mostly empty until the
+  Milky Way model arrives (our star catalogues thin out towards the galactic centre).
 * Performance has been verified only under software rendering (≈20–30 fps at 720p; ~3–5 ms JS per
   frame). GPU profiling and quality presets come in Phase 6.
 
@@ -201,7 +209,7 @@ Known limitations (planned for later phases unless noted):
 3. Milky Way model calibrated on Gaia star counts, nebulae and clusters (OpenNGC), procedural stars.
 4. Procedural planetary systems + NASA Exoplanet Archive systems.
 5. Full UI: search panel, bookmarks, settings and quality presets.
-6. Polish: lens flares, eclipses, black holes, performance tuning.
+6. Polish: lens flares, eclipses, spinning (Kerr) black holes, performance tuning.
 
 ## Data and credits
 

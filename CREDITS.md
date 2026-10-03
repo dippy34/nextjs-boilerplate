@@ -109,6 +109,30 @@ carry restrictions on commercial use — check the caption of each PIA image bef
 * Sun-path optical depth: Chapman grazing-incidence function in the closed form popularised by
   C. Schüler (GPU Pro 3, 2012).
 
+## Black holes (`public/data/blackholes.json`, `pipeline/build_blackholes.py`)
+
+* **BlackCAT** — Corral-Santana et al. 2016, *A&A* 587, A61, via CDS VizieR (J/A+A/587/A61, tables A1
+  and A4): positions, distances, black-hole masses, orbital periods, mass ratios, inclinations and
+  companion spectral types of the dynamically confirmed stellar black holes.
+* **SIMBAD** (CDS, Strasbourg) TAP service: positions (and parallaxes where no distance is published) of
+  Sgr A\*, M87, Cyg X-1 and the Gaia BH1–3 companions (queried by Gaia DR3 source id).
+* Companion temperatures from spectral types: E. Mamajek's online table "A Modern Mean Dwarf Stellar
+  Color and Effective Temperature Sequence" (Pecaut & Mamajek 2013, *ApJS* 208, 9).
+* Published values typed into the pipeline, each cited in the data file: Sgr A\* — GRAVITY
+  Collaboration 2022, *A&A* 657, L12; M87\* — Event Horizon Telescope Collaboration 2019, *ApJL* 875, L6;
+  Cyg X-1 — Miller-Jones et al. 2021, *Science* 371, 1046 and Orosz et al. 2011, *ApJ* 742, 84;
+  Gaia BH1/BH2 — El-Badry et al. 2023, *MNRAS* 518, 1057 and 521, 4323; Gaia BH3 — Gaia Collaboration,
+  Panuzzo et al. 2024, *A&A* 686, L2.
+* Companion radii of the X-ray binaries: Roche-lobe radius formula of P. P. Eggleton 1983, *ApJ* 268, 368.
+* Rendering (`src/render/shaders/blackhole.ts`): photons traced in the Schwarzschild metric (Binet
+  equation with the relativistic term); weak-field deflection 4GM/(c²b) with the second-order term
+  15πG²M²/(4c⁴b²); thin-disk temperature profile of Shakura & Sunyaev 1973 / Novikov & Thorne 1973 with a
+  zero-torque inner edge at the ISCO; Doppler and gravitational shifts applied to a blackbody spectrum.
+  Disk orientations follow the catalogue inclinations (the node on the sky is unknown and fixed
+  arbitrarily per object). X-ray binaries are shown in outburst (inner disk ≈ 10⁷ K); the disks of
+  Sgr A\* and M87\* are illustrative — their real accretion flows are faint and radiate mostly in
+  radio. The streaky gas texture and its slowed-down rotation are procedural.
+
 ## Algorithms and code
 
 * [three.js](https://threejs.org/) (MIT), [Vite](https://vite.dev/) (MIT), [jplephem](https://github.com/brandon-rhodes/python-jplephem) (MIT, pipeline), NumPy, Pillow, Requests, rasterio/GDAL, OpenEXR, Astropy (pipeline).
