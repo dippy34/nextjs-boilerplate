@@ -1,4 +1,8 @@
-import { Matrix3, Matrix4, Quaternion, Vector3 } from 'three';
+import {
+  CustomBlending, DstColorFactor, Group, InstancedBufferAttribute, InstancedMesh, Matrix3, Matrix4, OneFactor, PlaneGeometry, Quaternion,
+  ShaderMaterial, Vector3, ZeroFactor,
+} from 'three';
+import { FIX_LOGDEPTH, GLOBALS, PROJECT_PARS } from '../render/shaders/xr';
 import { UPos } from '../core/upos';
 import { Body, type SpaceObject } from '../universe/Body';
 import { Landmark } from '../universe/Landmarks';
@@ -302,6 +306,22 @@ export function cannotWalkReason(o: SpaceObject | null): string | null {
   return `Can't walk on ${o.name}: fly to a planet or a moon first`;
 }
 
+/** Worlds with a dusty regolith that keeps bootprints (not Earth's grass and water, not lava or ocean worlds). */
+export function leavesPrints(o: object | null): boolean {
+  if (o instanceof Body) return o.name !== 'Earth';
+  if (o instanceof ExoPlanet) return !['ocean', 'lava', 'terran'].includes(o.spec.type);
+  return false;
+}
+
+/** Drag on dust (1/s): none in vacuum; Mars' thin air keeps fine dust up longer. */
+export function airDrag(o: object | null): number {
+  const n = (o as { name?: string } | null)?.name;
+  if (n === 'Earth') return 3;
+  if (n === 'Mars') return 0.8;
+  if (o instanceof ExoPlanet && ['terran', 'ocean', 'desert'].includes(o.spec.type)) return 2;
+  return 0;
+}
+
 export type WalkState = 'off' | 'approach' | 'descend' | 'walk';
 
 export interface WalkSettings {
@@ -349,6 +369,12 @@ export class Walk {
   private hudTimer = 0;
   /** short status for the HUD and the VR wrist */
   status = '';
+  /** bootprints and dust */
+  readonly marks = new GroundMarks();
+  private stepIndex = 0;
+  /** orbit lines are hidden while walking (they cross the sky and the ground) */
+  private orbitsBefore: boolean | null = null;
+  private foot = 1;
 
   constructor(private app: App) {
     if (typeof document !== 'undefined' && app.hud?.root) {
@@ -360,6 +386,8 @@ export class Walk {
       app.hud.root.appendChild(el);
       this.hudEl = el;
     }
+    this.marks.group.visible = false;
+    app.renderer?.scene.add(this.marks.group);
   }
 
   /** walking or about to (flying down to land) */
@@ -435,6 +463,8 @@ export class Walk {
     this.state = 'off';
     this.approachTarget = null;
     app.vr.comfort = 0;
+    this.marks.group.visible = false;
+    if (this.orbitsBefore !== null) { app.orbits.enabled = this.orbitsBefore; this.orbitsBefore = null; }
     if (this.hudEl) this.hudEl.style.display = 'none';
     if (typeof document !== 'undefined' && document.pointerLockElement) document.exitPointerLock?.();
     if (was === 'walk' || was === 'descend') {
@@ -464,6 +494,7 @@ export class Walk {
   }
 
   private bindWorld(owner: SpaceObject): void {
+    if (this.marks.owner !== owner) this.marks.clear(owner);
     this.world = owner;
     this.body.gm = worldGM(owner);
     this.body.lope = this.settings.lope;
@@ -525,6 +556,7 @@ export class Walk {
     this.fwd.copy(f.normalize());
     this.pitch = Math.max(-1.2, Math.min(1.2, pitch));
     this.state = 'walk';
+    if (this.orbitsBefore === null) { this.orbitsBefore = app.orbits.enabled; app.orbits.enabled = false; }
     app.rig.cancelGoto();
     app.rig.stop();
     if (!app.vr.active) {
@@ -754,6 +786,7 @@ export class Walk {
       this.visR += (pr - this.visR) * (1 - Math.exp(-dt / 0.03));
     }
     this.place(bob + this.dip);
+    this.updateMarks(dt, landed, impact, up);
 
     // comfort vignette while moving or turning (VR)
     if (vrOn) {
@@ -766,6 +799,35 @@ export class Walk {
 
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) { this.hudTimer = 0.2; this.updateHud(); }
+  }
+
+  /** Bootprints at each step (and both feet on landing), dust from landings and running. */
+  private updateMarks(dt: number, landed: boolean, impact: number, upOld: Vector3): void {
+    const b = this.body;
+    const up = b.pos.clone().normalize();
+    const g = b.gravity;
+    const prints = leavesPrints(this.world);
+    const drag = airDrag(this.world);
+    const vt = b.vel.clone().addScaledVector(up, -b.vel.dot(up));
+    const heading = vt.lengthSq() > 0.04 ? vt.clone().normalize() : this.fwd.clone();
+    const side = new Vector3().crossVectors(heading, up).normalize();
+    const footAt = (sgn: number) => b.pos.clone().addScaledVector(side, 0.11 * sgn);
+    if (landed) {
+      if (prints) { this.marks.addPrint(footAt(1), heading, up); this.marks.addPrint(footAt(-1), heading, up); }
+      const n = Math.round(Math.min(90, 10 + impact * 22 + vt.length() * 6));
+      if (impact > 0.4 || vt.length() > 1.5) this.marks.kick(b.pos, up, n, Math.min(2.2, 0.35 + impact * 0.45 + vt.length() * 0.15), vt.clone().multiplyScalar(0.25));
+    } else if (b.onGround) {
+      const step = Math.floor(this.bobPhase);
+      if (step !== this.stepIndex) {
+        this.stepIndex = step;
+        this.foot = -this.foot;
+        if (prints) this.marks.addPrint(footAt(this.foot), heading, up);
+        if (vt.length() > 2) this.marks.kick(footAt(this.foot), up, 6, 0.5, vt.clone().multiplyScalar(0.2));
+      }
+    }
+    void upOld;
+    const camRel = this.app.rig.upos.sub(this.centre, new Vector3());
+    this.marks.update(dt, g, drag, up, b.onGround ? b.radius : this.ground(up), this.R, camRel, true);
   }
 
   /** Put the camera rig where the walker's eyes are (VR: the dolly at the feet; the headset adds its height). */
@@ -815,7 +877,9 @@ export class Walk {
       state: this.state, world: this.world?.name ?? null, gravity: b.gravity, onGround: b.onGround, slope: (b.slope * 180) / Math.PI,
       feetH: b.radius - g, eyeH: eyeR - g, speed: b.groundSpeed, vUp: b.vel.dot(up), airTime: b.airTime, apex: b.apex,
       finite: Number.isFinite(eyeR) && Number.isFinite(b.pos.x),
-      upDot: new Vector3(0, 1, 0).applyQuaternion(this.app.rig.quat).dot(up.clone().applyMatrix3(this.R).normalize()),
+      // the view stays upright: its right axis is horizontal (no roll)
+      roll: new Vector3(1, 0, 0).applyQuaternion(this.app.rig.quat).dot(up.clone().applyMatrix3(this.R).normalize()),
+      pos: b.pos.toArray(),
     };
   }
 }
@@ -823,4 +887,204 @@ export class Walk {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+// ------------------------------------------------------------------ bootprints and dust
+const MARK_VERT = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
+attribute float aA;
+uniform float uBillboard;
+varying vec2 vUv;
+varying float vA;
+void main() {
+  vUv = uv;
+  vA = aA;
+  vec4 mv;
+  if (uBillboard > 0.5) {
+    // camera-facing quad of the instance's size
+    mat4 im = instanceMatrix;
+    float s = length(im[0].xyz);
+    mv = viewMatrix * modelMatrix * vec4(im[3].xyz, 1.0);
+    mv.xy += position.xy * s;
+  } else {
+    mv = viewMatrix * modelMatrix * instanceMatrix * vec4(position, 1.0);
+  }
+  gl_Position = projectView(mv);
+  #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
+}`;
+
+/** Bootprint: darkens the ground below it (dst x factor), tread stripes inside a sole outline. */
+const PRINT_FRAG = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+varying vec2 vUv;
+varying float vA;
+void main() {
+  #include <logdepthbuf_fragment>
+  vec2 p = vUv * 2.0 - 1.0;               // x across, y along the foot (toe at +1)
+  float w = mix(0.62, 0.95, smoothstep(-0.9, 0.3, p.y));   // narrower heel
+  float waist = 1.0 - 0.18 * exp(-pow((p.y + 0.15) * 4.0, 2.0));
+  float e = length(vec2(p.x / (w * waist), p.y));
+  float m = 1.0 - smoothstep(0.86, 1.0, e);
+  float rim = smoothstep(0.78, 0.92, e) * (1.0 - smoothstep(0.92, 1.0, e));
+  float tread = step(0.5, fract(p.y * 7.0 + 0.25));
+  float f = 1.0 - m * vA * (0.30 + 0.12 * tread) + rim * vA * 0.10;
+  gl_FragColor = vec4(vec3(f), 1.0);
+}`;
+
+/** Dust grain: brightens what is behind it (dst x (1 + a)), sunlit regolith over the ground. */
+const DUST_FRAG = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+varying vec2 vUv;
+varying float vA;
+void main() {
+  #include <logdepthbuf_fragment>
+  float r = length(vUv * 2.0 - 1.0);
+  float a = vA * (1.0 - smoothstep(0.3, 1.0, r));
+  if (a < 0.003) discard;
+  gl_FragColor = vec4(vec3(a * 0.9), 1.0);
+}`;
+
+const MAX_PRINTS = 500;
+const MAX_DUST = 600;
+
+interface Grain { p: Vector3; v: Vector3; life: number; settled: number; size: number }
+
+/**
+ * Bootprints in the regolith behind the walker and dust kicked up by landings and running.
+ * Body-fixed positions (they stay on the turning world), drawn camera-relative each frame.
+ * Dust flies ballistically (no air on the Moon; a little drag where there is air).
+ */
+export class GroundMarks {
+  readonly group = new Group();
+  private prints: InstancedMesh;
+  private dust: InstancedMesh;
+  private printPos: { p: Vector3; f: Vector3; up: Vector3; a: number }[] = [];
+  private grains: Grain[] = [];
+  private printA: InstancedBufferAttribute;
+  private dustA: InstancedBufferAttribute;
+  private next = 0;
+  owner: object | null = null;
+
+  constructor() {
+    this.group.name = 'walk-marks';
+    this.group.matrixAutoUpdate = false;
+    const common = { vertexShader: MARK_VERT, transparent: true, depthWrite: false, depthTest: true, blending: CustomBlending };
+    const pg = new PlaneGeometry(0.13, 0.31);
+    this.printA = new InstancedBufferAttribute(new Float32Array(MAX_PRINTS), 1);
+    pg.setAttribute('aA', this.printA);
+    this.prints = new InstancedMesh(pg, new ShaderMaterial({
+      name: 'bootprints', fragmentShader: PRINT_FRAG, ...common, blendSrc: DstColorFactor, blendDst: ZeroFactor,
+      uniforms: { uBillboard: { value: 0 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+    }), MAX_PRINTS);
+    const dg = new PlaneGeometry(1, 1);
+    this.dustA = new InstancedBufferAttribute(new Float32Array(MAX_DUST), 1);
+    dg.setAttribute('aA', this.dustA);
+    this.dust = new InstancedMesh(dg, new ShaderMaterial({
+      name: 'walk-dust', fragmentShader: DUST_FRAG, ...common, blendSrc: DstColorFactor, blendDst: OneFactor,
+      uniforms: { uBillboard: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+    }), MAX_DUST);
+    for (const m of [this.prints, this.dust]) {
+      m.frustumCulled = false;
+      m.count = 0;
+      m.matrixAutoUpdate = false;
+      this.group.add(m);
+    }
+    this.prints.renderOrder = 19.93; // after the terrain and rocks, before the terrain haze
+    this.dust.renderOrder = 19.94;
+    this.prints.name = 'bootprints';
+    this.dust.name = 'walk-dust';
+  }
+
+  /** Forget everything (another world). */
+  clear(owner: object | null): void {
+    this.owner = owner;
+    this.printPos = [];
+    this.grains = [];
+    this.next = 0;
+  }
+
+  get printCount(): number { return this.printPos.length; }
+  get dustCount(): number { return this.grains.length; }
+
+  /** A print at body-fixed feet position `p` (on the ground), heading `f`, local vertical `up`. */
+  addPrint(p: Vector3, f: Vector3, up: Vector3): void {
+    const e = { p: p.clone().addScaledVector(up, 0.03), f: f.clone(), up: up.clone(), a: 1 };
+    if (this.printPos.length < MAX_PRINTS) this.printPos.push(e);
+    else { this.printPos[this.next] = e; this.next = (this.next + 1) % MAX_PRINTS; }
+  }
+
+  /** Kick up `n` grains at body-fixed `p` with up to `speed` m/s, biased along `dir` (tangent, may be zero). */
+  kick(p: Vector3, up: Vector3, n: number, speed: number, dir: Vector3, rnd: () => number = Math.random): void {
+    tangents(up, _t1, _t2);
+    for (let i = 0; i < n && this.grains.length < MAX_DUST; i++) {
+      const a = rnd() * Math.PI * 2;
+      const s = speed * (0.25 + 0.75 * rnd());
+      const v = _t1.clone().multiplyScalar(Math.cos(a) * s).addScaledVector(_t2, Math.sin(a) * s)
+        .addScaledVector(up, speed * (0.3 + 0.9 * rnd())).addScaledVector(dir, 0.6);
+      const q = p.clone().addScaledVector(_t1, (rnd() - 0.5) * 0.3).addScaledVector(_t2, (rnd() - 0.5) * 0.3).addScaledVector(up, 0.03);
+      this.grains.push({ p: q, v, life: 0, settled: 0, size: 0.012 + 0.03 * rnd() });
+    }
+  }
+
+  /**
+   * Advance the dust (gravity `g` towards the centre, drag `drag` 1/s; `groundR` the ground
+   * radius near the walker, `feet` its body-fixed feet) and place everything relative to the
+   * camera: `camRel` = camera - world centre (world axes), `R` body-fixed -> world.
+   */
+  update(dt: number, g: number, drag: number, feetUp: Vector3, groundR: number, R: Matrix3, camRel: Vector3, visible: boolean): void {
+    this.group.visible = visible;
+    if (!visible) return;
+    const m = new Matrix4(), q = new Quaternion(), s = new Vector3(), pos = new Vector3();
+    // dust
+    let k = 0;
+    const keep: Grain[] = [];
+    for (const gr of this.grains) {
+      gr.life += dt;
+      if (gr.settled > 0) gr.settled += dt;
+      else {
+        const up = _up.copy(gr.p).normalize();
+        gr.v.addScaledVector(up, -g * dt).multiplyScalar(Math.exp(-drag * dt));
+        gr.p.addScaledVector(gr.v, dt);
+        // the ground near the walker is close to the plane through its feet
+        if (gr.p.dot(feetUp) < groundR) { gr.p.addScaledVector(feetUp, groundR - gr.p.dot(feetUp)); gr.settled = 1e-6; }
+      }
+      const alpha = gr.settled > 0 ? Math.max(0, 0.5 * (1 - gr.settled / 0.6)) : Math.min(0.5, gr.life * 6) * (drag > 0 ? Math.exp(-gr.life * 0.3) : 1);
+      if (alpha <= 0.002 || gr.life > 12) continue;
+      keep.push(gr);
+      if (k >= MAX_DUST) continue;
+      pos.copy(gr.p).applyMatrix3(R).sub(camRel);
+      s.setScalar(gr.size);
+      m.compose(pos, q.identity(), s);
+      this.dust.setMatrixAt(k, m);
+      this.dustA.setX(k, alpha);
+      k++;
+    }
+    this.grains = keep;
+    this.dust.count = k;
+    this.dust.instanceMatrix.needsUpdate = true;
+    this.dustA.needsUpdate = true;
+    // prints (only the ones near the camera are worth drawing)
+    let j = 0;
+    const basis = new Matrix4();
+    const right = new Vector3();
+    for (const pr of this.printPos) {
+      pos.copy(pr.p).applyMatrix3(R).sub(camRel);
+      if (pos.lengthSq() > 250 * 250) continue;
+      const upW = pr.up.clone().applyMatrix3(R).normalize();
+      const fW = pr.f.clone().applyMatrix3(R).normalize();
+      right.crossVectors(fW, upW).normalize();
+      basis.makeBasis(right, fW, upW).setPosition(pos);
+      this.prints.setMatrixAt(j, basis);
+      this.printA.setX(j, pr.a);
+      j++;
+    }
+    this.prints.count = j;
+    this.prints.instanceMatrix.needsUpdate = true;
+    this.printA.needsUpdate = true;
+  }
 }

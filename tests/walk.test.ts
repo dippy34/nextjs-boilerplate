@@ -1,7 +1,7 @@
-import { Vector3 } from 'three';
+import { Matrix3, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  EYE_STAND, G_NEWTON, JUMP_SPEED, SLOPE_LIMIT, WALK_SPEED, WalkBody, cannotWalkReason, escapeSpeed, gravityAt, jumpSpeed, runSpeed,
+  EYE_STAND, G_NEWTON, GroundMarks, airDrag, JUMP_SPEED, SLOPE_LIMIT, WALK_SPEED, WalkBody, cannotWalkReason, escapeSpeed, gravityAt, jumpSpeed, runSpeed,
   type GroundFn, type WalkIntent,
 } from '../src/app/Walk';
 
@@ -180,5 +180,31 @@ describe('robustness', () => {
   });
   it('explains why gas giants and stars cannot be walked on', () => {
     expect(cannotWalkReason(null)).toMatch(/Nothing to stand on/);
+  });
+});
+
+describe('bootprints and dust', () => {
+  it('dust kicked up on the Moon flies ballistically and settles', () => {
+    const marks = new GroundMarks();
+    const R = MOON.r, g = gravityAt(MOON.gm, R);
+    const up = new Vector3(0, 0, 1);
+    const feet = up.clone().multiplyScalar(R);
+    let seed = 1;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    marks.kick(feet, up, 40, 1.5, new Vector3(), rnd);
+    expect(marks.dustCount).toBe(40);
+    const cam = feet.clone().addScaledVector(up, 1.7);
+    let t = 0;
+    // a grain thrown up at <= 1.5 * 1.2 m/s is back on the ground within 2 * 1.8 / 1.62 s
+    while (t < 2.4) { marks.update(1 / 60, g, airDrag(null), up, R, new Matrix3(), cam, true); t += 1 / 60; }
+    expect(marks.dustCount).toBeGreaterThan(0); // settled grains fade for a moment
+    for (let i = 0; i < 60; i++) marks.update(1 / 60, g, 0, up, R, new Matrix3(), cam, true);
+    expect(marks.dustCount).toBe(0);
+  });
+  it('keeps a bounded number of prints', () => {
+    const marks = new GroundMarks();
+    const up = new Vector3(0, 0, 1);
+    for (let i = 0; i < 2000; i++) marks.addPrint(new Vector3(i * 0.7, 0, MOON.r), new Vector3(1, 0, 0), up);
+    expect(marks.printCount).toBe(500);
   });
 });
