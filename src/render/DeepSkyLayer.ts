@@ -1,5 +1,5 @@
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, DataTexture, Group, Mesh, PlaneGeometry, Points, ShaderMaterial, Vector3,
+  AdditiveBlending, BackSide, BufferAttribute, BufferGeometry, DataTexture, Group, Mesh, PlaneGeometry, Points, ShaderMaterial, SphereGeometry, Vector3,
 } from 'three';
 import { teffToLut } from '../astro/photometry';
 import type { UPos } from '../core/upos';
@@ -117,6 +117,93 @@ export interface DeepSkyView { obj: DeepSkyObject; rel: Vector3; dist: number; p
  * catalogue stars) plus a glow while they are unresolved. Open clusters need nothing: their stars
  * are in the catalogues.
  */
+const VOL_VERT = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
+uniform float uClipScale;
+varying vec3 vPos;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vPos = wp.xyz;
+  gl_Position = projectView(viewMatrix * wp);
+  #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
+  gl_Position *= uClipScale;
+}`;
+
+/**
+ * Inside (or near) a nebula: the same procedural cloud as the billboards, as a volume. The view
+ * ray is marched through the nebula's sphere, adding glowing gas and dimming it behind dark dust,
+ * so flying in gives depth and parallax instead of a flat picture.
+ */
+const VOL_FRAG = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+uniform vec3 uCenter;   // camera-relative (m)
+uniform float uRadius;  // m
+uniform float uType;    // 0 emission, 1 planetary shell, 2 supernova remnant
+uniform float uSeed;
+uniform float uGain;
+uniform float uFade;
+uniform float uLite;
+uniform float uFilled;
+varying vec3 vPos;
+float h31(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float n3(vec3 p) {
+  vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(h31(i), h31(i + vec3(1,0,0)), f.x), mix(h31(i + vec3(0,1,0)), h31(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(h31(i + vec3(0,0,1)), h31(i + vec3(1,0,1)), f.x), mix(h31(i + vec3(0,1,1)), h31(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm3(vec3 p) { float s = 0.0, a = 0.5; int n = uLite > 0.5 ? 3 : 4; for (int i = 0; i < 4; i++) { if (i >= n) break; s += a * n3(p); p = p * 2.07 + 5.3; a *= 0.5; } return s / (1.0 - pow(0.5, float(n))); }
+void main() {
+  vec3 dir = normalize(vPos);
+  // the ray from the eye through the nebula's sphere (unit radius around its centre)
+  vec3 oc = -uCenter / uRadius;
+  float b = dot(oc, dir);
+  float c = dot(oc, oc) - 1.0;
+  float disc = b * b - c;
+  if (disc <= 0.0) discard;
+  float sq = sqrt(disc);
+  float t0 = max(-b - sq, 0.0), t1 = -b + sq;
+  if (t1 <= t0) discard;
+  int N = uLite > 0.5 ? 12 : 22;
+  float dt = (t1 - t0) / float(N);
+  vec3 col = vec3(0.0);
+  float T = 1.0;
+  vec3 sd = vec3(uSeed * 17.0, uSeed * 29.0, uSeed * 7.0);
+  for (int i = 0; i < 22; i++) {
+    if (i >= N) break;
+    vec3 p = oc + dir * (t0 + (float(i) + 0.5) * dt);
+    float r = length(p);
+    vec3 e = vec3(0.0);
+    float dust = 0.0;
+    if (uType < 0.5) {
+      vec3 q = p * 2.2 + sd;
+      float cloud = fbm3(q + 0.8 * vec3(fbm3(q + 3.1), fbm3(q + 8.7), 0.0) - 0.4);
+      float dens = smoothstep(0.42, 0.85, cloud) * (1.0 - smoothstep(0.45, 1.0, r));
+      float core = exp(-r * r * 6.0) * smoothstep(0.3, 0.7, fbm3(q * 1.7 + 1.0));
+      e = vec3(1.0, 0.22, 0.32) * dens * 1.3 + vec3(0.35, 0.95, 0.85) * core * 0.9;
+      dust = smoothstep(0.55, 0.72, fbm3(q * 2.3 + 9.0)) * (1.0 - smoothstep(0.3, 1.0, r)) * 3.0;
+    } else if (uType < 1.5) {
+      float wob = 0.06 * (fbm3(p * 3.0 + sd) - 0.5);
+      float shell = exp(-pow((r - 0.55 - wob) / 0.12, 2.0));
+      float rim = exp(-pow((r - 0.75 - wob) / 0.1, 2.0));
+      e = (vec3(0.3, 0.95, 0.9) * (exp(-pow(r / 0.42, 2.0)) * 0.5 + shell * 0.7) + vec3(1.0, 0.3, 0.35) * rim * 1.2) * (0.75 + 0.5 * fbm3(p * 8.0 + sd));
+    } else {
+      float fil = pow(1.0 - abs(fbm3(p * 2.0 + sd) * 2.0 - 1.0), 6.0);
+      float shell = mix(smoothstep(0.45, 0.85, r), 1.0, uFilled) * (1.0 - smoothstep(0.9, 1.0, r));
+      e = mix(vec3(0.4, 0.75, 1.0), vec3(1.0, 0.35, 0.3), smoothstep(0.4, 0.7, fbm3(p + sd + 2.0))) * fil * shell * 2.0;
+    }
+    col += T * e * dt;
+    T *= exp(-dust * dt);
+  }
+  // a chord through the middle (length 2) gives about the billboards' brightness
+  gl_FragColor = vec4(col * 0.7 * uGain * uFade, 1.0);
+${OUTPUT_FRAGMENT}
+  #include <logdepthbuf_fragment>
+}`;
+
 export class DeepSkyLayer {
   readonly group = new Group();
   views: DeepSkyView[] = [];
@@ -124,9 +211,22 @@ export class DeepSkyLayer {
   private stars = new Map<DeepSkyObject, Points>();
   private quad = new PlaneGeometry(2, 2);
   readonly gain = { value: 0.6 };
+  /** the nebula volume shown when the explorer is close to (or inside) a nebula */
+  private volume: Mesh;
 
   constructor(readonly objects: DeepSkyObject[], psf: Record<string, { value: number }>, colorLut: DataTexture, vr = false) {
     this.group.name = 'deep-sky';
+    this.volume = new Mesh(new SphereGeometry(1, 32, 16), new ShaderMaterial({
+      name: 'nebula-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG,
+      uniforms: { uCenter: { value: new Vector3() }, uRadius: { value: 1 }, uType: { value: 0 }, uSeed: { value: 0 }, uGain: this.gain,
+        uFade: { value: 0 }, uLite: LITE.uLite, uFilled: { value: 0 }, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+      transparent: true, depthWrite: false, blending: AdditiveBlending, side: BackSide,
+    }));
+    this.volume.matrixAutoUpdate = false;
+    this.volume.frustumCulled = false;
+    this.volume.visible = false;
+    this.volume.renderOrder = -1;
+    this.group.add(this.volume);
     for (const o of objects) {
       const k = o.data.kind;
       if (k === 'open') continue;
@@ -175,11 +275,38 @@ export class DeepSkyLayer {
     }
   }
 
+  /** The nebula volume, for compiling its shader ahead of time. */
+  warmupObjects(): Mesh[] {
+    return [this.volume];
+  }
+
   /** `camPc`: camera position (pc); `adapt`: dark adaptation (1 = dark-adapted). */
   update(cam: UPos, camPc: Vector3, pixelAngle: number, adapt: number): void {
     this.views = [];
     this.gain.value = 0.55 * Math.pow(Math.max(adapt, 0), 0.55);
     const rel = new Vector3();
+    // the nearest nebula (in its radii) gets the volume when the explorer is close
+    let near: DeepSkyObject | null = null, nearK = Infinity;
+    for (const o of this.objects) {
+      if (o.data.kind === 'open' || o.data.kind === 'globular') continue;
+      const k = o.upos.sub(cam, rel).length() / o.radius;
+      if (k < nearK) { nearK = k; near = o; }
+    }
+    const volW = near ? Math.min(1, Math.max(0, (3.2 - nearK) / 1.4)) : 0;   // fades in from 3.2 to 1.8 radii
+    this.volume.visible = volW > 0.01;
+    if (near && this.volume.visible) {
+      near.upos.sub(cam, rel);
+      const u = (this.volume.material as ShaderMaterial).uniforms;
+      (u.uCenter.value as Vector3).copy(rel);
+      u.uRadius.value = near.radius;
+      u.uType.value = near.data.kind === 'emission' ? 0 : near.data.kind === 'planetary' ? 1 : 2;
+      u.uSeed.value = near.seed;
+      u.uFilled.value = /Crab/.test(near.name) ? 1 : 0;
+      u.uFade.value = volW;
+      u.uClipScale.value = 1 / Math.max(rel.length(), near.radius);
+      this.volume.matrix.makeScale(near.radius, near.radius, near.radius).setPosition(rel);
+      this.volume.matrixWorldNeedsUpdate = true;
+    }
     for (const o of this.objects) {
       o.upos.sub(cam, rel);
       const dist = rel.length();
@@ -191,7 +318,9 @@ export class DeepSkyLayer {
         const fade = o.data.kind === 'globular' ? Math.min(1, Math.max(0, (dist / o.radius - 1.5) / 6)) : 1;
         for (const m of meshes) {
           const { size, offset } = m.userData as { size: number; offset: Vector3 };
-          m.visible = pr > 0.8 && fade > 0.01;
+          // (the billboards give way to the volume up close)
+          const billW = o === near ? 1 - volW : 1;
+          m.visible = pr > 0.8 && fade > 0.01 && billW > 0.01;
           if (!m.visible) continue;
           const p = rel.clone().addScaledVector(offset, o.radius);
           const s = o.radius * size;
@@ -200,6 +329,10 @@ export class DeepSkyLayer {
           const u = (m.material as ShaderMaterial).uniforms;
           u.uClipScale.value = 1 / Math.max(p.length(), 1);
           if (o.data.kind === 'globular') u.uGain.value = this.gain.value * fade * 1.4;
+          else if (o === near && billW < 1) {
+            if (u.uGain === this.gain) u.uGain = { value: 0 };
+            u.uGain.value = this.gain.value * billW;
+          } else if (u.uGain !== this.gain) u.uGain = this.gain;
         }
       }
       const pts = this.stars.get(o);
