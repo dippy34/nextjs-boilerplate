@@ -148,6 +148,8 @@ uniform float uGain;
 uniform float uFade;
 uniform float uLite;
 uniform float uFilled;
+uniform vec3 uAxis;     // symmetry axis (world)
+uniform float uShape;   // planetary: 0 barrel/ring, 1 bipolar, 2 round with cavities
 varying vec3 vPos;
 float h31(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
 float n3(vec3 p) {
@@ -157,6 +159,19 @@ float n3(vec3 p) {
 }
 float fbm3(vec3 p) { float s = 0.0, a = 0.5; int n = uLite > 0.5 ? 3 : 4; for (int i = 0; i < 4; i++) { if (i >= n) break; s += a * n3(p); p = p * 2.07 + 5.3; a *= 0.5; } return s / (1.0 - pow(0.5, float(n))); }
 float ridge(vec3 p) { return 1.0 - abs(2.0 * n3(p) - 1.0); }
+// cellular noise: distances to the nearest and second-nearest feature points (thin sheets where they meet)
+vec2 vor3(vec3 p) {
+  vec3 i = floor(p), f = fract(p);
+  float d1 = 8.0, d2 = 8.0;
+  for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
+    vec3 g = vec3(float(x), float(y), float(z));
+    vec3 o = vec3(h31(i + g), h31(i + g + 17.13), h31(i + g + 43.71));
+    vec3 r = g + o - f;
+    float d = dot(r, r);
+    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+  }
+  return vec2(sqrt(d1), sqrt(d2));
+}
 void main() {
   vec3 dir = normalize(vPos);
   // the ray from the eye through the nebula's sphere (unit radius around its centre)
@@ -200,14 +215,64 @@ void main() {
       dust = (pillar * 9.0 + lane * 3.5) * (0.6 + 0.8 * n3(q * 4.0));
       e += vec3(1.0, 0.55, 0.35) * pillar * ion * 0.35;   // bright rims of the pillars
     } else if (uType < 1.5) {
-      float wob = 0.06 * (fbm3(p * 3.0 + sd) - 0.5);
-      float shell = exp(-pow((r - 0.55 - wob) / 0.12, 2.0));
-      float rim = exp(-pow((r - 0.75 - wob) / 0.1, 2.0));
-      e = (vec3(0.3, 0.95, 0.9) * (exp(-pow(r / 0.42, 2.0)) * 0.5 + shell * 0.7) + vec3(1.0, 0.3, 0.35) * rim * 1.2) * (0.75 + 0.5 * fbm3(p * 8.0 + sd));
+      // planetary nebula: a shell of gas thrown off by the dying star, lit by its hot core: teal
+      // [O III] inside, red [N II]/H-alpha outside, knots and radial spokes at the edge, a faint halo
+      float ca = dot(p, uAxis);
+      vec3 perp = p - uAxis * ca;
+      float rp = length(perp);
+      float re, dens;
+      float wob = 0.06 * (fbm3(p * 4.0 + sd) - 0.5);
+      if (uShape < 0.5) {
+        // barrel (a ring when seen end-on): prolate, thinner towards the axis
+        re = length(vec2(rp, ca / 1.45));
+        dens = exp(-pow((re - 0.5 - wob) / 0.1, 2.0)) * smoothstep(0.12, 0.6, rp / max(re, 1e-3)) * 1.6;
+        dens += 0.12 * smoothstep(0.5, 0.2, re);    // fainter gas filling the cavity
+      } else if (uShape < 1.5) {
+        // bipolar: two lobes along the axis, pinched by a dense waist
+        vec3 c1 = uAxis * 0.4;
+        float d1 = length(p - c1), d2 = length(p + c1);
+        float lobes = exp(-pow((d1 - 0.38 - wob) / 0.07, 2.0)) + exp(-pow((d2 - 0.38 - wob) / 0.07, 2.0));
+        lobes += 0.25 * (smoothstep(0.38, 0.1, d1) + smoothstep(0.38, 0.1, d2));
+        float waist = exp(-pow((rp - 0.22) / 0.06, 2.0) - ca * ca / 0.004);
+        dens = lobes * 1.3 + waist * 2.0;
+        re = min(d1, d2) + 0.15;
+      } else {
+        // round shell with two dark cavities (the Owl)
+        re = length(p);
+        vec3 side = normalize(cross(uAxis, vec3(0.31, 0.95, 0.12)));
+        float e1 = smoothstep(0.1, 0.2, length(p - side * 0.2)), e2 = smoothstep(0.1, 0.2, length(p + side * 0.2));
+        dens = smoothstep(0.75, 0.55, re + wob) * (0.6 + 0.4 * fbm3(p * 6.0 + sd)) * e1 * e2;
+      }
+      // knots and radial spokes
+      vec3 u = normalize(p + 1e-4);
+      float spokes = 0.55 + 0.9 * pow(n3(u * 26.0 + sd), 3.0);
+      float knots = 0.7 + 0.8 * smoothstep(0.55, 0.85, n3(p * 22.0 + sd * 2.0));
+      dens *= spokes * knots;
+      vec3 tint = mix(vec3(0.25, 0.95, 0.85), vec3(1.0, 0.22, 0.3), smoothstep(0.4, 0.62, re));
+      float halo = 0.1 * exp(-pow((length(p) - 0.88) / 0.07, 2.0)) * (0.3 + 1.4 * ridge(p * 5.0 + sd));
+      e = (tint * dens + vec3(1.0, 0.3, 0.35) * halo) * 1.4;
     } else {
-      float fil = pow(1.0 - abs(fbm3(p * 2.0 + sd) * 2.0 - 1.0), 6.0);
-      float shell = mix(smoothstep(0.45, 0.85, r), 1.0, uFilled) * (1.0 - smoothstep(0.9, 1.0, r));
-      e = mix(vec3(0.4, 0.75, 1.0), vec3(1.0, 0.35, 0.3), smoothstep(0.4, 0.7, fbm3(p + sd + 2.0))) * fil * shell * 2.0;
+      // supernova remnant: a web of thin filaments (cell walls of the shock), over a blue
+      // synchrotron glow when a pulsar fills it (the Crab), or on a thin shell (Veil, Cas A)
+      float ca = dot(p, uAxis);
+      vec3 q = p - uAxis * ca * 0.3;     // a little elongated along the axis
+      float r = length(q);
+      vec2 v1 = uLite > 0.5 ? vec2(0.0, 1.0) : vor3(p * 3.2 + sd);
+      float web1 = uLite > 0.5 ? pow(ridge(p * 3.2 + sd), 6.0) : 1.0 - smoothstep(0.0, 0.07, v1.y - v1.x);
+      vec2 v2 = uLite > 0.5 ? vec2(0.0, 1.0) : vor3(p * 7.5 + sd * 1.7);
+      float web2 = uLite > 0.5 ? 0.0 : 1.0 - smoothstep(0.0, 0.1, v2.y - v2.x);
+      float web = web1 * 0.8 + web2 * 0.45;
+      float region = fbm3(p * 1.5 + sd + 2.0);
+      if (uFilled > 0.5) {
+        float body = smoothstep(0.95, 0.65, r + 0.1 * (fbm3(p * 3.0 + sd) - 0.5));
+        vec3 fil = mix(vec3(1.0, 0.45, 0.22), vec3(1.0, 0.75, 0.5), smoothstep(0.4, 0.8, region));
+        vec3 sync = vec3(0.55, 0.72, 1.0) * smoothstep(0.85, 0.1, r) * (0.35 + 0.5 * fbm3(p * 9.0 + sd));
+        e = (fil * web * body * 2.6 + sync * 0.9);
+      } else {
+        float shell = exp(-pow((r - 0.82 - 0.1 * (fbm3(p * 2.0 + sd) - 0.5)) / 0.09, 2.0));
+        vec3 fil = mix(vec3(1.0, 0.3, 0.32), vec3(0.35, 0.8, 1.0), smoothstep(0.35, 0.65, region));
+        e = fil * shell * (0.15 + 2.6 * web);
+      }
     }
     col += T * e * dt;
     T *= exp(-dust * dt);
@@ -223,11 +288,38 @@ void main() {
       col += vec3(0.7, 0.82, 1.0) * L * (exp(-pow(d / 0.003, 2.0)) * 8.0 + 0.06 / (1.0 + pow(d / 0.015, 2.0)));
     }
   }
+  // the dying star at a planetary nebula's centre, the pulsar in a filled remnant
+  if (uType > 0.5 && (uType < 1.5 || uFilled > 0.5)) {
+    float ts = dot(-oc, dir);
+    if (ts > 0.0) {
+      float d = length(oc + dir * ts) / max(ts, 1e-3);
+      col += vec3(0.8, 0.88, 1.0) * (exp(-pow(d / 0.002, 2.0)) * 10.0 + 0.04 / (1.0 + pow(d / 0.01, 2.0)));
+    }
+  }
   // a chord through the middle (length 2) gives about the billboards' brightness
   gl_FragColor = vec4(col * 0.7 * uGain * uFade, 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
+
+/**
+ * Shape and symmetry axis of a nebula's volume: the well-known planetary nebulae as they are seen
+ * from Earth (the Ring and the Helix are barrels seen nearly end-on, the Dumbbell a bipolar nebula
+ * seen side-on, the Owl a round shell with two cavities); others from their seed.
+ */
+function nebulaShape(o: DeepSkyObject): { shape: number; axis: Vector3 } {
+  const los = o.posPc.clone().normalize();
+  const known: Record<string, [number, number]> = {
+    'Ring Nebula': [0, 25], 'Helix Nebula': [0, 18], 'Southern Ring Nebula': [0, 45], 'Eskimo Nebula': [0, 10],
+    'Dumbbell Nebula': [1, 80], "Cat's Eye Nebula": [1, 50], 'Owl Nebula': [2, 0], 'Crab Nebula': [0, 70],
+  };
+  const r = rnd(o.seed + 0.5);
+  const [shape, tiltDeg] = known[o.name] ?? [r() < 0.5 ? 0 : 1, 90 * r()];
+  const ref = Math.abs(los.z) < 0.9 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0);
+  const perp = new Vector3().crossVectors(los, ref).normalize().applyAxisAngle(los, r() * Math.PI * 2);
+  const t = (tiltDeg * Math.PI) / 180;
+  return { shape, axis: los.multiplyScalar(Math.cos(t)).addScaledVector(perp, Math.sin(t)).normalize() };
+}
 
 export class DeepSkyLayer {
   readonly group = new Group();
@@ -244,7 +336,8 @@ export class DeepSkyLayer {
     this.volume = new Mesh(new SphereGeometry(1, 32, 16), new ShaderMaterial({
       name: 'nebula-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG,
       uniforms: { uCenter: { value: new Vector3() }, uRadius: { value: 1 }, uType: { value: 0 }, uSeed: { value: 0 }, uGain: this.gain,
-        uFade: { value: 0 }, uLite: LITE.uLite, uFilled: { value: 0 }, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+        uFade: { value: 0 }, uLite: LITE.uLite, uFilled: { value: 0 }, uAxis: { value: new Vector3(0, 0, 1) }, uShape: { value: 0 },
+        uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
       transparent: true, depthWrite: false, blending: AdditiveBlending, side: BackSide,
     }));
     this.volume.matrixAutoUpdate = false;
@@ -327,6 +420,9 @@ export class DeepSkyLayer {
       u.uType.value = near.data.kind === 'emission' ? 0 : near.data.kind === 'planetary' ? 1 : 2;
       u.uSeed.value = near.seed;
       u.uFilled.value = /Crab/.test(near.name) ? 1 : 0;
+      const sh = nebulaShape(near);
+      u.uShape.value = sh.shape;
+      (u.uAxis.value as Vector3).copy(sh.axis);
       u.uFade.value = volW;
       u.uClipScale.value = 1 / Math.max(rel.length(), near.radius);
       this.volume.matrix.makeScale(near.radius, near.radius, near.radius).setPosition(rel);

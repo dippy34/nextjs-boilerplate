@@ -1,4 +1,5 @@
 import { CHAPMAN } from './atmosphere';
+import { MATERIAL_GLSL } from '../Materials';
 import { FIX_LOGDEPTH, OUTPUT_FRAGMENT, PROJECT_PARS } from './xr';
 /** Shaders for resolved Solar System bodies (Phase 1: textured ellipsoids). */
 
@@ -14,6 +15,7 @@ varying float vSun;       // terrain only: clearance of the Sun over the relief 
 varying vec3 vLocal;      // terrain only: body-fixed position relative to the patch origin (m)
 varying vec3 vPosView;    // camera-relative world position (m)
 varying vec2 vUv;
+varying vec3 vGround;     // terrain only: body-fixed position of the ground relative to the patch origin (m)
 float vh3(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
 float vn3(vec3 p) {
   vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -25,6 +27,7 @@ void main() {
   vTerrN = vNormalBF;
   vSun = 1.0;
   vLocal = vec3(0.0);
+  vGround = vec3(0.0);
   vUv = uv;
   vec3 pos = position;
   if (uLumpy > 0.0) {
@@ -107,6 +110,10 @@ varying float vSun;
 varying vec3 vLocal;
 varying vec3 vPosView;
 varying vec2 vUv;
+varying vec3 vGround;
+uniform vec4 uMatSel;          // ground materials (render/Materials.ts): flat A, flat B, steep, snow
+uniform float uMatMode;        // 0 airless regolith, 1 Earth (from the map's colour), 2 Mars, 3 ice
+${MATERIAL_GLSL}
 ${CHAPMAN}
 vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
@@ -350,11 +357,59 @@ void main() {
     float b = noise1(lat * 18.0 + uSeed) * 0.6 + noise1(lat * 45.0 + uSeed * 1.7) * 0.4;
     albedo *= 0.86 + 0.24 * b;
   }
+  // close-up ground: scanned materials (regolith, rock, sand, soil, snow, forest floor) as detail
+  // around the world's own colour, and their grain in the lighting
+  if (uTerrain > 0.5 && uMatOn > 0.5 && uHScale > 0.01) {
+    float mix2 = 0.0, snowW = 0.0;
+    float lumA = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+    if (uMatMode < 0.5) {
+      mix2 = smoothstep(0.45, 0.65, bn3(vGround / 260.0 + uSeed)) * 0.8 + freshAll * 0.5;
+    } else if (uMatMode < 1.5) {
+      // Earth: plants where the map is green, bare soil where it is brown, snow where it is white
+      mix2 = smoothstep(0.0, 0.03, albedo.g - 0.85 * albedo.r) * (1.0 - water);
+      snowW = smoothstep(0.32, 0.5, min(albedo.r, albedo.b) / max(uAlbedoScale, 1e-3));
+    } else if (uMatMode < 2.5) {
+      // Mars: dark basaltic sand in the dark regions, dusty soil elsewhere, frost on the polar caps
+      mix2 = smoothstep(0.16, 0.1, lumA / max(uAlbedoScale, 1e-3)) * 0.8 + 0.2 * smoothstep(0.5, 0.7, bn3(vGround / 180.0 + uSeed));
+      snowW = smoothstep(0.35, 0.5, albedo.b / max(albedo.r, 1e-3));
+    } else {
+      snowW = 1.0;
+    }
+    vec3 nPB = normalize(nP * uBodyToWorld);
+    vec3 nG;
+    vec3 det = groundDetail(vGround, nB, nPB, mppT, uMatSel, mix2, snowW, uLite, nG);
+    albedo *= mix(vec3(1.0), det, uHScale);
+    nP = normalize(mix(nP, uBodyToWorld * nG, uHScale * limbFade));
+    mu0 = dot(nP, uSunDir);
+    mu = max(dot(nP, V), 0.0);
+  }
   float cloud = 0.0;
+  float cloudShadow = 1.0;
   if (uHasClouds > 0.5) {
     cloud = texture2D(uClouds, vec2(vUv.x + uCloudShift, vUv.y)).r;
+    // the map's clouds are ~20 km per texel: generated billows break up their edges up close
+    float texC = fwidth(vUv.x) * 2048.0;
+    float wc = smoothstep(0.9, 0.25, texC) * (uLite > 0.5 ? 0.6 : 1.0);
+    if (wc > 0.0) {
+      float ang = uCloudShift * 6.2831853;
+      vec3 nc = vec3(cos(ang) * nB.x - sin(ang) * nB.y, sin(ang) * nB.x + cos(ang) * nB.y, nB.z);
+      float bill = 0.6 * bn3(nc * 900.0) + 0.4 * (uLite > 0.5 ? 0.5 : bn3(nc * 2600.0 + 7.0));
+      cloud += (bill - 0.5) * 0.55 * wc * smoothstep(0.02, 0.25, cloud);
+    }
     cloud = smoothstep(0.08, 0.9, cloud) * uCloudVis;
     albedo = mix(albedo, vec3(0.75), cloud);
+    // the clouds' shadows on the ground: the cloud (tops ~7 km up) between this point and the Sun
+    vec3 sB = uSunDir * uBodyToWorld;
+    float m0 = dot(nB, sB);
+    if (m0 > 0.0) {
+      vec3 eastB = normalize(vec3(-nB.y, nB.x, 0.0) + vec3(1e-6, 0.0, 0.0));
+      vec3 northB = cross(nB, eastB);
+      vec3 ts = sB - nB * m0;
+      float k = 0.0011 / max(m0, 0.08);
+      float dlon = dot(ts, eastB) * k / max(sqrt(1.0 - nB.z * nB.z), 0.05), dlat = dot(ts, northB) * k;
+      float cs = texture2D(uClouds, vec2(vUv.x + uCloudShift + dlon / 6.2831853, vUv.y + dlat / 3.14159265)).r;
+      cloudShadow = 1.0 - 0.55 * smoothstep(0.08, 0.9, cs) * uCloudVis * (1.0 - cloud);
+    }
   }
 
   // Terrain shading only on the day side (no light leaking past the geometric terminator)
@@ -365,7 +420,7 @@ void main() {
   } else {
     light = max(mix(mu0, mu0g, cloud), 0.0);                // Lambert (clouds hide the relief)
   }
-  light *= dayside;
+  light *= dayside * cloudShadow;
   if (uTerrain > 0.5) light *= mix(1.0, clamp(0.5 + vSun, 0.0, 1.0), uHScale);   // shadows of the relief
   // eclipses: shadows of moons and planets (with a coppery glow where sunlight is bent through an atmosphere)
   float eclRed = 0.0;

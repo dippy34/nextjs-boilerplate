@@ -1,4 +1,4 @@
-import type { Vector3 } from 'three';
+import { Vector3 } from 'three';
 import { craterField, type Ground, vnoise } from './Terrain';
 import type { ExoPlanet } from './Planets';
 
@@ -21,9 +21,8 @@ function pn(x: number, y: number, z: number): number {
     m(m(ph(ix, iy, iz), ph(ix + 1, iy, iz), fx), m(ph(ix, iy + 1, iz), ph(ix + 1, iy + 1, iz), fx), fy),
     m(m(ph(ix, iy, iz + 1), ph(ix + 1, iy, iz + 1), fx), m(ph(ix, iy + 1, iz + 1), ph(ix + 1, iy + 1, iz + 1), fx), fy), fz);
 }
-function fbm(x: number, y: number, z: number, lite: boolean): number {
+function fbmN(x: number, y: number, z: number, n: number): number {
   let s = 0, a = 0.5;
-  const n = lite ? 4 : 6;
   for (let i = 0; i < n; i++) {
     s += a * pn(x, y, z);
     x = x * 2.03 + 1.7; y = y * 2.03 + 1.7; z = z * 2.03 + 1.7;
@@ -31,30 +30,52 @@ function fbm(x: number, y: number, z: number, lite: boolean): number {
   }
   return s;
 }
-function ridged(x: number, y: number, z: number): number {
-  let s = 0, a = 0.5;
-  for (let i = 0; i < 5; i++) {
-    const n = 1 - Math.abs(pn(x, y, z) * 2 - 1);
-    s += a * n * n;
+function ridgedN(x: number, y: number, z: number, n: number): number {
+  let s = 0, a = 0.5, w = 1;
+  for (let i = 0; i < n; i++) {
+    let r = 1 - Math.abs(pn(x, y, z) * 2 - 1);
+    r *= r;
+    s += a * r * w;
+    w = Math.min(1, Math.max(0, r * 1.6));
     x = x * 2.1 + 3.1; y = y * 2.1 + 3.1; z = z * 2.1 + 3.1;
     a *= 0.5;
   }
   return s;
 }
+const smooth = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 /** `terrain(n)` of EXO_FRAG (0..~1); `lite` = the headset variant (LITE.uLite) */
 export function exoTerrain(n: Vector3, seed: number, lite: boolean): number {
   const qx = n.x * 2.2 + seed, qy = n.y * 2.2 + seed, qz = n.z * 2.2 + seed;
+  const hx = qx * 0.5, hy = qy * 0.5, hz = qz * 0.5;
   let wx: number, wy: number, wz: number;
   if (lite) {
-    wx = pn(qx * 0.7 + 1.3, qy * 0.7 + 1.3, qz * 0.7 + 1.3) - 0.5;
-    wy = pn(qx * 0.7 + 7.9, qy * 0.7 + 7.9, qz * 0.7 + 7.9) - 0.5;
-    wz = pn(qx * 0.7 + 4.1, qy * 0.7 + 4.1, qz * 0.7 + 4.1) - 0.5;
+    wx = pn(hx + 1.3, hy + 1.3, hz + 1.3) - 0.5;
+    wy = pn(hx + 7.9, hy + 7.9, hz + 7.9) - 0.5;
+    wz = pn(hx + 4.1, hy + 4.1, hz + 4.1) - 0.5;
   } else {
-    wx = fbm(qx + 1.3, qy + 1.3, qz + 1.3, false) - 0.5;
-    wy = fbm(qx + 7.9, qy + 7.9, qz + 7.9, false) - 0.5;
-    wz = fbm(qx + 4.1, qy + 4.1, qz + 4.1, false) - 0.5;
+    wx = fbmN(hx + 1.3, hy + 1.3, hz + 1.3, 4) - 0.5;
+    wy = fbmN(hx + 7.9, hy + 7.9, hz + 7.9, 4) - 0.5;
+    wz = fbmN(hx + 4.1, hy + 4.1, hz + 4.1, 4) - 0.5;
   }
-  return 0.65 * fbm(qx + wx * 1.6, qy + wy * 1.6, qz + wz * 1.6, lite) + 0.35 * ridged(qx * 1.7 + wx, qy * 1.7 + wy, qz * 1.7 + wz);
+  const cont = fbmN(qx * 0.7 + wx * 2, qy * 0.7 + wy * 2, qz * 0.7 + wz * 2, lite ? 4 : 6);
+  const plate = pn(qx * 0.55 + wx * 1.4 + 11, qy * 0.55 + wy * 1.4 + 11, qz * 0.55 + wz * 1.4 + 11);
+  const belt = 1 - smooth(0, 0.14, Math.abs(plate - 0.5));
+  const mount = ridgedN(qx * 2 + wx, qy * 2 + wy, qz * 2 + wz, lite ? 3 : 5);
+  const land = smooth(0.38, 0.6, cont);
+  return 0.7 * cont + 0.3 * mount * (0.3 + 0.7 * belt) * (0.35 + 0.65 * land);
+}
+
+/** Height of the terrain function at `quantile` of the surface (for a sea covering that fraction). */
+export function exoQuantile(seed: number, quantile: number, samples = 600): number {
+  const v: number[] = [];
+  const n = new Vector3();
+  const ga = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < samples; i++) {
+    const z = 1 - (2 * (i + 0.5)) / samples, r = Math.sqrt(1 - z * z), th = ga * i;
+    v.push(exoTerrain(n.set(r * Math.cos(th), r * Math.sin(th), z), seed, false));
+  }
+  v.sort((a, b) => a - b);
+  return v[Math.min(samples - 1, Math.max(0, Math.round(quantile * (samples - 1))))];
 }
 
 /** Planet types (EXO_FRAG uType) with a solid surface to land on. */
@@ -93,7 +114,7 @@ export class ExoGround implements Ground {
     const seas = this.type === 3 || this.type === 4;
     // land fraction: 0 at the shore, 1 a little inland (seas stay flat)
     const land = seas ? Math.min(1, Math.max(0, (t - this.seaLevel) / 0.02)) : 1;
-    let h = seas ? Math.max(0, t - this.seaLevel) * this.relief : (t - 0.5) * this.relief;
+    let h = seas ? Math.max(0, t - this.seaLevel) * this.relief : (t - 0.4) * this.relief;
     if (land <= 0) return 0;
     const R = this.radius;
     const px = n.x * R, py = n.y * R, pz = n.z * R;

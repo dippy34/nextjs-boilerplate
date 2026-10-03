@@ -20,6 +20,7 @@ import { CloudLayer } from './CloudLayer';
 import { TerrainSource } from '../universe/Terrain';
 import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
+import { MAT, MATERIALS } from './Materials';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
 
 interface MapInfo {
@@ -359,6 +360,8 @@ export class BodiesLayer {
         uProc: { value: 0 }, uIcy: { value: 0 }, uTint: { value: new Vector3(1, 1, 1) }, uCraters: { value: 0 },
         uLumpy: { value: 0 }, uRadiusM: { value: b.radius }, uMapW: { value: 0 },
         uDetail: { value: null }, uDetailRect: { value: new Vector4(0, 0, 1, 1) }, uDetailOn: { value: 0 }, uLite: LITE.uLite,
+        ...MATERIALS, uMatSel: { value: new Vector4(MAT.regolith, MAT.regolithPocked, MAT.cliff, MAT.snow) }, uMatMode: { value: 0 },
+        uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) },
         uTerrain: { value: 0 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
         uSunDir: { value: new Vector3(1, 0, 0) },
         uSunIrr: { value: Math.PI },
@@ -439,6 +442,13 @@ export class BodiesLayer {
    */
   private surfaceLook(b: Body, u: Record<string, { value: unknown }>, texKey: string | null, mapWidth: number): void {
     const h = (k: string) => hashString(b.name + k);
+    // ground materials up close (render/Materials.ts)
+    const sel = u.uMatSel.value as Vector4;
+    if (b.name === 'Earth') { sel.set(MAT.drySoil, MAT.forest, MAT.cliff, MAT.snow); u.uMatMode.value = 1; }
+    else if (b.name === 'Mars') { sel.set(MAT.drySoil, MAT.sand, MAT.cliff, MAT.snow); u.uMatMode.value = 2; }
+    else if (b.name === 'Venus' || b.name === 'Io') { sel.set(MAT.rockGround, MAT.drySoil, MAT.cliff, MAT.snow); u.uMatMode.value = 0; }
+    else if (b.albedo > 0.45 || (b.kind !== 'planet' && b.pos.length() > 4.5 * AU && b.meta.albedo === undefined)) { sel.set(MAT.snow, MAT.snow, MAT.cliff, MAT.snow); u.uMatMode.value = 3; }
+    else { sel.set(MAT.regolith, MAT.regolithPocked, MAT.cliff, MAT.snow); u.uMatMode.value = 0; }
     const solid = !b.isGasGiant && b.kind !== 'star' && !['Venus', 'Earth', 'Titan'].includes(b.name);
     if (!solid) return;
     const R = b.radius;

@@ -94,6 +94,21 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     disc, arms, bar, bulge, single stars; sprites of fixed size in space, so surface brightness holds
     at any distance and flux is kept below a pixel; distances in the shader are in galaxy radii, as
     metres squared overflow 32-bit floats); the disc picture fades out as the cloud fades in.
+  - Galaxy volumes (`GalaxiesLayer`, VOL_FRAG): every galaxy is a box in its catalogued frame, ray-marched
+    per pixel (old disc, young clumpy arms with H II knots, bulge, bar; a thinner dust layer that
+    absorbs, more in blue); the step follows the height above the mid-plane so thin discs resolve at
+    any angle; ellipticals are Sérsic spheroids normalised to the old picture's light (`sersicNorm`).
+    The nearest galaxy's cloud sprites are dimmed by the dust in front of them (`dustTau`, exact
+    through the dust layer's vertical profile).
+  - Generated planet surfaces (`shaders/planet.ts`): warped continents, ridged mountain belts, relief
+    shading from finite differences of `terrain()`, octaves down to the pixel (`detail`), climate
+    biomes, cyclone clouds with shadows, sheared giant bands. `terrain()` is mirrored in
+    `universe/ExoTerrain.ts` (`exoTerrain`); sea level = the quantile of the planet's land fraction
+    (`exoQuantile`).
+  - Ground materials (`render/Materials.ts`): Poly Haven CC0 scans in two texture arrays (colour ÷ mean,
+    normal + height); `groundDetail` in the terrain shaders blends flat/steep/snow materials at three
+    scales by slope and height, as detail around the world's own colour. `render/Rocks.ts` scatters
+    rocks per body-fixed cell on the drawn ground (`TerrainPatch.groundRadius`).
   - Spacecraft models (`SpacecraftLayer.parts`): ISS (Sun-tracking arrays), Hubble, JWST, Voyager,
     New Horizons built from parts, baked per finish (`bake`); HULL_FRAG adds cells/foil/quilting/truss
     lattice from the part-local position (`aLoc`).

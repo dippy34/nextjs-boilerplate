@@ -12,7 +12,8 @@ import { EXO_FRAG } from './shaders/planet';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import { ExoPlanet as ExoPlanetClass, PlanetarySystem as SystemClass } from '../universe/Planets';
 import { CatalogStar } from '../universe/Stars';
-import { ExoGround, ROCKY_TYPES } from '../universe/ExoTerrain';
+import { ExoGround, exoQuantile, ROCKY_TYPES } from '../universe/ExoTerrain';
+import { MATERIALS } from './Materials';
 import { earthLikeAtmosphere, type AtmosphereSpec, type ExoAtmosphere } from './Atmospheres';
 import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
 
@@ -134,12 +135,23 @@ export class ExoPlanetLayer {
     let d = this.draws.get(p);
     if (d) return d;
     const pal = paletteFor(p);
+    const seed = p.spec.seed % 97;
+    {
+      // climate and seas: the sea covers the planet's own fraction of the surface
+      const rc = rng(hashKey(p.key + '/climate'));
+      const t = p.spec.type;
+      if (t === 'terran' || t === 'ocean') pal.uSeaLevel = exoQuantile(seed, t === 'ocean' ? 0.85 + 0.11 * rc() : 0.4 + 0.35 * rc());
+      pal.uTeq = p.spec.teqK;
+      pal.uDry = t === 'ocean' ? 0.1 * rc() : t === 'terran' ? 0.1 + 0.5 * rc() : 1;
+      pal.uRelief = Math.min(20e3, p.radius * 0.002) / p.radius;
+    }
     const u: Record<string, { value: unknown }> = {
-      uType: { value: TYPE_ID[p.spec.type] }, uSeed: { value: p.spec.seed % 97 }, uLumpy: { value: 0 },
+      uType: { value: TYPE_ID[p.spec.type] }, uSeed: { value: seed }, uLumpy: { value: 0 },
       uSunDir: { value: new Vector3(1, 0, 0) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI },
       uExposure: this.exposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
       uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK, uLite: LITE.uLite,
       uTerrain: { value: 0 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
+      ...MATERIALS, uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) },
     };
     for (const [k, v] of Object.entries(pal)) u[k] = { value: Array.isArray(v) ? new Vector3(...v) : v };
     const mesh = new Mesh(this.sphere, new ShaderMaterial({ name: 'exoplanet', vertexShader: BODY_VERT, fragmentShader: EXO_FRAG, uniforms: u }));

@@ -52,6 +52,7 @@ varying float vSun;
 varying vec3 vLocal;
 varying vec3 vPosView;
 varying vec2 vUv;
+varying vec3 vGround;
 void main() {
   vNormalBF = aN;
   vLocal = position;
@@ -59,6 +60,7 @@ void main() {
   vSun = aSun;
   vUv = aUv;
   vec3 pos = position + aN * (aH * uHScale);
+  vGround = pos;
   vec4 wp = modelMatrix * vec4(pos, 1.0);
   vPosView = wp.xyz;
   gl_Position = projectView(viewMatrix * wp);
@@ -185,6 +187,7 @@ export class TerrainPatch {
         fragmentShader: bodyMat.fragmentShader,
         uniforms: {
           ...bodyMat.uniforms, uTerrain: { value: 1 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
+          uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) },
           ...Object.fromEntries(FINE_CELLS.flatMap((_, k) => [[`uOI${k}`, { value: new Vector3() }], [`uOF${k}`, { value: new Vector3() }]])),
         },
         // opaque, but in the transparent pass so it is drawn after the atmosphere shell
@@ -308,6 +311,8 @@ export class TerrainPatch {
       (mat.uniforms[`uOI${k}`].value as Vector3).set(iv[0], iv[1], iv[2]);
       (mat.uniforms[`uOF${k}`].value as Vector3).set(v[0] - iv[0], v[1] - iv[1], v[2] - iv[2]);
     });
+    // the patch's east and north at its centre (texture axes of the ground materials)
+    if (mat.uniforms.uTanE) { (mat.uniforms.uTanE.value as Vector3).copy(fr.e); (mat.uniforms.uTanN.value as Vector3).copy(fr.nrt); }
     const m4 = fr.mesh.matrix.copy(c.orient);
     const o = fr.origin.clone().applyMatrix4(new Matrix4().extractRotation(c.orient)).add(c.rel);
     m4.setPosition(o);

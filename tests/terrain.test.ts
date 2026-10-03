@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { UPos } from '../src/core/upos';
 import { TerrainPatch } from '../src/render/TerrainPatch';
 import type { Body } from '../src/universe/Body';
-import { ExoGround, exoTerrain } from '../src/universe/ExoTerrain';
+import { ExoGround, exoQuantile, exoTerrain } from '../src/universe/ExoTerrain';
 import type { ExoPlanet } from '../src/universe/Planets';
 import { TerrainSource } from '../src/universe/Terrain';
 import { ATMO_FRAG, ATMO_HAZE_FRAG } from '../src/render/shaders/atmosphere';
@@ -197,15 +197,16 @@ describe('generated planets', () => {
 
   it('seas are flat and land rises above them', () => {
     const planet = { name: 'Test b', radius: 6.4e6 } as unknown as ExoPlanet;
-    const g = new ExoGround(planet, 3, 41, 0.5);
-    let sea = 0, land = 0, maxH = 0;
+    const sea = exoQuantile(41, 0.5);
+    const g = new ExoGround(planet, 3, 41, sea);
+    let wet = 0, land = 0, maxH = 0;
     for (let i = 0; i < 2000; i++) {
       const n = dir(i);
       const h = g.height(n, 50);
-      if (exoTerrain(n, 41, false) < 0.5) { sea++; expect(h).toBe(0); } else { land++; maxH = Math.max(maxH, h); }
+      if (exoTerrain(n, 41, false) < sea) { wet++; expect(h).toBe(0); } else { land++; maxH = Math.max(maxH, h); }
     }
-    expect(sea).toBeGreaterThan(100);
-    expect(land).toBeGreaterThan(100);
+    expect(wet).toBeGreaterThan(700);
+    expect(land).toBeGreaterThan(700);
     expect(maxH).toBeGreaterThan(500);
     expect(maxH).toBeLessThan(20e3);
   });

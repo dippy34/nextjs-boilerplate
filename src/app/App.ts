@@ -23,6 +23,8 @@ import { Comet, SmallBodiesLayer } from '../render/SmallBodies';
 import { StarFieldLayer } from '../render/StarField';
 import { TileDetail } from '../render/TileDetail';
 import { type CraftView, SpacecraftLayer } from '../render/SpacecraftLayer';
+import { loadMaterials } from '../render/Materials';
+import { Rocks } from '../render/Rocks';
 import { GalaxiesLayer } from '../render/GalaxiesLayer';
 import { DeepSkyLayer } from '../render/DeepSkyLayer';
 import { DeepSkyObject, loadDeepSky } from '../universe/DeepSky';
@@ -111,6 +113,8 @@ export class App {
   private labelsBeforePhoto = true;
   /** real 3D ground under the explorer near solid worlds */
   readonly terrain = new TerrainPatch();
+  /** rocks on the ground around the explorer (on the landing terrain) */
+  rocks!: Rocks;
   /** comas and tails of the active comets */
   cometTails!: CometTails;
   /** systems drawn this frame: those of the stars around the explorer, plus a selected/targeted one */
@@ -196,6 +200,9 @@ export class App {
     app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
     app.exo = new ExoPlanetLayer(starField.psf, bodies.surfaceExposure);
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
+    // scanned ground materials for close-up surfaces (loaded in the background)
+    void loadMaterials(DATA, xrCapable).catch((e) => console.warn('materials', e));
+    app.rocks = new Rocks(app.terrain, xrCapable);
     app.cometTails = new CometTails(bodies.surfaceExposure);
     const earthBody = system.byId.get(399)!;
     const craft = await loadSpacecraft(DATA, system.sun, earthBody).catch((e) => { console.warn('spacecraft', e); return [] as Spacecraft[]; });
@@ -210,7 +217,7 @@ export class App {
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.cometTails.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.rocks.group, app.cometTails.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
@@ -507,7 +514,7 @@ export class App {
     const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
     const air = this.atmospheres.warmupObjects()[0];
     if (air) terrain.push(this.terrain.warmupHaze(air.material as ShaderMaterial));
-    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects()];
+    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
@@ -1625,6 +1632,7 @@ export class App {
       if (c) c.air = this.atmospheres.material(c.ground.owner);
       this.terrain.vr = this.vr.active;
       this.terrain.update(c);
+      this.rocks.update(this.rig.upos);
     }
     this.craft.update(this.rig.upos, pixelAngle, jd, this.system.sun, this.system.byId.get(399)!);
     this.holes.vr = this.vr.active;

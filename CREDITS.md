@@ -291,6 +291,15 @@ generated: fractal hills and crater fields (bowls with raised rims; depth-to-dia
 craters and 0.09 for large ones, somewhat shallower than fresh lunar craters, about 0.2 for simple
 craters in Pike 1977, as most craters are worn). It is plausible, not mapped.
 
+## Ground materials (`public/data/materials/`, `pipeline/fetch_materials.py`)
+
+Scanned surface materials from [Poly Haven](https://polyhaven.com), released under **CC0** (public
+domain dedication): `moon_01` and `moon_meteor_01` (lunar regolith, Poly Haven's Moon collection),
+`rocks_ground_02`, `rock_face_03`, `sand_01`, `dry_ground_rocks`, `snow_02` and `forest_ground_04`
+(colour, OpenGL normal and displacement maps at 1024 px). The engine uses them as close-up detail
+around each world's own colour (real maps or generated palettes) and for the rocks scattered on
+the ground (`src/render/Materials.ts`, `src/render/Rocks.ts`).
+
 ## The Milky Way model and procedural stars (`src/universe/Galaxy.ts`, `ProceduralStars.ts`)
 
 A parametric model (parameters typed in, not downloaded data), after published values:
