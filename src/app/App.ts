@@ -983,7 +983,7 @@ export class App {
   private ringRadiance(): number {
     const rp = this.bodies.ringParticles;
     const sat = this.system.bodies.find((b) => b.name === 'Saturn');
-    if (!rp?.mesh.visible || !sat) return 0;
+    if (!(rp?.mesh.visible || rp?.slabActive) || !sat) return 0;
     return (0.6 * sunIrradianceAt(Math.max(sat.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI;
   }
 

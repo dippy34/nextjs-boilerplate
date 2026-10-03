@@ -1,4 +1,4 @@
-import { BackSide, BoxGeometry, BufferAttribute, ClampToEdgeWrapping, CustomBlending, DataTexture, IcosahedronGeometry, InstancedMesh, LinearFilter, Matrix3, Matrix4, Mesh, OneFactor, OneMinusSrcAlphaFactor, Quaternion, RGBAFormat, ShaderMaterial, type Texture, Vector2, Vector3 } from 'three';
+import { BackSide, BufferAttribute, ClampToEdgeWrapping, CustomBlending, DataTexture, IcosahedronGeometry, InstancedMesh, LinearFilter, Matrix3, Matrix4, Mesh, OneFactor, OneMinusSrcAlphaFactor, Quaternion, RGBAFormat, ShaderMaterial, SphereGeometry, type Texture, Vector2, Vector3 } from 'three';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 /** Vertical structure of the ring layer: Gaussian density with this standard deviation (m). */
@@ -77,6 +77,7 @@ uniform vec3 uRingN;         // ring plane normal (world)
 uniform float uCamZ;         // camera height above the ring mid-plane (m)
 uniform float uTau;          // normal optical depth here
 uniform vec3 uHaze;          // radiance of the layer per unit optical depth (display units)
+uniform float uSunZ;         // Sun direction's component along the ring normal
 varying vec3 vN;
 varying vec3 vPos;
 varying vec3 vObj;
@@ -108,6 +109,9 @@ void main() {
   float c = dot(oc, oc) - uPlanetR * uPlanetR;
   float disc = b * b - c;
   float lit = (disc > 0.0 && -b - sqrt(disc) > 0.0) ? 0.0 : 1.0;
+  // sunlight reaching the particle through the rest of the layer between it and the Sun
+  float zpS = (uCamZ + dot(vPos, uRingN)) * sign(uSunZ);
+  lit *= exp(-uTau * (1.0 - ncdf(zpS / SIG)) / max(abs(uSunZ), 0.02));
   // frost and dust: clean bright frost on the lumps, dirtier ice in the hollows and patches
   float dirt = smoothstep(0.35, 0.75, rn(vObj * 2.3 + 19.0)) * 0.5 + (1.0 - smoothstep(0.35, 0.6, h0)) * 0.35;
   vec3 alb = uColor * (0.8 + 0.4 * vTone) * mix(vec3(1.12), vec3(0.62, 0.55, 0.5), dirt);
@@ -246,6 +250,7 @@ ${OUTPUT_FRAGMENT}
 
 const CELL = 40;          // m: particles are generated per cell of the ring plane
 const SLAB_HEIGHT = 3000; // m: within this height of the mid-plane the layer is drawn as a medium
+const SLAB_PROXY = 2000;  // m: radius of the sphere the layer is drawn on
 const RANGE = 500;        // m: drawn out to this distance
 const MAX = 6000;
 
@@ -291,7 +296,7 @@ export class RingParticles {
       uniforms: {
         uColor: { value: new Vector3(...color) }, uSunDir: { value: new Vector3(1, 0, 0) }, uSunIrr: { value: Math.PI }, uExposure: exposure,
         uPlanet: { value: new Vector3() }, uPlanetR: { value: 1 }, uPlanetDir: { value: new Vector3() }, uShine: { value: 0 }, uRange: { value: RANGE },
-        uRingShine: { value: 0 }, uRingN: { value: new Vector3(0, 0, 1) }, uCamZ: { value: 0 }, uTau: { value: 0 }, uHaze: { value: new Vector3() },
+        uRingShine: { value: 0 }, uRingN: { value: new Vector3(0, 0, 1) }, uCamZ: { value: 0 }, uTau: { value: 0 }, uHaze: { value: new Vector3() }, uSunZ: { value: 1 },
         uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
     });
@@ -313,7 +318,7 @@ export class RingParticles {
       transparent: true, depthWrite: false, side: BackSide,
       blending: CustomBlending, blendSrc: OneFactor, blendDst: OneMinusSrcAlphaFactor,
     });
-    this.slab = new Mesh(new BoxGeometry(2, 2, 2), this.slabMat);
+    this.slab = new Mesh(new SphereGeometry(1, 32, 16), this.slabMat);
     this.slab.matrixAutoUpdate = false;
     this.slab.frustumCulled = false;
     this.slab.visible = false;
@@ -361,7 +366,7 @@ export class RingParticles {
     const toBody = new Matrix3().setFromMatrix4(orient).transpose();
     const cam = rel.clone().negate().applyMatrix3(toBody);      // camera in the ring frame
     const r = Math.hypot(cam.x, cam.y);
-    this.updateSlab(cam, r, toBody, orient, radius, sunDir, sunIrr);
+    this.updateSlab(cam, r, toBody, radius, sunDir, sunIrr);
     const u = this.mat.uniforms;
     u.uCamZ.value = cam.z;
     u.uTau.value = this.tauAt(r);
@@ -385,6 +390,7 @@ export class RingParticles {
     // ring is dense (its reflectance times the fraction of the sky it fills, about half)
     const nRing = new Vector3(0, 0, 1).applyMatrix4(new Matrix4().extractRotation(orient)).normalize();
     (u.uRingN.value as Vector3).copy(nRing);
+    u.uSunZ.value = sunDir.dot(nRing);
     u.uRingShine.value = 0.06 * Math.min(1, this.tauAt(r) / 1.5) * Math.abs(sunDir.dot(nRing)) ** 0.5;
     // the layer's own light per unit optical depth (for particles seen through it), as in the slab
     const c = this.slabMat.uniforms.uColor.value as Vector3;
@@ -395,16 +401,15 @@ export class RingParticles {
   /** True while the explorer is within reach of the ring layer (the whole ring is then drawn by the slab). */
   get slabActive(): boolean { return this.slab.visible; }
 
-  private updateSlab(cam: Vector3, r: number, toBody: Matrix3, orient: Matrix4, radius: number, sunDir: Vector3, sunIrr: number): void {
+  private updateSlab(cam: Vector3, r: number, toBody: Matrix3, radius: number, sunDir: Vector3, sunIrr: number): void {
     const on = !!this.profileTex && Math.abs(cam.z) < SLAB_HEIGHT && r > this.inner - 2e3 && r < this.outer + 2e3;
     this.slab.visible = on;
     if (!on) return;
-    // a box flat in the ring plane, centred under the explorer on the mid-plane, reaching past the
-    // rings' outer edge in every direction
-    const R = this.outer * 2.2;
-    const rot = new Matrix4().extractRotation(orient);
-    const z = new Vector3(0, 0, 1).applyMatrix4(rot);
-    this.slab.matrix.copy(rot).scale(new Vector3(R, R, 4 * SIGMA)).setPosition(z.multiplyScalar(-cam.z));
+    // the shader integrates along each view ray by itself: the mesh only has to cover the screen.
+    // A sphere around the eye, beyond the drawn ice chunks (which hide the layer behind them and
+    // are seen through the layer in front by themselves); far smaller than the ring, so no huge
+    // triangles (a box the ring's size came out garbled)
+    this.slab.matrix.makeScale(SLAB_PROXY, SLAB_PROXY, SLAB_PROXY);
     this.slab.matrixWorldNeedsUpdate = true;
     const u = this.slabMat.uniforms;
     (u.uToRing.value as Matrix3).copy(toBody);
