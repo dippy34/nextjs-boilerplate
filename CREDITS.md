@@ -260,6 +260,16 @@ heights in PNG files; all are public domain (U.S. Government work):
 - **Mercury**: MESSENGER USGS global DEM 665 m v2 (NASA/JHUAPL/CIW), via USGS Astrogeology
   (`Mercury_Messenger_USGS_DEM_Global_665m_v2.tif`).
 
+Around the landmarks, sharper regional patches (`public/data/terrain/patches/`,
+`pipeline/build_terrain_patches.py`) take over from the global maps, cut row by row with HTTP range
+requests from:
+
+- **Moon**: LRO LOLA gridded elevation `LDEM_128` (128 pixels per degree, about 237 m), PDS
+  Geosciences Node, <https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/>
+  (Apollo 11 site, Tycho, Copernicus).
+- **Mars**: the MOLA 463 m DEM above at full or half resolution (Olympus Mons, Valles Marineris,
+  Gale and Jezero craters).
+
 Landmark coordinates (`src/universe/Landmarks.ts`): the USGS/IAU Gazetteer of Planetary Nomenclature
 (<https://planetarynames.wr.usgs.gov/>) for feature centres; the Apollo 11, Curiosity and Perseverance
 landing sites as published by NASA and the mission teams. Their ground elevations are rounded values

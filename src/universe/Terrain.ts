@@ -16,6 +16,10 @@ export interface Ground {
   ready(): boolean;
   /** height (m) above the reference surface at body-fixed unit direction n; `spacing`: finest feature size worth computing (m) */
   height(n: Vector3, spacing: number): number;
+  /** called each frame with the direction below the explorer (to fetch sharper data nearby) */
+  prepare?(n: Vector3): void;
+  /** changes when the heights change (sharper data arrived) */
+  version?(): number;
 }
 
 /** reference-surface radius (m) along body-fixed unit direction n (the ellipsoid) */
@@ -33,7 +37,34 @@ interface HeightMap {
 }
 interface TerrainManifest {
   maps: Record<string, { file: string; width: number; height: number; lonLeft: number; offset: number; scale: number; credit: string }>;
+  /** sharper regional elevation around landmarks (pipeline/build_terrain_patches.py) */
+  patches?: PatchInfo[];
 }
+interface PatchInfo {
+  name: string; body: string; file: string; width: number; height: number; offset: number; scale: number;
+  /** bounds (degrees, planetocentric, east longitude; lon0 may be outside -180..180) */
+  lat0: number; lat1: number; lon0: number; lon1: number;
+}
+interface Patch extends PatchInfo { data: Uint16Array; pixelM: number }
+
+/** Decode a 16-bit-in-RGB height PNG (R * 256 + G). */
+async function loadHeights(url: string): Promise<{ w: number; h: number; data: Uint16Array }> {
+  const blob = await fetch(url).then((r) => r.blob());
+  const bmp = await createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+  const w = bmp.width, h = bmp.height;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  ctx.drawImage(bmp, 0, 0);
+  bmp.close();
+  const px = ctx.getImageData(0, 0, w, h).data;
+  const data = new Uint16Array(w * h);
+  for (let i = 0; i < data.length; i++) data[i] = px[i * 4] * 256 + px[i * 4 + 1];
+  return { w, h, data };
+}
+
+const catmull = (t: number): [number, number, number, number] => [
+  ((-t + 2) * t - 1) * t * 0.5, ((3 * t - 5) * t * t + 2) * 0.5, ((-3 * t + 4) * t + 1) * t * 0.5, (t - 1) * t * t * 0.5];
 
 // ---------------------------------------------------------------- deterministic noise
 function hash3(x: number, y: number, z: number, s: number): number {
@@ -99,6 +130,9 @@ export class TerrainSource {
   /** crater density (0..1) per body, from its surface look */
   craters = new Map<Body, number>();
   private grounds = new Map<Body, Ground>();
+  private patches = new Map<string, Patch[]>();          // loaded, by body key
+  private patchRequested = new Set<string>();
+  private versions = new Map<string, number>();
 
   constructor(private base: string) {
     fetch(`${base}/terrain/terrain.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { this.manifest = j; }).catch(() => undefined);
@@ -109,7 +143,8 @@ export class TerrainSource {
     let g = this.grounds.get(b);
     if (!g) {
       g = { owner: b, name: b.name, radius: b.radius, radii: b.radii, amplitude: TerrainSource.amplitude(b),
-        ready: () => this.ready(b), height: (n, spacing) => this.height(b, n, spacing) };
+        ready: () => this.ready(b), height: (n, spacing) => this.height(b, n, spacing),
+        prepare: (n) => this.nearPatches(b, n), version: () => this.versions.get(b.name.toLowerCase()) ?? 0 };
       this.grounds.set(b, g);
     }
     return g;
@@ -135,22 +170,56 @@ export class TerrainSource {
     return k ? this.manifest!.maps[k].credit : null;
   }
 
+  /** Fetch the sharper patches whose area the explorer is over or near (body-fixed direction n). */
+  private nearPatches(b: Body, n: Vector3): void {
+    const k = this.keyOf(b);
+    const list = k ? this.manifest?.patches?.filter((p) => p.body === k) : undefined;
+    if (!k || !list?.length) return;
+    const lat = (Math.asin(Math.max(-1, Math.min(1, n.z))) * 180) / Math.PI;
+    const lon = (Math.atan2(n.y, n.x) * 180) / Math.PI;
+    for (const p of list) {
+      if (this.patchRequested.has(p.name)) continue;
+      const clat = (p.lat0 + p.lat1) / 2, clon = (p.lon0 + p.lon1) / 2;
+      const dlon = ((((lon - clon) % 360) + 540) % 360) - 180;
+      const half = Math.max(p.lat1 - p.lat0, (p.lon1 - p.lon0) * Math.cos((clat * Math.PI) / 180)) / 2;
+      if (Math.hypot(lat - clat, dlon * Math.cos((clat * Math.PI) / 180)) > half + 8) continue;   // degrees
+      this.patchRequested.add(p.name);
+      loadHeights(`${this.base}/terrain/${p.file}`).then(({ data }) => {
+        const pixelM = (((p.lat1 - p.lat0) / p.height) * Math.PI * b.radius) / 180;
+        const arr = this.patches.get(k) ?? [];
+        arr.push({ ...p, data, pixelM });
+        this.patches.set(k, arr);
+        this.versions.set(k, (this.versions.get(k) ?? 0) + 1);
+      }).catch((err) => console.warn('terrain patch failed', p.name, err));
+    }
+  }
+
+  /** bicubic sample of a patch at (lat, lon) degrees, with its blend weight (0 outside, 1 well inside) */
+  private patchSample(p: Patch, lat: number, lon: number): { h: number; w: number } | null {
+    const v = (p.lat1 - lat) / (p.lat1 - p.lat0);
+    const u = ((((lon - p.lon0) % 360) + 360) % 360) / (p.lon1 - p.lon0);
+    if (u <= 0 || u >= 1 || v <= 0 || v >= 1) return null;
+    const e = Math.min(u, 1 - u, v, 1 - v);
+    const t = Math.min(1, e / 0.12);
+    const w = t * t * (3 - 2 * t);
+    const fx = u * p.width - 0.5, fy = v * p.height - 0.5;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const wx = catmull(fx - x0), wy = catmull(fy - y0);
+    let h = 0;
+    for (let j = 0; j < 4; j++) {
+      const y = Math.max(0, Math.min(p.height - 1, y0 - 1 + j));
+      let row = 0;
+      for (let i = 0; i < 4; i++) row += wx[i] * p.data[y * p.width + Math.max(0, Math.min(p.width - 1, x0 - 1 + i))];
+      h += wy[j] * row;
+    }
+    return { h: h * p.scale + p.offset, w };
+  }
+
   private request(k: string, radius: number): void {
     if (this.pending.has(k)) return;
     const m = this.manifest!.maps[k];
-    const p = fetch(`${this.base}/terrain/${m.file}`)
-      .then((r) => r.blob())
-      .then((blob) => createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' }))
-      .then((bmp) => {
-        const w = bmp.width, h = bmp.height;
-        const c = document.createElement('canvas');
-        c.width = w; c.height = h;
-        const ctx = c.getContext('2d', { willReadFrequently: true })!;
-        ctx.drawImage(bmp, 0, 0);
-        bmp.close();
-        const px = ctx.getImageData(0, 0, w, h).data;
-        const data = new Uint16Array(w * h);
-        for (let i = 0; i < data.length; i++) data[i] = px[i * 4] * 256 + px[i * 4 + 1];
+    const p = loadHeights(`${this.base}/terrain/${m.file}`)
+      .then(({ w, h, data }) => {
         const hm: HeightMap = { width: w, height: h, lonLeft: m.lonLeft, data, offset: m.offset, scale: m.scale, pixelM: (2 * Math.PI * radius) / w };
         this.maps.set(k, hm);
         // keep at most two elevation models in memory
@@ -208,9 +277,21 @@ export class TerrainSource {
     let h = 0;
     // generated relief starts below this wavelength (m): the whole range without an elevation model
     let top: number;
+    // a sharper regional patch takes over (blended in at its edges), and generated relief
+    // between its resolution and the global map's fades out there
+    let wP = 0, topP = Infinity;
     if (m) {
       h = this.dem(m, n);
       top = m.pixelM * 3;
+      const pl = this.patches.get(k!);
+      if (pl) {
+        const lat = (Math.asin(Math.max(-1, Math.min(1, n.z))) * 180) / Math.PI;
+        const lon = (Math.atan2(n.y, n.x) * 180) / Math.PI;
+        for (const p of pl) {
+          const smp = this.patchSample(p, lat, lon);
+          if (smp && smp.w > wP) { h += (smp.h - h) * smp.w; wP = smp.w; topP = p.pixelM * 3; }
+        }
+      }
     } else {
       top = R / 3;
     }
@@ -220,7 +301,7 @@ export class TerrainSource {
     const slope = m ? 0.012 : Math.min(0.03, TerrainSource.amplitude(b) / (R / 3));
     let o = 0;
     for (let L = top; L > minL && o < 16; L *= 0.5, o++) {
-      h += (vnoise(px / L, py / L, pz / L, s + o * 7) - 0.5) * 2 * slope * L;
+      h += (vnoise(px / L, py / L, pz / L, s + o * 7) - 0.5) * 2 * slope * L * (L > topP ? 1 - wP : 1);
     }
     // crater fields: cells of 40 km down to 30 m, each a fifth the size of the one before
     const dens = this.craters.get(b) ?? 0.8;
@@ -234,7 +315,7 @@ export class TerrainSource {
         const d = dens * (0.35 + 0.35 * patch) * (cell < 1000 ? 1.15 : 1);
         // complex (large) craters are shallower relative to their size
         const depth = cell > 5000 ? 0.18 : 0.32;
-        h += craterField(px, py, pz, cell, s + 100 * i, d, depth);
+        h += craterField(px, py, pz, cell, s + 100 * i, d, depth) * (cell > topP * 1.2 ? 1 - wP : 1);
       }
     }
     return Number.isFinite(h) ? h : 0;

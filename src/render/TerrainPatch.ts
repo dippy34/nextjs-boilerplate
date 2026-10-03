@@ -73,6 +73,7 @@ interface Built {
   nrt: Vector3;
   full: Float64Array; // full-height vertex positions relative to the origin (for shadows)
   sunBF: Vector3;     // body-fixed Sun direction the shadows were computed for
+  version: number;    // the ground's height version it was built with
 }
 
 function makeGeometry(): BufferGeometry {
@@ -134,7 +135,7 @@ export class TerrainPatch {
       mesh.renderOrder = 1;
       mesh.name = 'terrain';
       return { mesh, ground: null, up: new Vector3(), origin: new Vector3(), outer: 0, inner: 0, q: 1, e: new Vector3(), nrt: new Vector3(),
-        full: new Float64Array((1 + RINGS * SEGS) * 3), sunBF: new Vector3() };
+        full: new Float64Array((1 + RINGS * SEGS) * 3), sunBF: new Vector3(), version: 0 };
     };
     this.front = mk();
     this.back = mk();
@@ -209,6 +210,7 @@ export class TerrainPatch {
     const alt = camBF.length() - baseRadius(b, up);
     const th = TerrainPatch.threshold(b);
     if (alt > th || !b.ready()) { this.hide(); return null; }
+    b.prepare?.(up);
     const mat = this.materialFor(c.material);
     this.hScale = Math.min(1, Math.max(0, (th - alt) / (th * 0.35)));
     mat.uniforms.uHScale.value = this.hScale;
@@ -219,7 +221,7 @@ export class TerrainPatch {
 
     // start a new patch when this one is off-centre, the wrong size or for another world
     const f = this.front;
-    const need = f.ground !== b || !f.mesh.visible
+    const need = f.ground !== b || !f.mesh.visible || f.version !== (b.version?.() ?? 0)
       || f.up.angleTo(up) * b.radius > Math.max(2 * Math.max(alt, 0), 25)
       || outer > f.outer * 1.3 || outer < f.outer * 0.6 || inner > f.inner * 4 || inner < f.inner * 0.25;
     if (need && (!this.job || !this.jobSwaps)) {
@@ -308,6 +310,7 @@ export class TerrainPatch {
   private *build(t: Built, b: Ground, up: Vector3, outer: number, inner: number, lonLeftDeg: number, sunBF: Vector3): Generator<void, void, void> {
     t.mesh.visible = false;
     t.ground = b;
+    t.version = b.version?.() ?? 0;
     t.up.copy(up);
     t.outer = outer;
     t.inner = inner;
