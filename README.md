@@ -37,6 +37,8 @@ headset) and press **ENTER VR**.
 | ![40 pc above the Sun](docs/img/09-neighborhood.jpg) | ![Asteroid belt](docs/img/11-asteroid-belt.jpg) |
 | ![Pluto and Charon](docs/img/12-pluto-charon.jpg) | ![Sirius](docs/img/13-sirius.jpg) |
 | ![Gaia BH1 bending the Milky Way into an Einstein ring](docs/img/bh-gaia-bh1.jpg) | ![Cygnus X-1's accretion disk lensed over the shadow](docs/img/bh-cygnus-x1.jpg) |
+| ![The Moon from 5 km: LOLA heights, generated craters](docs/img/terrain-moon-5km.jpg) | ![Standing in a lunar crater at sunrise](docs/img/terrain-moon-ground.jpg) |
+| ![Over Olympus Mons (MOLA heights) under the Martian sky](docs/img/terrain-mars-olympus.jpg) | ![On Proxima Cen b, lit by its red dwarf (generated surface)](docs/img/terrain-proxima-b.jpg) |
 
 *Screenshots are from headless Chromium with software (SwiftShader) rendering — the automated
 verification run, not hand-picked renders.*
@@ -73,6 +75,11 @@ Deploy to GitHub Pages: `bash scripts/deploy-pages.sh` (builds and force-pushes 
 | P · H · Esc | Screenshot · help · stop autopilot / deselect |
 | V · J · X | Spaceship (cockpit / chase / off) · warp drive to the selection · brake |
 | K · N | Missions and discoveries · ship sound on/off |
+
+**Landing:** go to a solid world (the Moon, Mars, Mercury, Ganymede, Callisto … or a rocky planet of
+another star) and keep descending (F; in VR, point the left controller down and push the left stick): below about 40 km the sphere turns
+into real 3D ground, and you can fly down to standing height. In ship mode, coming down slowly below
+10 m is a touchdown. For long shadows, come down near the terminator (the day/night line).
 
 ### VR (WebXR) — built for the headset
 
@@ -225,8 +232,9 @@ Known limitations (planned for later phases unless noted):
   clouds). Other galaxies are procedural discs/spheroids with their catalogued size, type and
   orientation (no individual stars inside them); nebulae are procedural billboards at their
   catalogued size (flat up close); globular-cluster stars are generated.
-* Terrain casts no shadows (slopes facing away from the Sun go dark, but hills do not shade the
-  ground behind them), and generated relief is plausible, not mapped.
+* Terrain shadows are computed per mesh vertex (soft, with blocky edges in the middle distance);
+  elevation models are coarse (5–10 km per sample) with generated relief below that, which is
+  plausible, not mapped. Generated planets' atmospheres are Earth-like for every temperate world.
 * Generated planets are labelled as such; their counts and sizes follow occurrence statistics, not
   observations. Orbit orientations and phases of most real exoplanets are unmeasured and chosen
   deterministically.
