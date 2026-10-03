@@ -12,7 +12,7 @@ import { EXO_FRAG, RING_GLSL } from './shaders/planet';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import { ExoPlanet as ExoPlanetClass, PlanetarySystem as SystemClass } from '../universe/Planets';
 import { CatalogStar } from '../universe/Stars';
-import { ExoGround, exoCraterSeed, exoQuantile, ROCKY_TYPES } from '../universe/ExoTerrain';
+import { ExoGround, exoCraterSeed, exoQuantile, exoQuantiles, ROCKY_TYPES } from '../universe/ExoTerrain';
 import { MATERIALS } from './Materials';
 import { earthLikeAtmosphere, type AtmosphereSpec, type ExoAtmosphere } from './Atmospheres';
 import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
@@ -69,7 +69,11 @@ function paletteFor(p: ExoPlanet): Record<string, number | V3> {
     }
     case 'terran': case 'ocean': {
       // vegetation of other worlds needn't be green, but it stays dark (it absorbs starlight)
-      const veg = jit(pick<V3>([[0.035, 0.06, 0.025], [0.035, 0.06, 0.025], [0.06, 0.065, 0.03], [0.025, 0.05, 0.04], [0.08, 0.04, 0.025], [0.06, 0.035, 0.05], [0.09, 0.075, 0.03]]));
+      const veg = jit(pick<V3>([
+        [0.035, 0.06, 0.025], [0.035, 0.06, 0.025], [0.03, 0.055, 0.025], [0.045, 0.065, 0.03],   // green
+        [0.055, 0.06, 0.03], [0.025, 0.05, 0.04],                                                   // olive, teal
+        [0.06, 0.032, 0.025], [0.05, 0.032, 0.045], [0.07, 0.06, 0.025],                            // red, purple, ochre
+      ]));
       const soil = jit(pick<V3>([[0.42, 0.31, 0.18], [0.36, 0.3, 0.22], [0.45, 0.26, 0.14], [0.4, 0.36, 0.28]]));
       const clouds = t === 'ocean' ? 0.55 + 0.35 * r() : 0.4 + 0.4 * r();
       return {
@@ -215,6 +219,9 @@ export class ExoPlanetLayer {
       const rc = rng(hashKey(p.key + '/climate'));
       const t = p.spec.type;
       if (t === 'terran' || t === 'ocean') pal.uSeaLevel = exoQuantile(seed, t === 'ocean' ? 0.85 + 0.11 * rc() : 0.4 + 0.35 * rc());
+      const [q10, q50, q90] = ROCKY_TYPES.has(TYPE_ID[t]) ? exoQuantiles(seed, [0.1, 0.5, 0.9]) : [0.3, 0.4, 0.5];
+      pal.uHMid = q50;
+      pal.uHSpan = Math.max(0.02, q90 - q10);
       pal.uTeq = p.spec.teqK;
       pal.uDry = t === 'ocean' ? 0.1 * rc() : t === 'terran' ? 0.1 + 0.5 * rc() : 1;
       pal.uRelief = Math.min(20e3, p.radius * 0.002) / p.radius;
