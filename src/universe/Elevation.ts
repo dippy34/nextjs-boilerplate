@@ -411,7 +411,7 @@ export class ElevationStore {
     if (!s?.man) return null;
     const p = dirToFace(dirBF, this.fp);
     const lf = this.levelFor(bodyKey, metresPerSample);
-    const l1 = Math.max(0, Math.ceil(lf - 1e-9));
+    const l1 = Math.max(0, Math.ceil(lf - 1e-6));
     const a = this.sampleUpTo(s, l1, p);
     if (Number.isNaN(a)) return null;
     const used = this.lastLevel;
@@ -433,7 +433,7 @@ export class ElevationStore {
   async prefetch(bodyKey: string, dirBF: Vec3Like, metresPerSample: number, ring = 1): Promise<void> {
     const man = this.manifest(bodyKey) ?? (await this.load(bodyKey));
     if (!man) return;
-    const target = Math.max(0, Math.ceil(this.levelFor(bodyKey, metresPerSample) - 1e-9));
+    const target = Math.max(0, Math.ceil(this.levelFor(bodyKey, metresPerSample) - 1e-6));
     const ids = new Map<string, TileId>();
     const add = (t: TileId) => ids.set(`${t.face}/${t.level}/${t.x}/${t.y}`, t);
     for (let f = 0; f < 6; f++) add({ face: f, level: 0, x: 0, y: 0 });

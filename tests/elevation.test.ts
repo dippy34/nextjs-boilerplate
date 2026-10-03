@@ -120,7 +120,8 @@ describe.skipIf(!bodies.length)('elevation tiles', () => {
 
     it(`${body}: tiles agree along shared edges (between tiles and across faces)`, async () => {
       const man = (await store.load(body)) as ElevationManifest;
-      const L = Math.min(2, man.levels[man.levels.length - 1].level);
+      // the deepest complete level, at most 2
+      const L = Math.min(2, Math.max(...man.levels.filter((l) => !l.bitmap).map((l) => l.level)));
       const n = 1 << L;
       for (let f = 0; f < 6; f++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) await store.request(body, f, L, x, y);
       const mps = man.levels[L].metresPerSample;

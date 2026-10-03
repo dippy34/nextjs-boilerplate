@@ -42,7 +42,7 @@ images are 259 x 259, pixel (i + 1, j + 1) = sample (i, j). Metres per sample at
 
 ENCODING: 16-bit greyscale PNG (lossless), height (m) = offset + step * value, with one offset and
 step per body (manifest). Coarse levels are complete; deeper levels hold only the tiles that add
-the most detail (greedy by RMS difference from the parent, under a byte budget per body) plus the
+the most detail (greedy by RMS difference from the parent x 2^(-level/2), under a byte budget per body) plus the
 tiles around the landmarks; the manifest lists them as a bitmap per level. Earth levels deeper
 than `seaFloorMaxLevel` store ocean (height <= 0) as -200 m, like the old terrain map; the
 shallower ones keep the real sea floor.
@@ -97,10 +97,10 @@ BODIES = {
     "mercury": dict(radii=(2440.53, 2440.53, 2438.26), unit=0.5, budget=25, full=2, max=5, step=1.0,
                     credit="NASA/JHUAPL/CIW MESSENGER, USGS global DEM 665 m v2, via USGS Astrogeology",
                     reference="IAU ellipsoid 2440.53 x 2438.26 km (converted from the 2439.4 km sphere)"),
-    "ceres": dict(radii=(482.2, 482.1, 445.9), unit=1.0, budget=5, full=2, max=4, step=1.0,
+    "ceres": dict(radii=(482.2, 482.1, 445.9), unit=1.0, budget=7, full=1, max=4, step=1.0,
                   credit="NASA/JPL-Caltech/UCLA/MPS/DLR/IDA Dawn FC HAMO DTM (DLR) 60 px/deg, via USGS Astrogeology",
                   reference="IAU ellipsoid 482.2 x 482.1 x 445.9 km (converted from the 470 km sphere)"),
-    "vesta": dict(radii=(284.62, 277.24, 226.33), unit=1.0, budget=5, full=2, max=3, step=1.0,
+    "vesta": dict(radii=(284.62, 277.24, 226.33), unit=1.0, budget=7, full=1, max=3, step=1.0,
                   credit="NASA/JPL-Caltech/UCLA/MPS/DLR/IDA Dawn FC HAMO DTM (DLR) 48 px/deg, via USGS Astrogeology",
                   reference="IAU ellipsoid 284.62 x 277.24 x 226.33 km (converted from radii)"),
 }
@@ -372,7 +372,10 @@ def _job(args):
         hh = h
         if "oceanFill" in cfg:      # rank by land detail only
             hh, ref = np.maximum(h, cfg["sea"]), np.maximum(ref, cfg["sea"])
-        score = float(np.sqrt(np.mean((hh[1:-1, 1:-1] - ref[1:-1, 1:-1]) ** 2)))
+        # RMS of the detail this tile adds (m), weighted by 2^(-level/2): between "metres of error"
+        # (which spends everything on the steepest mountains) and "expected on-screen error for a
+        # viewer anywhere" (rms x tile size, which spreads the budget thinly)
+        score = float(np.sqrt(np.mean((hh[1:-1, 1:-1] - ref[1:-1, 1:-1]) ** 2))) * 2.0 ** (-level / 2)
     return (level, face, x, y), h.astype(np.float32), encode(h, offset, step), score
 
 
