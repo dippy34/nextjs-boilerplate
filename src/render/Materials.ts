@@ -240,6 +240,9 @@ vec3 groundDetailS(vec3 g, vec3 up, vec3 tn, float mpp, vec4 sel, float mix2, fl
   gMatLite = lite;
   shadow = 1.0;
   cliff = 0.0;
+  nOut = tn;
+  // even the coarsest scale (332 m) under ~20 pixels: nothing to draw (far ground)
+  if (332.75 / max(mpp, 1e-4) < 20.0) return vec3(1.0);
   // flat ground: the horizontal projection; cliffs: the two vertical ones, blended by the slope's direction
   float steep = smoothstep(0.16, 0.4, 1.0 - dot(tn, up));
   vec3 P = uMatO + vec3(dot(g, e), dot(g, nr), dot(g, u3));
