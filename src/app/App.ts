@@ -25,6 +25,7 @@ import { TileDetail } from '../render/TileDetail';
 import { type CraftView, SpacecraftLayer } from '../render/SpacecraftLayer';
 import { loadMaterials } from '../render/Materials';
 import { Rocks } from '../render/Rocks';
+import { MilkyWayVolume } from '../render/MilkyWayVolume';
 import { GalaxiesLayer } from '../render/GalaxiesLayer';
 import { DeepSkyLayer } from '../render/DeepSkyLayer';
 import { DeepSkyObject, loadDeepSky } from '../universe/DeepSky';
@@ -113,6 +114,8 @@ export class App {
   private labelsBeforePhoto = true;
   /** real 3D ground under the explorer near solid worlds */
   readonly terrain = new TerrainPatch();
+  /** the Milky Way drawn per pixel from outside it */
+  readonly mwVolume = new MilkyWayVolume();
   /** rocks on the ground around the explorer (on the landing terrain) */
   rocks!: Rocks;
   /** comas and tails of the active comets */
@@ -217,7 +220,7 @@ export class App {
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.rocks.group, app.cometTails.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.rocks.group, app.mwVolume.mesh, app.cometTails.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
@@ -514,7 +517,7 @@ export class App {
     const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
     const air = this.atmospheres.warmupObjects()[0];
     if (air) terrain.push(this.terrain.warmupHaze(air.material as ShaderMaterial));
-    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects()];
+    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
@@ -1645,6 +1648,7 @@ export class App {
     // one face per frame while travelling; all at once if we find ourselves far out with no map yet
     if (sunDistPc > 60) this.galaxy.update(this.renderer.gl, this.camGal, !this.galaxy.ready && sunDistPc > 150 ? 6 : 1);
     this.sky.updateWith(xStar / xDark, sunDistPc, this.galaxy.ready ? this.galaxy.target.texture : null, this.camGal);
+    this.mwVolume.update(this.rig.upos, this.camGal, this.sky.modelK, SkyLayer.MODEL_REF, this.sky.modelExp);
     this.galaxies.update(this.rig.upos, pixelAngle, xStar / xDark, smoothstep(300, 1500, sunDistPc), this.view.quat);
     this.deepSky.update(this.rig.upos, this.camPc, pixelAngle, xStar / xDark);
     this.cometTails.gain.value = xStar / xDark;

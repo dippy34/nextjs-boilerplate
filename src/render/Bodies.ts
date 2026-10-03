@@ -11,7 +11,8 @@ import type { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
 import type { AtmosphereSpec } from './Atmospheres';
 import type { TileDetail } from './TileDetail';
-import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
+import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT, STAR_FRAG } from './shaders/body';
+import { RING_FRAG, RING_VERT } from './shaders/rings';
 import { StarCorona } from './StarCorona';
 import { RingParticles } from './RingParticles';
 import { ringFrame } from '../universe/RingSpot';
@@ -533,6 +534,7 @@ export class BodiesLayer {
         uRingTex: { value: this.ringTex }, uRingRadii: { value: new Vector3(inner, outer, 0) },
         uColor: { value: new Vector3(...b.color) }, uSunDirBF: { value: new Vector3() }, uViewDirBF: { value: new Vector3() },
         uSunIrr: { value: Math.PI }, uExposure: this.surfaceExposure, uPlanetRadius: { value: 1 }, uPolar: { value: b.radii[2] / b.radii[0] },
+        uCamBF: { value: new Vector3() }, uReqKm: { value: req / 1e3 }, uShine: { value: 0.02 },
         uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       transparent: true, depthWrite: false, side: DoubleSide,
@@ -646,6 +648,7 @@ export class BodiesLayer {
           const inv = rot3.clone().transpose();
           ru.uSunDirBF.value.copy(u.uSunDir.value).applyMatrix3(inv);
           ru.uViewDirBF.value.copy(view.rel).negate().normalize().applyMatrix3(inv);
+          ru.uCamBF.value.copy(view.rel).negate().applyMatrix3(inv).divideScalar(b.radii[0]);
           ru.uSunIrr.value = u.uSunIrr.value;
         }
         if (this.ringParticles && b === this.ringParticlesBody) {
