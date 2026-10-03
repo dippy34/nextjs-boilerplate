@@ -16,6 +16,7 @@ import { StarCorona } from './StarCorona';
 import { RingParticles } from './RingParticles';
 import { ringFrame } from '../universe/RingSpot';
 import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
+import { CloudLayer } from './CloudLayer';
 import { TerrainSource } from '../universe/Terrain';
 import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
@@ -139,6 +140,8 @@ export class BodiesLayer {
   readonly group = new Group();
   readonly views = new Map<Body, BodyView>();
   private meshes = new Map<Body, Mesh>();
+  /** Earth's cloud layer for low flight (render/CloudLayer.ts) */
+  clouds: CloudLayer | null = null;
   private rings = new Map<Body, Mesh>();
   private spheres = new Map<number, BufferGeometry>();
   private textures = new Map<string, Promise<{ tex: Texture; meanLum: number }>>();
@@ -403,7 +406,12 @@ export class BodiesLayer {
       }
       if (b.name === 'Earth') {
         this.texture('earth_night').then(({ tex }) => { u.uNight.value = tex; u.uHasNight.value = 1; });
-        this.texture('earth_clouds').then(({ tex }) => { u.uClouds.value = tex; u.uHasClouds.value = 1; });
+        this.texture('earth_clouds').then(({ tex }) => {
+          u.uClouds.value = tex;
+          u.uHasClouds.value = 1;
+          this.clouds = new CloudLayer(tex, this.surfaceExposure);
+          this.group.add(this.clouds.mesh);
+        });
       }
       const ring = this.rings_[b.name.toLowerCase()];
       if (ring) this.createRings(b, ring, u);
@@ -539,6 +547,7 @@ export class BodiesLayer {
    */
   update(cam: UPos, pixelAngle: number, dt: number, viewQuat?: Quaternion): void {
     this.time += dt;
+    if (this.clouds) this.clouds.mesh.visible = false;   // shown again below while Earth is near
     const now = performance.now() / 1000;
     const sun = this.system.sun;
     const sunRel = sun.upos.sub(cam, new Vector3());
@@ -610,6 +619,9 @@ export class BodiesLayer {
         if (u.uHasClouds.value) {
           const t = Math.min(1, Math.max(0, (view.dist - b.radius - 50e3) / 100e3));
           u.uCloudVis.value = t * t * (3 - 2 * t);
+          // ... and the cloud layer at cloud height takes over
+          this.clouds?.update(view.rel, b.orientation, b.radii[0], b.radii[2], u.uSunDir.value as Vector3, u.uSunIrr.value as number,
+            u.uSunColor.value as Vector3, 1 - (u.uCloudVis.value as number), u.uCloudShift.value as number);
         }
         const ring = this.rings.get(b);
         if (ring) {
