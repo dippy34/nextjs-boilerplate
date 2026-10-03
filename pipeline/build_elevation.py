@@ -43,11 +43,15 @@ images are 259 x 259, pixel (i + 1, j + 1) = sample (i, j). Metres per sample at
 ENCODING: 16-bit greyscale PNG (lossless), height (m) = offset + step * value, with one offset and
 step per body (manifest). Coarse levels are complete; deeper levels hold only the tiles that add
 the most detail (greedy by RMS difference from the parent x 2^(-level/2), under a byte budget per body) plus the
-tiles around the landmarks; the manifest lists them as a bitmap per level. Earth levels deeper
+tiles around the landmarks; the manifest lists them as a bitmap (or, for the sparse regional
+levels of elevation_hires.py, a flat [face, x, y, ...] list) per level. Earth levels deeper
 than `seaFloorMaxLevel` store ocean (height <= 0) as -200 m, like the old terrain map; the
 shallower ones keep the real sea floor.
 
+Sharper regional levels (Earth: Copernicus GLO-90, Moon: SLDEM2015) are added by elevation_hires.py.
+
 Usage: python3 build_elevation.py [body ...]   (downloads via elevation_sources.py, resumable)
+       python3 build_elevation.py hires [earth|moon]   (only the regional levels)
 """
 from __future__ import annotations
 
@@ -524,6 +528,19 @@ def write_fixture(body: str, man: dict, count: int = 24) -> None:
         e = levels[int(rng.integers(len(levels)))]
         level, n = e["level"], 1 << e["level"]
         f, x, y = int(rng.integers(6)), int(rng.integers(n)), int(rng.integers(n))
+        if "list" in e:     # regional levels (elevation_hires.py): a listed tile, exact samples
+            import elevation_hires
+            k = int(rng.integers(len(e["list"]) // 3))
+            f, x, y = e["list"][3 * k:3 * k + 3]
+            i, j = rng.integers(0, T + 1, 2)
+            u, v = (x + i / T) / n, (y + j / T) / n
+            n_, U, V = FACES[f]
+            d = n_ + math.tan((2 * u - 1) * math.pi / 4) * U + math.tan((2 * v - 1) * math.pi / 4) * V
+            d /= np.linalg.norm(d)
+            elevation_hires._init(body)
+            h = float(elevation_hires._heights(level, f, x, y)[j + 1, i + 1])
+            out.append({"level": level, "dir": [float(c) for c in d], "h": round(h, 2), "exact": True})
+            continue
         if "bitmap" in e:
             bits = np.unpackbits(np.frombuffer(base64.b64decode(e["bitmap"]), np.uint8), bitorder="little")
             if not bits[(f * n + y) * n + x]:
@@ -554,9 +571,18 @@ def write_index() -> None:
 
 
 def main() -> None:
-    names = sys.argv[1:] or list(BODIES)
-    for b in names:
-        write_fixture(b, build(b))
+    import elevation_hires
+    args = sys.argv[1:]
+    if args[:1] == ["hires"]:           # only the regional levels (Earth, Moon), keeping the rest
+        for b in args[1:] or list(elevation_hires.HI):
+            write_fixture(b, elevation_hires.build(b))
+        write_index()
+        return
+    for b in args or list(BODIES):
+        man = build(b)
+        if b in elevation_hires.HI:
+            man = elevation_hires.build(b)
+        write_fixture(b, man)
     write_index()
 
 
