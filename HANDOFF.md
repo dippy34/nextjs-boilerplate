@@ -40,6 +40,10 @@ procedural generation for the rest. Never use SpaceEngine's own files.
 * Overnight session (2026-10-03), all live:
   - Unique looks: per-star surfaces (`src/render/StarLook.ts`, `StarCorona.ts`), per-hole disks and
     jets (`Jets.ts`), procedural surfaces/lumpy shapes for map-less bodies, 4K moon maps.
+    The corona quad is drawn on a scaled-down copy 1e4 km from the eye (a 1e12 m quad around a giant
+    was garbled) and starts at the disk's elliptical outline; big star disks are exposed below white
+    (`STAR_KEY`/`STAR_CAP` in App.ts). Catalogue stars move from the name list's rounded position to
+    the octree's when their tile loads; `App.getStar` carries a parked explorer along.
   - GPU crash fix: point sprites of very distant stars overflowed the clipper (`POINT_CLIP` in
     `shaders/xr.ts` rescales point clip coordinates; meshes at Mpc use a per-object `uClipScale`).
   - Exoplanets: `src/app/Systems.ts` (archive <-> catalogue matching, claims), `src/universe/Planets.ts`
