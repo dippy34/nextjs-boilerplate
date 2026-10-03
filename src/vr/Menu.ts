@@ -101,6 +101,8 @@ export class VRMenu {
     p.text(app.clock.paused ? 'PAUSED' : app.rateText(), 560, 84, 24, app.clock.paused ? COLORS.warn : COLORS.accent, 500);
     p.button('pause', 1080, 30, 170, 64, app.clock.paused ? '▶ Play' : '⏸ Pause', () => { app.togglePause(); p.dirty = true; }, { size: 28 });
     p.button('close', 1460, 26, 110, 72, '✕', () => this.host.closeMenu(), { size: 40 });
+    // walking (src/app/Walk.ts): on the ground below, or land first
+    p.button('walk', 1266, 30, 180, 64, app.walk.active ? 'Fly' : 'Walk', () => { if (!app.walk.active) this.host.closeMenu(); app.walk.toggle(); p.dirty = true; }, { size: 28, active: app.walk.active });
     const tw = (p.width - 80 + 12) / TABS.length;
     TABS.forEach(([id, label], i) => {
       p.button(`tab:${id}`, 40 + i * tw, 122, tw - 12, 76, label, () => { this.tab = id; p.dirty = true; }, { active: this.tab === id, size: 24 });
@@ -359,9 +361,14 @@ export class VRMenu {
     tb('t:rev', 2, '⇄ Reverse', () => app.timeReverse());
     tb('t:now', 3, 'Now', () => app.realTime());
     p.button('exit', tx, a.y + 400, 505, 90, 'Exit VR', () => this.host.exitVR(), { size: 32, color: COLORS.warn });
+    // walking options (src/app/Walk.ts)
+    const ws = app.walk.settings;
+    p.text('Walking', tx, a.y + 530, 30, COLORS.text, 600);
+    p.button('wk:vig', tx, a.y + 556, 245, 70, ws.vignette ? 'Vignette on' : 'Vignette off', () => { ws.vignette = !ws.vignette; p.dirty = true; }, { size: 24, active: ws.vignette });
+    p.button('wk:h', tx + 260, a.y + 556, 245, 70, ws.height === 'standing' ? 'Standing' : 'Seated', () => { ws.height = ws.height === 'standing' ? 'seated' : 'standing'; p.dirty = true; }, { size: 24 });
     const ms = app.game.missions;
-    p.text(`Missions: ${ms.doneCount} / ${ms.total}`, tx, a.y + 540, 30, COLORS.warn, 600);
-    ms.list.filter((m) => !m.done).slice(0, 4).forEach((m, i) => p.text(`○ ${m.title}`, tx, a.y + 590 + i * 38, 24, COLORS.dim, 500, 'left', 520));
+    p.text(`Missions: ${ms.doneCount} / ${ms.total}`, tx, a.y + 664, 26, COLORS.warn, 600);
+    ms.list.filter((m) => !m.done).slice(0, 1).forEach((m, i) => p.text(`○ ${m.title}`, tx, a.y + 704 + i * 38, 22, COLORS.dim, 500, 'left', 520));
   }
 }
 

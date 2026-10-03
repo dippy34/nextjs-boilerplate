@@ -47,6 +47,7 @@ import { Station } from '../game/Station';
 import { Input } from './Input';
 import { Systems } from './Systems';
 import { VRSupport } from './VR';
+import { Walk } from './Walk';
 
 /** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
 const STAR_KEY = 0.62;
@@ -102,6 +103,8 @@ export class App {
   exo!: ExoPlanetLayer;
   /** game mode: ship, cockpit, warp, traffic, missions */
   game!: Game;
+  /** walking on the ground (src/app/Walk.ts) */
+  walk!: Walk;
   /** other galaxies (SIMBAD) */
   galaxies!: GalaxiesLayer;
   /** nebulae and star clusters (SIMBAD) */
@@ -225,6 +228,7 @@ export class App {
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
     app.game = new Game(app);
+    app.walk = new Walk(app); // walking hook
     bodies.uploader = (t) => renderer.gl.initTexture(t);
     app.warmupPending = true;
     app.applyUrl();
@@ -315,6 +319,7 @@ export class App {
 
   private bindKeys(): void {
     this.input.onClick = (x, y) => {
+      if (this.walk.onClick()) return; // walking: the click grabs the mouse
       const hit = this.pick(x, y);
       this.select(hit);
     };
@@ -331,6 +336,7 @@ export class App {
     this.input.onKey = (e) => {
       if (this.game?.active) this.game.audio.start();
       if (this.hud.searchOpen) return;
+      if (this.walk.onKey(e)) return; // walking: B, Space jumps, ...
       switch (e.code) {
         case 'Space': this.togglePause(); e.preventDefault(); break;
         case 'BracketRight': this.timeFaster(); break;
@@ -408,6 +414,7 @@ export class App {
       { label: 'Olympus Mons', detail: 'Mars · the tallest volcano known (real elevation data)', id: `lm:${lm('Olympus Mons')}` },
       { label: 'Valles Marineris', detail: 'Mars · a canyon 4,000 km long', id: `lm:${lm('Valles Marineris')}` },
       { label: 'Apollo 11 landing site', detail: 'the Moon · fly down and walk', id: `lm:${lm('Apollo 11 landing site')}` },
+      { label: 'Walk on the Moon at Apollo 17', detail: 'land in the Taurus-Littrow valley and walk (B: walk / fly)', id: 'tour:walk17' },
       { label: 'Shackleton crater', detail: 'the Moon\'s south pole · long shadows', id: `lm:${lm('Shackleton (lunar south pole)')}` },
       { label: 'A moon\'s shadow on Jupiter', detail: 'jumps to the next shadow transit', id: 'tour:shadow' },
       { label: 'Total lunar eclipse', detail: '3 March 2026 · the Moon in Earth\'s shadow', id: 'tour:eclipse' },
@@ -423,6 +430,7 @@ export class App {
 
   /** Tour destinations that need more than a fly-to (a time jump, a search): desktop flies there. */
   private tourAction(what: string): void {
+    if (what === 'walk17') { this.walk.walkAt(this.landmarks.find((l) => l.name === 'Apollo 17 landing site')!); return; }
     const o = this.prepareTour(what);
     if (o) { this.select(o); this.goTo(o); }
   }
@@ -1600,9 +1608,12 @@ export class App {
     this.rig.altitude = this.computeAltitude();
     if (this.vr.active) this.vr.updateInput(dt);
     this.rig.braking = this.input.keys.has('KeyX');
-    this.rig.update(dt, this.input);
-    this.keepOutsideHorizons();
-    this.keepAboveGround(dt);
+    // walking (src/app/Walk.ts) owns the camera while on foot; otherwise free flight
+    if (!this.walk.update(dt)) {
+      this.rig.update(dt, this.input);
+      this.keepOutsideHorizons();
+      this.keepAboveGround(dt);
+    }
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
 
     // The dolly carries the explorer's orientation; a headset pose is applied on top of it.
