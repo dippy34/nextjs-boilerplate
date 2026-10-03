@@ -1,0 +1,15 @@
+{
+ "tileSize": 256,
+ "bodies": {
+  "mars": {
+   "maxLevel": 6,
+   "bytes": 104995345,
+   "credit": "NASA/JPL/GSFC MGS MOLA global DEM 463 m, via USGS Astrogeology"
+  },
+  "moon": {
+   "maxLevel": 5,
+   "bytes": 114999070,
+   "credit": "NASA/GSFC/MIT LRO LOLA gridded elevation LDEM_128 (128 px/deg), PDS Geosciences Node"
+  }
+ }
+}
