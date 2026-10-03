@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import type { Body } from './Body';
+import { Elevation, tileOf } from './Elevation';
 
 /** A world that can have landing terrain (render/TerrainPatch.ts). */
 export interface Ground {
@@ -189,9 +190,13 @@ export class TerrainSource {
   private patches = new Map<string, Patch[]>();          // loaded, by body key
   private patchRequested = new Set<string>();
   private versions = new Map<string, number>();
+  /** [elevation] the max-level tile each body was last prefetched around */
+  private elevAt = new Map<string, string>();
 
   constructor(private base: string) {
     fetch(`${base}/terrain/terrain.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { this.manifest = j; }).catch(() => undefined);
+    // [elevation] global cube-face pyramids (public/data/elevation, src/universe/Elevation.ts)
+    Elevation.configure({ base: `${base}/elevation` });
   }
 
   /** The landing-terrain view of a Solar System body. */
@@ -200,7 +205,8 @@ export class TerrainSource {
     if (!g) {
       g = { owner: b, name: b.name, radius: b.radius, radii: b.radii, amplitude: TerrainSource.amplitude(b),
         ready: () => this.ready(b), height: (n, spacing) => this.height(b, n, spacing),
-        prepare: (n) => this.nearPatches(b, n), version: () => this.versions.get(b.name.toLowerCase()) ?? 0 };
+        prepare: (n) => { this.nearPatches(b, n); this.nearElevation(b, n); },
+        version: () => (this.versions.get(b.name.toLowerCase()) ?? 0) + Elevation.version(b.name.toLowerCase()) };
       this.grounds.set(b, g);
     }
     return g;
@@ -248,6 +254,17 @@ export class TerrainSource {
         this.versions.set(k, (this.versions.get(k) ?? 0) + 1);
       }).catch((err) => console.warn('terrain patch failed', p.name, err));
     }
+  }
+
+  /** [elevation] fetch the elevation tiles around the explorer (all levels, finest available) when it moves to another tile */
+  private nearElevation(b: Body, n: Vector3): void {
+    const k = b.name.toLowerCase();
+    if (!Elevation.levels(k)) return;
+    const t = tileOf(n, Math.max(0, Elevation.maxLevelAt(k, n)));
+    const id = `${t.face}/${t.level}/${t.x}/${t.y}`;
+    if (this.elevAt.get(k) === id) return;
+    this.elevAt.set(k, id);
+    void Elevation.prefetch(k, n, 0, 1);
   }
 
   /** bicubic sample of a patch at (lat, lon) degrees for features of `spacing` m, with its blend weight (0 outside, 1 well inside) */
@@ -308,9 +325,14 @@ export class TerrainSource {
     // a sharper regional patch takes over (blended in at its edges), and generated relief
     // between its resolution and the global map's fades out there
     let wP = 0, topP = Infinity;
-    if (m) {
-      h = this.dem(m, n, spacing);
-      top = m.pixelM * 3;
+    // [elevation] the global pyramid's heights where its tiles have loaded (sharper than the map)
+    const e = Elevation.sample(b.name.toLowerCase(), n, spacing);
+    if (e !== null && !m) {
+      h = e;
+      top = Elevation.lastMetresPerSample * 3;
+    } else if (m) {
+      h = e ?? this.dem(m, n, spacing);
+      top = e !== null ? Elevation.lastMetresPerSample * 3 : m.pixelM * 3;
       const pl = this.patches.get(k!);
       if (pl) {
         const lat = (Math.asin(Math.max(-1, Math.min(1, n.z))) * 180) / Math.PI;
@@ -326,7 +348,7 @@ export class TerrainSource {
     const minL = Math.max(spacing * 2.5, 6);
     const px = n.x * R, py = n.y * R, pz = n.z * R;
     // fractal hills: amplitude proportional to wavelength (slopes of a few percent)
-    let slope = m ? 0.012 : Math.min(0.03, TerrainSource.amplitude(b) / (R / 3));
+    let slope = m || e !== null ? 0.012 : Math.min(0.03, TerrainSource.amplitude(b) / (R / 3));
     // a world with oceans: no generated relief at sea, little on lowlands, the most in high mountains
     const sea = m?.sea;
     if (sea !== undefined) {
