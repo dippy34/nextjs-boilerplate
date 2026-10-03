@@ -32,6 +32,9 @@ for (const spec of specs) {
       a.rig.lookAt(v.clone().negate());
     }, [name, k, view]);
     await frames(10);
+    // the nearest galaxy's star cloud is sampled over several frames
+    await page.waitForFunction(() => !window.app.galaxies.filling, null, { timeout: 120000 }).catch(() => console.log('cloud still filling'));
+    await frames(3);
     const fps = await page.evaluate(() => window.app.fps);
     const file = `${out}-${name.split(' ')[0].replace(/[^A-Za-z0-9]/g, '')}-${view}-${k}.png`;
     await page.screenshot({ path: file, timeout: 240000 });

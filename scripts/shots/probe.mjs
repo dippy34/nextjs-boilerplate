@@ -9,7 +9,10 @@ await page.waitForFunction(() => window.app && window.app.renderer && window.app
 const [name, k, view] = spec.split('@');
 await page.evaluate(([n, kk, vw]) => {
   const a = window.app; const o = a.findByName(n); a.select(o);
-  const v = vw === 'earth' ? o.upos.sub(a.rig.upos.clone().set(0, 0, 0)).normalize().negate() : o.normal.clone().multiplyScalar(Number(vw)).addScaledVector(o.major, 1).normalize();
+  const v = vw === 'earth' ? o.upos.sub(a.rig.upos.clone().set(0, 0, 0)).normalize().negate()
+    : vw === 'face' ? o.normal.clone()
+      : vw === 'edge' ? o.major.clone().multiplyScalar(0.3).addScaledVector(o.minor, 1).normalize()
+        : o.normal.clone().multiplyScalar(Number(vw)).addScaledVector(o.major, 1).normalize();
   a.rig.upos.copy(o.upos).addVec(v, o.radius * Number(kk));
   a.rig.lookAt(v.clone().negate());
 }, [name, k, view]);

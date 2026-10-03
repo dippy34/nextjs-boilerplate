@@ -33,6 +33,8 @@ const HELP: [string, string][] = [
   ['L / O / M', 'Labels / orbits / minor-body orbits'],
   ['P', 'Screenshot (PNG)'],
   ['Esc', 'Stop autopilot / clear selection'],
+  ['B', 'Walk on the ground (land first if high up); B again to fly'],
+  ['Walking', 'W A S D move · mouse look · Shift run · Space jump · C crouch'],
   ['V', 'Spaceship: cockpit view / chase view / off'],
   ['J', 'Warp drive to the selection'],
   ['X', 'Brake (in the ship)'],

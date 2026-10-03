@@ -405,7 +405,7 @@
    "paDeg": 135.0,
    "morph": "Sab",
    "otype": "Sy2",
-   "vmag": 12.43
+   "vmag": 9.6
   },
   {
    "name": "M106",
@@ -531,7 +531,7 @@
    "paDeg": 143.0,
    "morph": "E-E/S0",
    "otype": "Sy2",
-   "vmag": 12.17
+   "vmag": 8.4
   },
   {
    "name": "M60",
@@ -559,7 +559,7 @@
    "paDeg": 111.0,
    "morph": "7.5",
    "otype": "EmG",
-   "vmag": 18.46
+   "vmag": 15.2
   },
   {
    "name": "NGC 4631",
@@ -644,6 +644,20 @@
    "morph": "dSphun",
    "otype": "G",
    "vmag": 12.0
+  },
+  {
+   "name": "NGC 5195",
+   "simbad": "NGC  5195",
+   "ra": 202.49829166666666,
+   "dec": 47.266127777777776,
+   "distPc": 7850000.0,
+   "nDist": 7,
+   "majArcmin": 5.89,
+   "minArcmin": 4.68,
+   "paDeg": 79.0,
+   "morph": "SB0 pec",
+   "otype": "GiG",
+   "vmag": 9.6
   }
  ]
 }

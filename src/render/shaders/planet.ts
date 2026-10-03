@@ -63,6 +63,8 @@ uniform vec3 uC3;           // rock, highlands / bright streaks
 uniform vec3 uC4;           // giants: storm and chromophore tint; rocky: fresh ejecta, salt, frost
 uniform vec3 uSea;          // ocean colour (deep)
 uniform float uSeaLevel;    // height of the sea (0..1 of the terrain function)
+uniform float uHMid;        // median of the terrain function over the planet
+uniform float uHSpan;       // ... and the spread between its 10 % and 90 % quantiles
 uniform float uIceLat;      // sine of the ice-cap edge latitude (1 = none; seas use the temperature)
 uniform float uClouds;      // cloud cover 0..1
 uniform vec3 uAtmoColor;
@@ -90,6 +92,7 @@ uniform mat3 uBodyToWorld;
 uniform float uLite;        // 1 in VR: fewer noise octaves, no domain warp
 uniform float uTerrain;     // 1 = drawing the landing terrain (render/TerrainPatch.ts)
 uniform float uHScale;      // terrain relief scale (fades in on descent)
+uniform float uCamAlt;      // the explorer's altitude over the sphere (m): below the clouds they are not painted on the ground
 uniform vec3 uHoleDir;      // sphere only: body-fixed centre of the terrain patch
 uniform float uHoleCos;     // ... and the cosine of its angular radius (2 = no hole)
 varying vec3 vTerrN;
@@ -102,10 +105,18 @@ ${MATERIAL_GLSL}
 ${RING_GLSL}
 
 float ph(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+// value noise on an integer lattice hash (exact on the CPU too, unlike a float hash)
+float lh(ivec3 c) {
+  uint h = (uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(c.z) * 83492791u);
+  h = (h ^ (h >> 16u)) * 73244475u;
+  h = (h ^ (h >> 16u)) * 73244475u;
+  return float(h ^ (h >> 16u)) * (1.0 / 4294967296.0);
+}
 float pn(vec3 p) {
-  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(ph(i), ph(i + vec3(1,0,0)), f.x), mix(ph(i + vec3(0,1,0)), ph(i + vec3(1,1,0)), f.x), f.y),
-             mix(mix(ph(i + vec3(0,0,1)), ph(i + vec3(1,0,1)), f.x), mix(ph(i + vec3(0,1,1)), ph(i + vec3(1,1,1)), f.x), f.y), f.z);
+  vec3 fl = floor(p); vec3 f = p - fl; f = f * f * (3.0 - 2.0 * f);
+  ivec3 i = ivec3(fl);
+  return mix(mix(mix(lh(i), lh(i + ivec3(1,0,0)), f.x), mix(lh(i + ivec3(0,1,0)), lh(i + ivec3(1,1,0)), f.x), f.y),
+             mix(mix(lh(i + ivec3(0,0,1)), lh(i + ivec3(1,0,1)), f.x), mix(lh(i + ivec3(0,1,1)), lh(i + ivec3(1,1,1)), f.x), f.y), f.z);
 }
 float fbmN(vec3 p, int n) { float s = 0.0, a = 0.5; for (int i = 0; i < 7; i++) { if (i >= n) break; s += a * pn(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
 // ridged multifractal: each octave weighted by the ridge below it, so detail gathers on the crests
@@ -140,13 +151,32 @@ float terrainX(vec3 n, out float low) {
   return 0.7 * cont + 0.3 * mount * (0.3 + 0.7 * belt) * (0.35 + 0.65 * land);
 }
 float terrain(vec3 n) { float l; return terrainX(n, l); }
-// detail below the height field's finest octave, down to the pixel (shading only)
+// detail below the height field's finest octave, down to the pixel (shading only): ridged, so it
+// reads as crests and valleys; octaves fade in as they grow past a few pixels
 float detail(vec3 n, float fp) {
   float s = 0.0, a = 0.5, f = 520.0;
   for (int i = 0; i < 8; i++) {
     if (f * fp > 0.35 || (uLite > 0.5 && i >= 3)) break;
-    s += a * (pn(n * f + uSeed * 3.7) - 0.5);
+    float r = 1.0 - abs(pn(n * f + uSeed * 3.7) * 2.0 - 1.0);
+    s += a * (r * r - 0.45) * smoothstep(0.35, 0.15, f * fp);
     f *= 2.07; a *= 0.55;
+  }
+  return s;
+}
+
+// landing terrain: hills below the patch's vertex spacing (frequencies above 'fmin'), shaped as the
+// CPU ground's (ExoGround.height: ridged in rough country, rolling elsewhere); metres
+float hills(vec3 n, float fp, float fmin, float rough) {
+  float s = 0.0, f = 300.0;
+  float amp = (0.008 + 0.03 * rough * rough) * 2.0;
+  for (int i = 0; i < 9; i++) {
+    if (f * fp > 0.35) break;
+    if (f > fmin * 0.7) {
+      float v = pn(n * f + uSeed * 5.3 + float(i) * 7.1);
+      float r = 1.0 - abs(2.0 * v - 1.0);
+      s += ((r * r - 0.45) * rough + (v - 0.5) * (1.0 - rough)) * amp * (uRadius / f) * smoothstep(fmin * 0.7, fmin * 1.4, f) * smoothstep(0.35, 0.15, f * fp);
+    }
+    f *= 2.0;
   }
   return s;
 }
@@ -178,26 +208,57 @@ vec4 craters(vec3 p, float cell, int s, float density, float depth, inout float 
     float dh = (d < 1.0 ? 2.0 * d : 0.0) - 0.32 * e * 2.0 * (d - 1.0) / 0.0784;
     acc.xyz += k * dh * dv / max(d, 1e-4) / (rc * cell);
     // young craters: bright rays and ejecta
-    float young = step(0.8, hash3u(ci, s + 7));
-    fresh += young * (smoothstep(1.7, 1.0, d) * 0.6 + smoothstep(1.0, 0.6, d) * 0.3) * (0.6 + 0.4 * pn(vec3(atan(dv.y, dv.x) * 6.0, d * 2.0, t * 9.0)));
+    // young craters: bright floors and rays
+    float young = step(0.9, hash3u(ci, s + 7));
+    float rays = smoothstep(0.55, 0.85, pn(vec3(atan(dv.y, dv.x) * 5.0, d * 0.7, t * 9.0)));
+    fresh += young * (smoothstep(1.0, 0.7, d) * 0.45 + rays * smoothstep(1.7, 1.05, d) * 0.6);
   }
   return acc;
 }
 
+// distance to the nearest border between Voronoi cells (crust plates); the headset tier uses the
+// contour of a noise instead
+float edgeDist(vec3 p, bool lite) {
+  if (lite) return abs(pn(p) - 0.5) * 0.6;
+  vec3 i = floor(p), f = fract(p);
+  float d1 = 8.0, d2 = 8.0;
+  for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec3 g = vec3(float(x), float(y), float(z));
+    vec3 o = g + vec3(ph(i + g), ph(i + g + 17.3), ph(i + g + 41.9)) - f;
+    float d = dot(o, o);
+    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+  }
+  return sqrt(d2) - sqrt(d1);
+}
 float hh(float k, float j) { return ph(vec3(uSeed * 1.37 + 3.1, k * 7.13 + 1.9, j * 3.71 + 0.7)); }
 float n1d(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(ph(vec3(i, uSeed, 5.0)), ph(vec3(i + 1.0, uSeed, 5.0)), f); }
+// round (slightly east-west elongated) spots on a grid of cells, 'n' cells round the planet
+float blobs(vec2 u, float n, float dens, float s) {
+  vec2 i = floor(u), f = u - i;
+  float m = 0.0;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 g = vec2(float(x), float(y));
+    vec3 hc = vec3(mod(i.x + g.x, n), i.y + g.y, s);
+    if (ph(hc) > dens) continue;
+    vec2 o = g + 0.1 + 0.8 * vec2(ph(hc + 3.1), ph(hc + 7.7)) - f;
+    float rr = 0.12 + 0.2 * ph(hc + 11.3);
+    m = max(m, smoothstep(rr, rr * 0.4, length(o * vec2(0.6, 1.0))));
+  }
+  return m;
+}
 vec3 rotAbout(vec3 p, vec3 c, float a) { float ca = cos(a), sa = sin(a); return p * ca + cross(c, p) * sa + c * dot(c, p) * (1.0 - ca); }
 vec3 rotZ(vec3 p, float a) { float ca = cos(a), sa = sin(a); return vec3(ca * p.x - sa * p.y, sa * p.x + ca * p.y, p.z); }
 vec3 dirLL(float la, float lo) { return vec3(cos(la) * cos(lo), cos(la) * sin(lo), sin(la)); }
 
 // clouds: circulation belts, mid-latitude cyclones and a few tropical ones (vortices that wind the
 // cloud field into spirals), zonal winds, fine convective texture; returns opacity 0..1
-float clouds(vec3 nB, float t) {
+float clouds(vec3 nB, float t, float fp) {
   bool lite = uLite > 0.5;
   float la = asin(clamp(nB.z, -1.0, 1.0));
   float al = abs(la);
-  // zonal drift: easterlies in the tropics, westerlies further out
-  vec3 p = rotZ(nB, t * (0.0035 * smoothstep(0.35, 0.7, al) - 0.002 * (1.0 - smoothstep(0.3, 0.5, al))));
+  // the cloud layer drifts round the planet as a whole (differential drift would shear it into
+  // streaks as time goes on); the field itself evolves slowly
+  vec3 p = rotZ(nB, t * 0.0012);
   float cyc = 0.0;
   for (int k = 0; k < 7; k++) {
     float fk = float(k);
@@ -209,19 +270,25 @@ float clouds(vec3 nB, float t) {
     float d = length(p - c);
     if (d > r * 3.0) continue;
     // low-pressure vortices turn with the planet's spin: counter-clockwise in the north
-    float strength = (tropical ? 9.0 : 4.5) * (0.6 + 0.4 * hh(fk, 5.0));
-    p = rotAbout(p, c, hs * strength * exp(-d / (r * 0.7)) * smoothstep(r * 3.0, r * 1.5, d));
+    float strength = (tropical ? 7.0 : 3.0) * (0.6 + 0.4 * hh(fk, 5.0));
+    p = rotAbout(p, c, hs * strength * exp(-d * d / (r * r * 0.5)) * smoothstep(r * 2.5, r * 1.2, d));
     cyc = max(cyc, (tropical ? 1.2 : 0.6) * exp(-d * d / (r * r)) * (tropical ? smoothstep(0.08, 0.2, d / r) : 1.0));
   }
   // stretched along the latitude circles at mid-latitudes (fronts, jet-stream bands)
-  vec3 q = p * vec3(3.2, 3.2, 3.2 + 3.0 * smoothstep(0.3, 0.9, al)) + uSeed * 1.7;
+  vec3 q = p * vec3(3.2, 3.2, 3.2 + 3.0 * smoothstep(0.3, 0.9, al)) + uSeed * 1.7 + vec3(0.0, 0.0, t * 0.0003);
   vec3 w = lite ? vec3(pn(q * 0.6 + 3.1), pn(q * 0.6 + 8.3), pn(q * 0.6 + 1.7)) - 0.5
                 : vec3(fbmN(q * 0.6 + 3.1, 3), fbmN(q * 0.6 + 8.3, 3), fbmN(q * 0.6 + 1.7, 3)) - 0.5;
   float c = fbmN(q + w * 2.2, lite ? 4 : 6);
   // fronts: long bands that wind into the cyclones (mid-latitudes)
   if (!lite) c += 0.3 * (ridgedN(q * 0.45 + w * 1.5 + 4.0, 3) - 0.3) * smoothstep(0.35, 0.7, al);
   c += 0.35 * (fbmN(q * 9.0 + w * 5.0, lite ? 1 : 3) - 0.44);
-  if (!lite) c += 0.12 * (fbmN(q * 31.0 + w * 9.0, 2) - 0.375);
+  // finer texture down to the pixel (convective cells, ragged edges)
+  float fa = 0.14, ff = 31.0;
+  for (int i = 0; i < 5; i++) {
+    if (lite || ff * 3.2 * fp > 0.5) break;
+    c += fa * (pn(q * ff + w * 9.0) - 0.5) * smoothstep(0.5, 0.25, ff * 3.2 * fp);
+    ff *= 2.1; fa *= 0.62;
+  }
   c = (c - 0.5) * 2.4 + 0.5;
   // circulation: the ITCZ, dry subtropical highs, the storm tracks, polar fog
   float zone = 0.5 + 0.35 * exp(-(la / 0.13) * (la / 0.13)) - 0.4 * exp(-((al - 0.45) / 0.15) * ((al - 0.45) / 0.15))
@@ -229,7 +296,7 @@ float clouds(vec3 nB, float t) {
   float cover = clamp(uClouds * zone + cyc * 0.5 * uClouds, 0.0, 1.0);
   float dense = smoothstep(1.0 - cover - 0.04, 1.0 - cover + 0.2, c);
   // thin cirrus streaks along the jet streams
-  float ci = lite ? 0.0 : smoothstep(0.56, 0.8, fbmN(q * vec3(1.2, 1.2, 4.0) + w * 3.0 + 9.0, 4)) * smoothstep(0.3, 0.6, al) * 0.4 * uClouds;
+  float ci = lite ? 0.0 : smoothstep(0.58, 0.8, fbmN(q * vec3(1.4, 1.4, 3.0) + w * 3.5 + 9.0, 4)) * smoothstep(0.3, 0.6, al) * 0.25 * uClouds;
   return max(dense, ci);
 }
 
@@ -250,7 +317,7 @@ vec3 biome(float h, float sea, float low, float lat, float slope, vec3 nB, float
   // far from the sea it is drier
   float inland = smoothstep(0.0, 0.11, 0.7 * low * 1.31 + 0.05 - sea);
   float mn = fbmN(nB * 5.0 + uSeed * 2.1, lite ? 2 : 4) - 0.5;
-  float moist = clamp(zonal * 0.9 + 0.22 - 0.45 * inland + 1.1 * mn + windward - uDry * 0.55, 0.0, 1.0);
+  float moist = clamp(zonal * 0.9 + 0.38 - 0.25 * inland + 1.1 * mn + windward - uDry * 0.4, 0.0, 1.0);
   float warm = smoothstep(272.0, 292.0, T);
   float tropic = smoothstep(290.0, 300.0, T);
   float scorch = smoothstep(318.0, 340.0, T);
@@ -259,7 +326,9 @@ vec3 biome(float h, float sea, float low, float lat, float slope, vec3 nB, float
   vec3 forest = uC1 * mix(vec3(0.85, 0.95, 1.1), vec3(0.75, 0.9, 0.8), tropic);
   vec3 grass = mix(uC1 * 2.2, uC2 * 0.55, 0.45);
   vec3 steppe = mix(uC2 * 0.75, grass, 0.35);
-  vec3 sand = uC2;
+  // deserts: sand seas, gravel plains and bare rock in provinces
+  float prov = smoothstep(0.42, 0.62, fbmN(nB * 3.0 + uSeed * 2.7, lite ? 2 : 4));
+  vec3 sand = mix(uC2, mix(uC2 * 0.6, uC3, 0.5), prov * 0.8);
   vec3 c = mix(sand, steppe, smoothstep(0.12, 0.28, moist));
   c = mix(c, grass, smoothstep(0.28, 0.45, moist));
   c = mix(c, forest, smoothstep(0.45, 0.7, moist));
@@ -268,7 +337,7 @@ vec3 biome(float h, float sea, float low, float lat, float slope, vec3 nB, float
   vec3 tundra = mix(uC3 * 0.8, uC1 * 1.6, 0.4);
   c = mix(tundra, c, smoothstep(262.0, 276.0, T));
   // too hot for plants: baked soil and dunes
-  c = mix(c, mix(sand, uC3, 0.25), scorch);
+  c = mix(c, mix(sand, uC3 * 0.8, 0.2), scorch);
   // variation at several scales
   float v1 = fbmN(nB * 23.0 + uSeed * 5.3, lite ? 1 : 3) - 0.44;
   c *= 1.0 + 0.6 * v1;
@@ -289,7 +358,8 @@ vec3 giant(vec3 nB, out float streakOut) {
   bool lite = uLite > 0.5;
   float la0 = asin(clamp(nB.z, -1.0, 1.0));
   // differential rotation: each latitude drifts at its own rate
-  vec3 p = rotZ(nB, uTime * (0.002 + 0.0015 * sin(la0 * uBands * 0.9 + uSeed)));
+  // (only slightly: drift that differs by latitude shears the vortices as time goes on)
+  vec3 p = rotZ(nB, uTime * (0.002 + 0.00006 * sin(la0 * uBands * 0.9 + uSeed)));
   // vortices: the bands swirl around them (anticyclonic ovals: clockwise in the north)
   float oval = 0.0, ovalCore = 0.0, comp = 0.0, collar = 0.0;
   for (int k = 0; k < 8; k++) {
@@ -339,9 +409,11 @@ vec3 giant(vec3 nB, out float streakOut) {
   col *= 1.0 - 0.3 * smoothstep(0.58, 0.78, 1.0 - streak) * (1.0 - b) * uTurb;
   col *= 0.86 + 0.28 * fine * (0.4 + uTurb);
   // small bright plumes and dark barges inside the belts
-  float spots = lite ? 0.5 : pn(vec3(ring * 26.0, lw * 80.0) + uSeed * 3.1);
-  col = mix(col, uC3, smoothstep(0.86, 0.94, spots) * (1.0 - b) * 0.6 * uTurb);
-  col = mix(col, uC1 * 0.6, smoothstep(0.14, 0.06, spots) * (1.0 - b) * 0.5 * uTurb);
+  if (!lite && uType >= 8) {
+    vec2 u = vec2(lon, lw) * (48.0 / 6.2832) + vec2(eddy * 0.6, 0.0);
+    col = mix(col, uC3, blobs(u, 48.0, 0.12, uSeed + 1.0) * (1.0 - b) * 0.45 * uTurb);
+    col = mix(col, uC1 * 0.6, blobs(u * 0.75, 36.0, 0.1, uSeed + 2.0) * (1.0 - b) * 0.45 * uTurb);
+  }
   // festoons and dark barges along the band edges
   col = mix(col, uC1 * vec3(0.7, 0.75, 0.85), edge * smoothstep(0.12, 0.3, eddy + (fine - 0.5) * 0.5) * 0.55 * uTurb);
   // vortices: a big oval (chromophore red; a dark spot on ice giants), smaller white ovals
@@ -352,8 +424,8 @@ vec3 giant(vec3 nB, out float streakOut) {
   if (darkSpots) col = mix(col, uC3 * 1.1, comp * 0.8);
   // chains of small white ovals on one latitude
   float chainLat = 0.35 + 0.3 * hh(1.0, 18.0);
-  float ov = pn(vec3(ring * 16.0, 0.0) + uSeed * 5.0);
-  col = mix(col, uC3, smoothstep(0.8, 0.88, ov) * (1.0 - smoothstep(0.0, 0.02, abs(abs(la) - chainLat))) * 0.7 * step(1.0, uStorms));
+  float ov = blobs(vec2(lon * (24.0 / 6.2832), (abs(la) - chainLat) * (24.0 / 6.2832) + 0.5), 24.0, 0.6, uSeed + 5.0);
+  col = mix(col, uC3, ov * (1.0 - smoothstep(0.02, 0.04, abs(abs(la) - chainLat))) * 0.7 * step(1.0, uStorms));
   // polar regions: the bands break up into mottled, darker, bluer haze
   float pole = smoothstep(1.0, 1.3, abs(la) + 0.15 * wave);
   float mott = fbmN(p * 9.0 + uSeed, lite ? 2 : 4);
@@ -383,6 +455,7 @@ void main() {
   // ground materials up close (render/Materials.ts): flat A, flat B, steep, snow; shares of B and snow
   vec4 msel = vec4(2.0, 5.0, 3.0, 6.0);
   float veg = 0.0, snowG = 0.0;
+  vec3 hillTilt = vec3(0.0);
   if (uType >= 6) {
     float streak;
     albedo = giant(nB, streak);
@@ -399,16 +472,25 @@ void main() {
     vec3 t1 = normalize(cross(abs(nB.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0), nB));
     vec3 t2 = cross(nB, t1);
     float eps = clamp(fp * 1.5, 2e-5, 0.01);
-    float dd = detail(nB, fp);
-    float hd = h + dd * 0.006;
+    float hn = (h - uHMid) / uHSpan;      // dry worlds: height by quantile (about -0.5 .. 0.5 for 10 .. 90 %)
+    // rough mountains and highlands, smoother plains and lowlands
+    float rough = seas ? 0.25 + 0.75 * smoothstep(sea + 0.01, sea + 0.2, h) : 0.5 + 0.5 * smoothstep(-0.2, 0.45, hn);
+    float dd = detail(nB, fp) * rough;
+    float hd = h + dd * 0.008;
     vec2 g = vec2(0.0);
     if (!lite) {
       vec3 n1 = normalize(nB + t1 * eps), n2 = normalize(nB + t2 * eps);
-      float hx = terrain(n1) + detail(n1, fp) * 0.006;
-      float hy = terrain(n2) + detail(n2, fp) * 0.006;
+      float hx = terrain(n1) + detail(n1, fp) * rough * 0.008;
+      float hy = terrain(n2) + detail(n2, fp) * rough * 0.008;
       g = vec2(hx - hd, hy - hd) / eps;
     }
     bool wet = seas && h < sea;
+    if (uTerrain > 0.5 && !lite && !wet) {
+      float fmin = uRadius / (2.5 * max(length(vPosView) * 0.065, 1.0));   // (the patch's vertex spacing there)
+      vec3 m1 = normalize(nB + t1 * eps), m2 = normalize(nB + t2 * eps);
+      float h0 = hills(nB, fp, fmin, rough);
+      hillTilt = (t1 * (hills(m1, fp, fmin, rough) - h0) + t2 * (hills(m2, fp, fmin, rough) - h0)) / (eps * uRadius);
+    }
     // slope of the ground (relief range over the radius); the shading exaggerates it so relief reads
     // from orbit (as it does at low sun on real planets, from slopes far below the pixel)
     vec2 gs = wet ? vec2(0.0) : g * uRelief * 2.5;
@@ -420,13 +502,13 @@ void main() {
       float pxm = fp * uRadius;
       vec3 cg = vec3(0.0);
       float cellS[3] = float[3](846400.0, 184000.0, 40000.0);
-      float densS[3] = float[3](0.3, 0.35, 0.4);
-      float depS[3] = float[3](0.025, 0.06, 0.18);
+      float densS[3] = float[3](0.5, 0.5, 0.4);
+      float depS[3] = float[3](0.04, 0.06, 0.18);
       for (int i = 0; i < 3; i++) {
-        if (lite && i == 2) break;
-        if (cellS[i] * 0.15 < pxm * 2.0 || (i == 0 && uRadius < 1.5e6)) continue;
+        if (lite && (i == 2 || (i == 1 && uRadius >= 1.5e6))) break;   // headset: one scale
+        if (cellS[i] * 0.15 < pxm || (i == 0 && uRadius < 1.5e6)) continue;
         vec4 cr = craters(pm, cellS[i], uCSeed + 100 * i, densS[i] * uCraters, depS[i], fresh);
-        float fade = smoothstep(pxm * 2.0, pxm * 6.0, cellS[i] * 0.15);
+        float fade = smoothstep(pxm, pxm * 4.0, cellS[i] * 0.15);
         cg += cr.xyz * fade;
         crat += cr.w * fade;
       }
@@ -438,10 +520,12 @@ void main() {
     float slope = clamp(length(gs) * 3.0, 0.0, 1.0);
     vec3 nBs = normalize(nB - (t1 * gs.x + t2 * gs.y) * exag);
     nShade = normalize(uBodyToWorld * nBs);
-    float mtn = seas ? smoothstep(sea + 0.12, sea + 0.28, h) : smoothstep(0.45, 0.62, h);
+    float mtn = seas ? smoothstep(sea + 0.12, sea + 0.28, h) : smoothstep(0.25, 0.55, hn);
     float altM = max(h - sea, 0.0) * uRelief * uRadius;
     float T = surfTemp(lat, seas ? altM : 0.0);
     float var = fbmN(nB * 31.0 + uSeed * 4.1, lite ? 1 : 3) - 0.44;   // patchiness
+    // and at the scale of kilometres (seen from low orbit and the ground), fading in as it resolves
+    float var2 = lite ? 0.0 : (fbmN(nB * 420.0 + uSeed * 2.9, 3) - 0.44) * smoothstep(0.004, 0.0008, fp);
     if (seas) {
       if (wet) {
         // depth: shelves bright and turquoise where warm, greener where cold; sea ice where frozen
@@ -462,40 +546,46 @@ void main() {
         float up = dot(t1 * g.x + t2 * g.y, wind) * uRelief * 40.0;
         float rock;
         albedo = biome(h, sea, low, lat, slope, nB, mtn, clamp(up, -0.25, 0.25), T, veg, snowG, rock);
-        albedo *= 0.9 + 2.0 * dd;
+        albedo *= 1.0 + 0.8 * dd;
         // beaches and coastal flats
         albedo = mix(albedo, uC2 * 1.1, (1.0 - smoothstep(0.0, 0.006, h - sea)) * smoothstep(275.0, 290.0, T) * 0.6);
       }
-      cloud = clouds(nB, uTime);
+      cloud = clouds(nB, uTime, fp);
       // cloud shadows on the ground (clouds ~0.15 % of the radius up), cloud tops shaded by their thickness
       float muB = dot(nB, sunB);
       vec3 sp = normalize(nB + (sunB - nB * muB) * 0.0025 / max(muB, 0.15));
-      float cs = lite ? cloud : clouds(sp, uTime);
+      float cs = lite ? cloud : clouds(sp, uTime, fp * 2.0);
       shadow = 1.0 - 0.75 * cs * smoothstep(-0.05, 0.25, muB);
-      cloud = clamp(cloud, 0.0, 1.0);
+      cloud = clamp(cloud, 0.0, 1.0) * smoothstep(4000.0, 9000.0, uCamAlt);
       albedo = mix(albedo, vec3(mix(0.62, 0.92, cloud)) * clamp(1.0 - 1.6 * (cs - cloud), 0.55, 1.15), cloud);
       if (cloud > 0.0) nShade = normalize(mix(nShade, nW, cloud));
       shadow = mix(shadow, 1.0, cloud);
       msel = vec4(5.0, 7.0, 3.0, 6.0);            // dry soil / forest floor / cliff / snow
     } else if (uType == 0) {
       // lava: dark crust in plates, glowing cracks between them, molten lakes in the lowlands
-      float cr = ridgedN(nB * 7.0 + uSeed, lite ? 3 : 5);
-      float cr2 = ridgedN(nB * 29.0 + uSeed * 1.9, lite ? 1 : 3);
-      albedo = mix(uC1, uC2, smoothstep(0.25, 0.6, h + 0.3 * var)) * (0.9 + 2.0 * dd);
-      float lake = smoothstep(0.3, 0.27, h);
+      vec3 lw3 = vec3(pn(nB * 4.0 + uSeed), pn(nB * 4.0 + uSeed + 3.3), pn(nB * 4.0 + uSeed + 7.1)) - 0.5;
+      float seam = edgeDist(nB * 9.0 + lw3 * 1.5 + uSeed, lite);
+      float seam2 = lite ? 1.0 : edgeDist(nB * 37.0 + lw3 * 3.0 + uSeed * 1.9, false);
+      float plate = smoothstep(-0.3, 0.3, hn + 0.6 * var);
+      albedo = mix(uC1, uC2, plate) * (1.0 + 0.8 * dd);
+      float lake = smoothstep(-0.4, -0.5, hn + 0.1 * var);
       albedo = mix(albedo, uC1 * 0.6, lake);
-      emit = uGlow * (smoothstep(0.78, 0.93, cr) * 0.8 + smoothstep(0.84, 0.95, cr2) * 0.35 + lake * (0.5 + 0.5 * pn(nB * 60.0 + uSeed)));
+      // seams between crust plates glow (wider and hotter in the lowlands), small cracks inside them
+      float live = smoothstep(0.5, 0.75, pn(nB * 3.5 + uSeed * 2.2) + 0.3 * smoothstep(0.1, -0.4, hn));
+      float cracks = (smoothstep(0.05, 0.0, seam) * 0.8 + smoothstep(0.04, 0.0, seam2) * 0.3) * live;
+      albedo *= 1.0 - 0.5 * cracks;
+      emit = uGlow * (cracks + lake * (0.6 + 0.4 * pn(nB * 60.0 + uSeed)));
       msel = vec4(2.0, 0.0, 3.0, 6.0);           // lava fields: dark rocky ground
     } else if (uType == 5) {
       // ice: bright plains, darker older terrain, long crossing ridges and cracks (lineae, along
       // arcs of great circles), finer fractures
       float lines = 0.0;
-      for (int k = 0; k < 12; k++) {
+      for (int k = 0; k < 18; k++) {
         float fk = float(k);
         if (lite && k >= 6) break;
         vec3 nrm = normalize(vec3(hh(fk, 21.0), hh(fk, 22.0), hh(fk, 23.0)) - 0.5);
         float d = dot(nB, nrm) + 0.012 * (pn(nB * 9.0 + fk * 3.3) - 0.5);
-        float wl = 0.002 + 0.004 * hh(fk, 24.0);
+        float wl = 0.0025 + 0.006 * hh(fk, 24.0) * hh(fk, 29.0);
         vec3 mid = normalize(cross(nrm, vec3(hh(fk, 25.0), hh(fk, 26.0), hh(fk, 27.0)) - 0.5));
         float seg = smoothstep(-0.2, 0.3, dot(nB, mid) - 0.3 + 0.6 * hh(fk, 28.0));
         // a double ridge: two dark bands with a brighter crest between
@@ -504,12 +594,15 @@ void main() {
       }
       float l3 = abs(pn(nB * 23.0 + uSeed * 2.3) - 0.5);
       lines = max(lines, smoothstep(0.012, 0.0, l3) * 0.4);
-      float old = smoothstep(0.42, 0.58, h + 0.35 * var);
-      albedo = mix(uC2, uC1, old * 0.7);
+      float old = smoothstep(-0.1, 0.15, hn + 0.7 * var);
+      albedo = mix(uC2, uC1, old * 0.6);
+      // chaos terrain: blocks of crust in darker, rougher matrix
+      float chaos = smoothstep(0.62, 0.7, fbmN(nB * 4.0 + uSeed * 1.3, lite ? 2 : 4)) * (0.6 + 0.4 * pn(nB * 60.0 + uSeed));
+      albedo = mix(albedo, uC1 * 0.9, chaos * 0.7);
       albedo = mix(albedo, uC1 * 0.8, lines * (lite ? 0.5 : 0.75));
-      albedo = mix(albedo, uC3, smoothstep(0.62, 0.75, h));
+      albedo = mix(albedo, uC3, smoothstep(0.4, 0.6, hn));
       albedo = mix(albedo, uC4, fresh * 0.7);
-      albedo *= 0.95 + dd;
+      albedo *= 1.0 + 0.5 * dd;
       msel = vec4(6.0, 6.0, 3.0, 6.0);
       snowG = 1.0;
     } else if (uType == 2) {
@@ -520,28 +613,29 @@ void main() {
       float region = fbmN(nB * 2.6 + rw * 1.2 + uSeed * 3.3, lite ? 3 : 5) + 0.2 * var;
       albedo = mix(uC2, uC1, smoothstep(0.52, 0.58, region));
       albedo = mix(albedo, mix(uC1, uC2, 0.5), smoothstep(0.47, 0.52, region) * (1.0 - smoothstep(0.52, 0.58, region)) * 0.6);
-      albedo = mix(albedo, uC2 * 1.12, smoothstep(0.45, 0.65, h) * 0.35);
+      albedo = mix(albedo, uC2 * 1.12, smoothstep(0.0, 0.4, hn) * 0.35);
       float dunes = 0.5 + 0.5 * sin(dot(nB, vec3(900.0, 380.0, 140.0)) + 9.0 * pn(nB * 40.0 + uSeed));
-      albedo *= 1.0 - 0.12 * dunes * smoothstep(0.38, 0.3, h) * smoothstep(0.002, 0.0006, fp);
+      albedo *= 1.0 - 0.12 * dunes * smoothstep(-0.1, -0.3, hn) * smoothstep(0.002, 0.0006, fp);
       // salt flats in the deepest basins
-      albedo = mix(albedo, uC4, smoothstep(0.275, 0.255, h + 0.03 * var) * 0.7);
+      albedo = mix(albedo, mix(uC2, uC4, 0.6), smoothstep(-0.62, -0.72, hn + 0.15 * var) * smoothstep(0.4, 0.6, pn(nB * 18.0 + uSeed)) * 0.8);
       albedo = mix(albedo, uC3, clamp(smoothstep(0.35, 0.75, slope) + mtn * 0.4, 0.0, 1.0) * 0.6);
       // craters: darker sandy floors, bright fresh ejecta
       albedo *= 1.0 + 0.18 * clamp(crat, -1.0, 0.3);
       albedo = mix(albedo, uC2 * 1.3, fresh * 0.5);
-      albedo *= (0.9 + 2.0 * dd) * (1.0 + 0.4 * var);
+      albedo *= (1.0 + 0.8 * dd) * (1.0 + 0.4 * var);
       msel = vec4(4.0, 5.0, 3.0, 6.0);
-      veg = 1.0 - smoothstep(0.28, 0.4, h);       // dunes in the lowlands
+      veg = 1.0 - smoothstep(-0.2, 0.05, hn);     // dunes in the lowlands
     } else {
       // hot rock (Mercury-like): dark smooth volcanic plains in the lowlands, lighter cratered
       // highlands, bright young craters
-      float plains = smoothstep(0.42, 0.36, h + 0.15 * var);
+      float plains = smoothstep(-0.02, -0.15, hn + 0.12 * (fbmN(nB * 9.0 + uSeed * 1.7, lite ? 2 : 3) - 0.44) + 0.1 * var);
       albedo = mix(uC2, uC1, plains);
-      albedo = mix(albedo, uC3, smoothstep(0.55, 0.7, h) * 0.5);
+      albedo = mix(albedo, uC3, smoothstep(0.3, 0.55, hn) * 0.5);
       albedo = mix(albedo, uC4, fresh * 0.8);
-      albedo *= (0.9 + 2.0 * dd) * (1.0 + 0.5 * var);
+      albedo *= (1.0 + 0.8 * dd) * (1.0 + 0.5 * var);
       msel = vec4(1.0, 2.0, 3.0, 6.0);           // hot rock: pocked regolith and stony ground
     }
+    if (!wet) albedo *= 1.0 + 0.5 * var2 * (1.0 - cloud);
     // polar caps (dry worlds; seas freeze by temperature)
     if (!seas) {
       float cap = smoothstep(uIceLat, uIceLat + 0.06, abs(lat) + 0.08 * (fbmN(nB * 6.0 + uSeed, 3) - 0.5));
@@ -558,7 +652,7 @@ void main() {
   if (uTerrain > 0.5) {
     // landing terrain: the relief's own normal and shadows, inside the geometric day side, with
     // the scanned ground materials' grain
-    vec3 nTB = normalize(vTerrN);
+    vec3 nTB = normalize(normalize(vTerrN) - hillTilt * uHScale);
     if (uMatOn > 0.5 && uType < 6 && uHScale > 0.01) {
       vec3 nG;
       vec3 det = groundDetail(vGround, nB, nTB, length(fwidth(vPosView)), msel, veg, snowG, uLite, nG);
@@ -587,10 +681,10 @@ void main() {
   // atmosphere: bright limb on the day side
   float mu = max(dot(nW, V), 0.0);
   float rim = pow(1.0 - mu, 3.0);
-  radiance += uAtmoColor * sunL * uAtmo * rim * smoothstep(-0.25, 0.3, mu0) * 0.9;
+  radiance += uAtmoColor * sunL * uAtmo * rim * smoothstep(-0.25, 0.3, mu0) * 0.9 * (1.0 - uTerrain);   // (the sphere's limb only)
   // thermal glow (night side mostly)
   // (scaled to the starlight so it shows at the exposure the lit planet sets)
-  radiance += emitColor * emit * luminance(sunL) * 0.15 * (0.08 + 0.92 * smoothstep(0.2, -0.2, mu0));
+  radiance += emitColor * emit * luminance(sunL) * (0.012 + 0.4 * smoothstep(0.2, -0.2, mu0));
   gl_FragColor = vec4(min(radiance * uExposure, vec3(6.0e4)), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>

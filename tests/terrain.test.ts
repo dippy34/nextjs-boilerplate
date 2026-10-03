@@ -1,9 +1,11 @@
-import { Matrix4, type Mesh, ShaderMaterial, Vector3 } from 'three';
+import { Matrix4, type Mesh, Quaternion, ShaderMaterial, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { UPos } from '../src/core/upos';
+import { Rocks } from '../src/render/Rocks';
 import { TerrainPatch } from '../src/render/TerrainPatch';
 import type { Body } from '../src/universe/Body';
-import { ExoGround, exoQuantile, exoTerrain } from '../src/universe/ExoTerrain';
+import { EXO_CRATER_CELLS, ExoGround, exoQuantile, exoQuantiles, exoTerrain } from '../src/universe/ExoTerrain';
+import { EXO_FRAG } from '../src/render/shaders/planet';
 import type { ExoPlanet } from '../src/universe/Planets';
 import { TerrainSource } from '../src/universe/Terrain';
 import { ATMO_FRAG, ATMO_HAZE_FRAG } from '../src/render/shaders/atmosphere';
@@ -174,6 +176,61 @@ describe('terrain patch', () => {
   });
 });
 
+describe('rocks', () => {
+  const src = new TerrainSource('http://localhost/none');
+  (src as unknown as { manifest: unknown }).manifest = { maps: {} };
+
+  it('rest on the ground actually drawn, also after a new patch replaces the old', () => {
+    const patch = new TerrainPatch();
+    patch.budgetMs = 1e9;
+    const b = world('Callisto', 2410e3);
+    src.craters.set(b, 0.8);
+    const mat = new ShaderMaterial({ uniforms: { uExposure: { value: 1 }, uSeed: { value: 3 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
+      uSunDir: { value: new Vector3(0, 0, 1) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI }, uAirless: { value: 1 } } });
+    const rocks = new Rocks(patch);
+    rocks.budgetMs = 1e9;
+    const at = (up: Vector3) => {
+      const g = src.ground(b);
+      const c = { ground: g, material: mat, upos: UPos.from(0, 0, 0), rel: new Vector3(), orient: new Matrix4(), lonLeft: -180, sunBF: new Vector3(0, 0, 1), alt: 2 };
+      for (let i = 0; i < 6; i++) {
+        // two metres above the ground drawn below (the patch follows)
+        const R = patch.owner ? patch.groundRadius(up) : b.radius + src.height(b, up, 1);
+        const cam = up.clone().multiplyScalar(R + 2);
+        c.rel.copy(cam).negate();
+        c.alt = cam.length() - b.radius;
+        patch.update(c);
+        rocks.update(UPos.from(cam.x, cam.y, cam.z));
+      }
+      const r = rocks as unknown as { meshes: { count: number; getMatrixAt(i: number, m: Matrix4): void }[]; origin: Vector3 };
+      let n = 0, worst = 0;
+      const m = new Matrix4(), p = new Vector3(), q = new Quaternion(), sc = new Vector3();
+      for (const mesh of r.meshes) {
+        for (let i = 0; i < mesh.count; i++) {
+          mesh.getMatrixAt(i, m);
+          m.decompose(p, q, sc);
+          p.add(r.origin);
+          const gr = patch.groundRadius(p.clone().normalize());
+          // the rock's centre sits a little below the ground (sunk in), never above it or deep under
+          const below = gr - p.length();
+          if (below < -0.01) worst = Infinity;   // floating
+          // sunk by part of its height, more on a slope (its lowest side), never far under
+          else if (sc.y > 0.05) worst = Math.max(worst, below / Math.max(sc.x, sc.z));
+          n++;
+        }
+      }
+      return { n, worst };
+    };
+    const up = new Vector3(0.3, -0.5, 0.8).normalize();
+    const first = at(up);
+    expect(first.n).toBeGreaterThan(50);
+    expect(first.worst).toBeLessThan(1);
+    // 200 m away: a new patch, and the rocks placed on it
+    const next = at(up.clone().add(new Vector3(1, 0.4, 0).multiplyScalar(200 / b.radius)).normalize());
+    expect(next.n).toBeGreaterThan(50);
+    expect(next.worst).toBeLessThan(1);
+  });
+});
+
 describe('atmosphere over the terrain', () => {
   it('the haze shader is the shell shader marching to the ground point', () => {
     expect(ATMO_HAZE_FRAG).not.toBe(ATMO_FRAG);
@@ -209,5 +266,28 @@ describe('generated planets', () => {
     expect(land).toBeGreaterThan(700);
     expect(maxH).toBeGreaterThan(500);
     expect(maxH).toBeLessThan(20e3);
+  });
+
+  it('quantiles of the height field rise with the fraction', () => {
+    const q = exoQuantiles(41, [0.1, 0.5, 0.9]);
+    expect(q[0]).toBeLessThan(q[1]);
+    expect(q[1]).toBeLessThan(q[2]);
+    expect(Math.abs(q[1] - exoQuantile(41, 0.5))).toBeLessThan(1e-12);
+  });
+
+  it('cratered worlds have craters on the ground, others none', () => {
+    const planet = { name: 'Test c', radius: 2.4e6 } as unknown as ExoPlanet;
+    const smooth = new ExoGround(planet, 1, 7, 0, 0);
+    const pitted = new ExoGround(planet, 1, 7, 0, 1);
+    let diff = 0;
+    for (let i = 0; i < 400; i++) diff = Math.max(diff, Math.abs(pitted.height(dir(i), 500) - smooth.height(dir(i), 500)));
+    expect(diff).toBeGreaterThan(200);
+  });
+
+  it('the shader mirrors the CPU noise and crater cells (see scripts/exoterrain-gpu.mjs for the numbers)', () => {
+    for (const k of ['73856093u', '19349663u', '83492791u', '73244475u']) expect(EXO_FRAG).toContain(k);
+    expect(EXO_FRAG).toContain(`float cellS[3] = float[3](${EXO_CRATER_CELLS.map((c) => c[0].toFixed(1)).join(', ')});`);
+    expect(EXO_FRAG).toContain(`float densS[3] = float[3](${EXO_CRATER_CELLS.map((c) => String(c[1])).join(', ')});`);
+    expect(EXO_FRAG).toContain(`float depS[3] = float[3](${EXO_CRATER_CELLS.map((c) => String(c[2])).join(', ')});`);
   });
 });
