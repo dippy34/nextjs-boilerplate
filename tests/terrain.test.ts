@@ -6,6 +6,7 @@ import type { Body } from '../src/universe/Body';
 import { ExoGround, exoTerrain } from '../src/universe/ExoTerrain';
 import type { ExoPlanet } from '../src/universe/Planets';
 import { TerrainSource } from '../src/universe/Terrain';
+import { ATMO_FRAG, ATMO_HAZE_FRAG } from '../src/render/shaders/atmosphere';
 
 const world = (name: string, r: number, radii = [r, r, r]) => ({ name, radius: r, radii }) as unknown as Body;
 const dir = (i: number) => {
@@ -150,6 +151,15 @@ describe('terrain patch', () => {
     console.log(`shadowed: Sun 3 deg up ${(shadowedLow * 100).toFixed(1)} %, overhead ${(shadowedHigh * 100).toFixed(1)} %`);
     expect(shadowedLow).toBeGreaterThan(0.03);
     expect(shadowedHigh).toBeLessThan(0.01);
+  });
+});
+
+describe('atmosphere over the terrain', () => {
+  it('the haze shader is the shell shader marching to the ground point', () => {
+    expect(ATMO_HAZE_FRAG).not.toBe(ATMO_FRAG);
+    expect(ATMO_HAZE_FRAG).toContain('varying vec3 vPosView;');
+    expect(ATMO_HAZE_FRAG).not.toContain('vWorld');
+    expect(ATMO_HAZE_FRAG).toContain('float t1 = min(ta.y, te);');
   });
 });
 
