@@ -193,6 +193,37 @@ if (which !== 'vr') {
   st = await page.evaluate(() => ({ game: window.app.game.mode, walk: window.app.walk.state }));
   check('w5: V (ship) stops walking and boards the ship', st.game === 'cockpit' && st.walk === 'off', JSON.stringify(st));
   await page.evaluate(() => window.app.game.setMode('off'));
+
+  // a planet of another star: 3 km up, B flies down and walks; gravity from its mass and radius
+  await page.evaluate(() => { const a = window.app; const p = a.findByName('Proxima Cen b'); a.select(p); a.placeNear(p, p.radius * 4, 30, 20); });
+  await frames(10);
+  await page.evaluate(() => {
+    const a = window.app;
+    const p = a.selection;
+    const star = p.system.host.upos.sub(p.upos).normalize();
+    const side = star.clone().set(0, 0, 1).cross(star).normalize();
+    const el = (25 * Math.PI) / 180;
+    const up = star.clone().multiplyScalar(Math.sin(el)).addScaledVector(side, Math.cos(el)).normalize();
+    a.rig.setAnchor(p);
+    a.rig.upos.copy(p.upos).addVec(up, p.radius + 3000);
+    a.rig.lookAt(side.clone().cross(up).normalize(), up);
+  });
+  await page.waitForFunction(() => window.app.terrain.owner === window.app.selection && window.app.terrain.hScale > 0.99, null, { timeout: 300000 });
+  await page.keyboard.press('KeyB');
+  await frames(2);
+  const desc = await page.evaluate(() => window.app.walk.state);
+  await page.waitForFunction(() => window.app.walk.state === 'walk', null, { timeout: 400000 });
+  st = await page.evaluate(() => {
+    const a = window.app; const p = a.selection; const d = a.walk.debug();
+    const r = a.walk.body.pos.length();
+    return { ...d, expect: (6.6743e-11 * p.spec.massKg) / (r * r), name: p.name };
+  });
+  check('w6: from 3 km up, B flies down to the ground of a generated planet and walks', desc === 'descend' && st.state === 'walk' && st.world === st.name && Math.abs(st.eyeH - 1.7) < 0.15, JSON.stringify({ desc, state: st.state, eyeH: st.eyeH }));
+  check('w6: its gravity comes from its mass and radius', Math.abs(st.gravity - st.expect) < 1e-6 && st.gravity > 1, `${st.gravity.toFixed(2)} m/s²`);
+  await page.keyboard.down('KeyW');
+  await sample(page, 12);
+  await page.keyboard.up('KeyW');
+  await page.screenshot({ timeout: 400000, path: path.join(outDir, 'w6-exoplanet-walking.png') });
   await page.close();
 }
 

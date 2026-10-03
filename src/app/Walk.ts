@@ -57,9 +57,12 @@ export function jumpSpeed(g: number): number {
   return Math.min(JUMP_SPEED, Math.sqrt(2 * Math.max(g, 1e-6) * MAX_JUMP_HEIGHT));
 }
 
-/** Take-off speed of a lope hop while running in low gravity (m/s): hops of ~1 s on the Moon. */
+/**
+ * Take-off speed of a lope hop while running in low gravity (m/s). On the Moon this gives hops
+ * about 0.6 s long and strides near 1.8 m, the gait of the Apollo films.
+ */
 export function hopSpeed(g: number): number {
-  return Math.min(0.9, 0.55 * g);
+  return Math.min(0.6, 0.3 * g);
 }
 
 /** Escape velocity (m/s). */
@@ -254,7 +257,7 @@ export class WalkBody {
       this.vel.addScaledVector(nUp, -this.vel.dot(nUp));
       this.onGround = true;
       this.landed = true;
-      this.hopWait = 0.04;
+      this.hopWait = 0.1;
     }
   }
 
