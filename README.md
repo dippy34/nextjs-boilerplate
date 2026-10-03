@@ -258,7 +258,8 @@ Known limitations (planned for later phases unless noted):
   somewhat over-saturated; OPAL maps miss the latitudes Hubble could not see (filled zonally).
 * The Milky Way model is smooth and idealised (arm positions, a clumpy noise for dust and star
   clouds). Other galaxies are procedural discs/spheroids with their catalogued size, type and
-  orientation (no individual stars inside them); nebulae are procedural at their catalogued size
+  orientation; the nearest one becomes a 3D cloud of generated star clouds and stars (arm positions
+  are not the real ones); nebulae are procedural at their catalogued size
   (billboards from afar, a ray-marched volume up close; their shapes are not the real ones);
   globular-cluster stars are generated.
 * Terrain shadows are ray-marched per mesh vertex, with the edge placed per pixel (features

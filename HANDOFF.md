@@ -87,8 +87,16 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   - Eclipses: `BodiesLayer.updateEclipses` picks up to 4 occluders per body; `sunVisible()` in
     `shaders/body.ts` (disc-overlap penumbra, red glow in Earth's shadow); `sunlit` feeds the exposure.
   - Walking: `App.keepAboveGround` keeps eye height within 4 m of the ground unless climbing.
-  - Nebula volumes: `DeepSkyLayer` (VOL_FRAG ray-marches the nearest nebula within ~3 radii, cross-fading
-    with the billboards).
+  - Nebula volumes: `DeepSkyLayer` (VOL_FRAG ray-marches the nearest nebula from 8 radii in, replacing
+    the billboards). Emission nebulae are a cavity around a young cluster: ridged filaments on the
+    walls, teal near the stars, red beyond, dust pillars/lanes; 40 jittered steps (16 in VR).
+  - Galaxy clouds: `GalaxiesLayer` turns the nearest galaxy into a 3D cloud from 40 radii in (`fillCloud`:
+    disc, arms, bar, bulge, single stars; sprites of fixed size in space, so surface brightness holds
+    at any distance and flux is kept below a pixel; distances in the shader are in galaxy radii, as
+    metres squared overflow 32-bit floats); the disc picture fades out as the cloud fades in.
+  - Spacecraft models (`SpacecraftLayer.parts`): ISS (Sun-tracking arrays), Hubble, JWST, Voyager,
+    New Horizons built from parts, baked per finish (`bake`); HULL_FRAG adds cells/foil/quilting/truss
+    lattice from the part-local position (`aLoc`).
   - Tests: `scripts/terrain.mjs` (landing terrain, the Tycho / Olympus Mons / Everest patches and the
     atmosphere over terrain, 14 checks),
     `scripts/places.mjs` (rings, comet, lunar eclipse, Jupiter moon shadow, landmarks, inside the
