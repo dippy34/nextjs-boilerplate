@@ -252,9 +252,10 @@ Known limitations (planned for later phases unless noted):
   orientation (no individual stars inside them); nebulae are procedural at their catalogued size
   (billboards from afar, a ray-marched volume up close; their shapes are not the real ones);
   globular-cluster stars are generated.
-* Terrain shadows are computed per mesh vertex (soft, with blocky edges in the middle distance);
-  elevation models are coarse (5–10 km per sample) with generated relief below that, which is
-  plausible, not mapped. Generated planets' atmospheres are Earth-like for every temperate world.
+* Terrain shadows are ray-marched per mesh vertex, with the edge placed per pixel (features
+  smaller than the mesh spacing cast none). The global elevation models are coarse (5–10 km per
+  sample; 0.24–0.9 km in the patches around the landmarks) with generated relief below that, which
+  is plausible, not mapped. Generated planets' atmospheres are Earth-like for every temperate world.
 * Generated planets are labelled as such; their counts and sizes follow occurrence statistics, not
   observations. Orbit orientations and phases of most real exoplanets are unmeasured and chosen
   deterministically.
@@ -283,7 +284,7 @@ Known limitations (planned for later phases unless noted):
 2. Planet rendering: cube-sphere quadtree terrain from real DEMs, Bruneton atmospheric scattering,
    oceans, clouds, space-to-surface descent and surface walking.
 3. Nebulae and star clusters (OpenNGC), a finer Milky Way seen from outside.
-4. Sharper terrain (streamed elevation tiles), terrain shadows, Earth terrain; more stations and ship types.
+4. Sharper terrain everywhere (streamed elevation tiles), Earth terrain; more stations and ship types.
 5. Full UI: search panel, bookmarks, settings and quality presets.
 6. Polish: lens flares, spinning (Kerr) black holes, performance tuning.
 

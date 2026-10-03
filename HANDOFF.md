@@ -57,7 +57,9 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     as 16-bit-in-RGB PNG), `src/universe/Terrain.ts` (heights: elevation model + generated hills and
     craters), `src/render/TerrainPatch.ts` (polar grid under the explorer, built a few rings per
     frame, drawn with the body's material; the sphere gets a hole via `uHoleDir`/`uHoleCos`).
-    `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`.
+    `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`. Shadows: `aSun`
+    is the Sun's clearance over the relief in penumbra widths (ray-marched per vertex, signed),
+    and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`.
   - Cockpit HUD (`src/game/HudMarkers.ts`): target bracket, flight-path marker, boresight.
   - Generated planets: `src/universe/ExoTerrain.ts` (CPU copy of EXO_FRAG `terrain()` so ground matches
     colours), Earth-like atmosphere shells for temperate/ocean types (`Atmospheres.updateExo`).
@@ -75,22 +77,24 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   - Walking: `App.keepAboveGround` keeps eye height within 4 m of the ground unless climbing.
   - Nebula volumes: `DeepSkyLayer` (VOL_FRAG ray-marches the nearest nebula within ~3 radii, cross-fading
     with the billboards).
-  - Tests: `scripts/terrain.mjs` (landing terrain, 9 checks), `scripts/places.mjs` (rings, comet,
-    lunar eclipse, Jupiter moon shadow).
+  - Tests: `scripts/terrain.mjs` (landing terrain and the Tycho / Olympus Mons patches, 11 checks),
+    `scripts/places.mjs` (rings, comet, lunar eclipse, Jupiter moon shadow, landmarks, inside the
+    Orion Nebula).
 
 ## Next
 
 1. Quest performance pass on a real headset (cockpit, planet/galaxy/nebula shaders, tile atlas size,
    black hole steps).
-2. Terrain: stream sharper elevation tiles (the full LOLA/MOLA resolution), shadows, Earth;
-   volumetric nebulae up close, OpenNGC for more deep-sky objects, a sharper galaxy impostor from outside.
+2. Terrain: stream sharper elevation tiles everywhere (the full LOLA/MOLA resolution; today only
+   the landmark patches have it), Earth; OpenNGC for more deep-sky objects, a sharper galaxy
+   impostor from outside.
 3. Unity port planning (the data pipeline outputs are engine-agnostic JSON/JPEG).
 
 ## Checks before every deploy
 
 `npm run typecheck`, `npm test`, then with `npx vite preview --port 4173` running:
 `node scripts/interact.mjs http://127.0.0.1:4173/ out`, `node scripts/verify.mjs ...`,
-`node scripts/vr.mjs http://127.0.0.1:4173/ out` (IWER Quest 3 emulator; 26 checks),
+`node scripts/vr.mjs http://127.0.0.1:4173/ out` (IWER Quest 3 emulator; 27 checks),
 `node scripts/game.mjs http://127.0.0.1:4173/ out` (game mode; 16 checks),
 `node scripts/terrain.mjs http://127.0.0.1:4173/ out` (landing terrain),
 `node scripts/places.mjs http://127.0.0.1:4173/ out` (rings, comets, eclipses). Run them one at a time
