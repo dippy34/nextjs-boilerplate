@@ -104,6 +104,8 @@ export class App {
   craft!: SpacecraftLayer;
   /** close-up map tiles for the body being approached */
   tiles!: TileDetail;
+  private photoMode = false;
+  private labelsBeforePhoto = true;
   /** real 3D ground under the explorer near solid worlds */
   readonly terrain = new TerrainPatch();
   /** comas and tails of the active comets */
@@ -325,6 +327,14 @@ export class App {
         case 'KeyG': if (this.selection) this.goTo(this.selection); break;
         case 'KeyC': if (this.selection) this.center(this.selection); break;
         case 'KeyL': this.labels.enabled = !this.labels.enabled; this.hud.toast(`Labels ${this.labels.enabled ? 'on' : 'off'}`); break;
+        case 'KeyU': {
+          // photo mode: panels and labels off (or back to how they were)
+          this.photoMode = !this.photoMode;
+          this.hud.setHidden(this.photoMode);
+          if (this.photoMode) { this.labelsBeforePhoto = this.labels.enabled; this.labels.enabled = false; } else this.labels.enabled = this.labelsBeforePhoto;
+          this.hud.toast(this.photoMode ? 'Photo mode (U to leave, P to save a PNG)' : 'Photo mode off', 1.5);
+          break;
+        }
         case 'KeyO': this.orbits.enabled = !this.orbits.enabled; this.hud.toast(`Orbits ${this.orbits.enabled ? 'on' : 'off'}`); break;
         case 'KeyM': this.orbits.showMinor = !this.orbits.showMinor; this.hud.toast(`Minor-body orbits ${this.orbits.showMinor ? 'on' : 'off'}`); break;
         case 'KeyH': case 'F1': this.hud.toggleHelp(); e.preventDefault(); break;

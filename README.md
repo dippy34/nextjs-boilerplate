@@ -81,6 +81,7 @@ Deploy to GitHub Pages: `bash scripts/deploy-pages.sh` (builds and force-pushes 
 | V · J · X | Spaceship (cockpit / chase / off) · warp drive to the selection · brake |
 | K · N | Missions and discoveries · ship sound on/off |
 | T | Tour: Saturn's rings, Olympus Mons, the Apollo 11 site, an eclipse, a comet, a black hole … |
+| U | Photo mode: hide panels and labels (P saves a PNG) |
 
 **Landing:** go to a solid world (the Moon, Mars, Mercury, Ganymede, Callisto … or a rocky planet of
 another star) and keep descending (F; in VR, point the left controller down and push the left stick): below about 40 km the sphere turns

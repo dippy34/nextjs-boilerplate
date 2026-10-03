@@ -38,6 +38,7 @@ const HELP: [string, string][] = [
   ['X', 'Brake (in the ship)'],
   ['K / N', 'Missions & discoveries / ship sound on-off'],
   ['T', 'Tour: places worth a visit'],
+  ['U', 'Photo mode: hide panels and labels'],
   ['H', 'Toggle this help'],
 ];
 
@@ -127,6 +128,11 @@ export class Hud {
     this.searchList.innerHTML = res
       .map((r) => `<div class="result" data-id="${escapeHtml(r.id)}"><span>${escapeHtml(r.label)}</span><small>${escapeHtml(r.detail)}</small></div>`)
       .join('');
+  }
+
+  /** Photo mode: hide every panel (toasts still show briefly). */
+  setHidden(hidden: boolean): void {
+    for (const el of [this.top, this.time, this.info, this.bottom, this.help]) el.style.visibility = hidden ? 'hidden' : '';
   }
 
   toggleHelp(): void {
