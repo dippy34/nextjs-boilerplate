@@ -96,6 +96,13 @@ export class CometTails {
     }
   }
 
+  private drawn: Comet[] = [];
+
+  /** Is an active comet (one being drawn) within `dist` metres of `pos`? */
+  near(pos: UPos, dist: number): boolean {
+    return this.drawn.some((c) => c.upos.sub(pos, new Vector3()).length() < dist);
+  }
+
   /** coma radius (m) of a comet at `r` AU from the Sun, from its total-magnitude parameters */
   static comaRadius(m1: number, k1: number, r: number): number {
     const mr = m1 + k1 * Math.log10(Math.max(r, 0.05));     // brightness "at 1 AU from the observer"
@@ -118,6 +125,7 @@ export class CometTails {
       if (c === selection || c.apparentMag < 9 || d < 0.3) scored.push({ c, r, score });
     }
     scored.sort((a, b) => a.score - b.score);
+    this.drawn = scored.slice(0, MAX).map((e) => e.c);
     const viewDir = new Vector3();
     for (let i = 0; i < MAX; i++) {
       const m = this.meshes[i];

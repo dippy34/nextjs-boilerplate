@@ -37,6 +37,14 @@ export class RingSpot implements SpaceObject {
 
   get parentObject(): SpaceObject { return this.planet; }
 
+  /** Direction (world) to arrive from: outward from the planet, a little above the ring plane. */
+  approachDir(): Vector3 {
+    const f = ringFrame(this.planet.orientation);
+    const out = this.local.clone().setZ(0).normalize().applyMatrix4(f);
+    const pole = new Vector3().setFromMatrixColumn(f, 2);
+    return out.addScaledVector(pole, 0.15).normalize();
+  }
+
   get upos(): UPos {
     return this.planet.upos.clone().addVec(this.local.clone().applyMatrix4(ringFrame(this.planet.orientation)));
   }

@@ -12,6 +12,7 @@ import { Galaxy } from '../universe/Galaxies';
 import { DeepSkyObject } from '../universe/DeepSky';
 import { ExoPlanet } from '../universe/Planets';
 import { RingSpot } from '../universe/RingSpot';
+import { Landmark } from '../universe/Landmarks';
 import { Spacecraft } from '../universe/Spacecraft';
 import { Body, type SpaceObject } from '../universe/Body';
 import { CatalogStar } from '../universe/Stars';
@@ -387,6 +388,7 @@ export class VRSupport {
     if (obj instanceof Galaxy) return obj.radius * 2.4;
     if (obj instanceof DeepSkyObject) return obj.radius * (obj.data.kind === 'open' ? 1.6 : 2.6);
     if (obj instanceof RingSpot) return 60;
+    if (obj instanceof Landmark) return obj.def.view;
     return obj.radius > 0 ? obj.radius * 80 : 3e7;
   }
 
@@ -411,12 +413,14 @@ export class VRSupport {
           const cam = this.app.renderer.camera;
           cam.updateMatrixWorld(true);
           const headFwd = new Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new Quaternion()));
-          if (tr.target instanceof BlackHole || tr.target instanceof MilkyWay || tr.target instanceof Galaxy) {
+          if (tr.target instanceof BlackHole || tr.target instanceof MilkyWay || tr.target instanceof Galaxy || tr.target instanceof Landmark || tr.target instanceof RingSpot) {
             // eyes closed: move round to the side the destination is best seen from
-            const from = rig.upos.sub(tr.target.upos, new Vector3());
+            const t = tr.target;
+            const from = rig.upos.sub(t.upos, new Vector3());
             const dist = from.length();
-            const dir = tr.target instanceof BlackHole ? tr.target.approachDir(from) : tr.target instanceof Galaxy ? tr.target.viewDir(from) : tr.target.viewDir();
-            rig.upos.copy(tr.target.upos).addVec(dir, dist);
+            const dir = t instanceof BlackHole ? t.approachDir(from) : t instanceof Galaxy ? t.viewDir(from) : t instanceof MilkyWay ? t.viewDir()
+              : t instanceof Landmark ? t.approachDir(this.app.system.sun.upos.sub(t.world.upos, new Vector3()).normalize()) : (t as RingSpot).approachDir();
+            rig.upos.copy(t.upos).addVec(dir, dist);
           }
           const toTarget = tr.target.upos.sub(rig.upos, new Vector3()).normalize();
           rig.quat.premultiply(new Quaternion().setFromUnitVectors(headFwd, toTarget)).normalize();

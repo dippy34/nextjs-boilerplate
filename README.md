@@ -14,9 +14,11 @@ positions (ISS, Hubble, JWST, Voyager 1 & 2, New Horizons, Parker Solar Probe, E
 Lucy, Psyche) · **47 nearby galaxies** (Andromeda, Triangulum, the Magellanic Clouds, the Whirlpool,
 the Sombrero, Centaurus A, M87 …) · **41 nebulae and star clusters** (the Orion, Carina, Eagle,
 Ring, Helix and Crab nebulae, the Pleiades, Omega Centauri, 47 Tucanae …) · the Milky Way from outside ·
-**real 3D ground to land on**: NASA elevation models for the Moon, Mars (Olympus Mons, Valles Marineris)
-and Mercury, generated hills, craters and shadows on other moons, and on rocky planets of other stars
-(their mountains and seas match their colours; temperate worlds have blue skies) · **inside Saturn's
+**real 3D ground to land on**: NASA elevation models for the Moon, Mars and Mercury, with a tour of
+landmarks to fly to (Olympus Mons, Valles Marineris, the Curiosity and Perseverance sites, the Apollo 11
+site, Tycho, Copernicus, Shackleton at the lunar south pole, the Caloris Basin), generated hills, craters
+and shadows on other moons, and on rocky planets of other stars (their mountains and seas match their
+colours; temperate worlds have blue skies) · **inside Saturn's
 rings** among their ice (search "rings") · comets near the Sun with comas and tails · **eclipses at their
 real times** (moon shadows crossing Jupiter, the Moon turning copper in Earth's shadow).
 
@@ -91,7 +93,8 @@ Open the link in the headset's browser (Meta Quest Browser, or Chrome/Edge on a 
 SteamVR headset) and press **ENTER VR**. The view fades in and the **menu** opens in front of you.
 
 * **Menu** (Y on the left controller, or MENU on your wrist): tabs for Planets, Moons (by planet),
-  Small worlds (dwarf planets, big asteroids, famous comets), Stars, **Search** (virtual keyboard over
+  Small worlds (dwarf planets, big asteroids, famous comets), Stars, Exoplanets, Nebulae, Galaxies,
+  Craft, **Places** (landmarks on the Moon, Mars and Mercury, and Saturn's rings), **Search** (virtual keyboard over
   every planet, moon, asteroid, comet and 12,585 named stars) and Settings. Every item shows a
   thumbnail rendered from the real map and its live distance; **point and pull the trigger** to fly there.
 * **Travel** blinks, turns the view so the destination is straight ahead, then flies there in a

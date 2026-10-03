@@ -242,6 +242,25 @@ const bhLum = await headsetBrightness();
 check('the black hole view is not black', bhLum.litFraction > 0.02, JSON.stringify(bhLum));
 await page.screenshot({ path: path.join(outDir, 'vr8-black-hole.png') });
 
+// 8b. Places tab: fly to the Apollo 11 landing site; the Moon's real terrain is drawn there
+await press('left', 'y-button');
+await page.waitForFunction(() => window.app.vr.menu.isOpen, null, { timeout: 30000 });
+await aimRegion('a.vr.menu.panel', 'tab:places');
+await frames(2);
+await press('right', 'trigger');
+await aimRegion('a.vr.menu.panel', 'go:place:Apollo 11 landing site');
+await frames(2);
+await press('right', 'trigger');
+await waitTravel();
+await page.waitForFunction(() => window.app.terrain.owner?.name === 'Moon', null, { timeout: 120000 }).catch(() => undefined);
+st = await page.evaluate(() => {
+  const a = window.app;
+  const l = a.findByName('Apollo 11 landing site');
+  return { terrain: a.terrain.owner?.name ?? null, km: l.upos.sub(a.rig.upos).length() / 1e3 };
+});
+check('Places tab flies to the Apollo 11 site over real terrain', st.terrain === 'Moon' && st.km > 2 && st.km < 8, JSON.stringify(st));
+await page.screenshot({ path: path.join(outDir, 'vr8b-apollo-11.png') });
+
 // 9. Exit VR (as the headset's system menu would): desktop rendering resumes with an un-rotated camera
 await page.evaluate(() => window.app.vr.session.end());
 await page.waitForFunction(() => !window.app.vr.active && !window.app.renderer.presenting, null, { timeout: 10000 });

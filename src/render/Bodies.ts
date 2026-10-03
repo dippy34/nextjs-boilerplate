@@ -641,6 +641,12 @@ export class BodiesLayer {
   private occluders: Body[] | null = null;
   /** fraction of sunlight reaching each body's centre this frame (eclipses), with the reddened light in a planet's shadow */
   readonly sunlit = new Map<Body, number>();
+
+  /** Does some body's shadow fall on `b` this frame? */
+  eclipsed(b: Body): boolean {
+    const m = this.meshes.get(b);
+    return !!m && ((m.material as ShaderMaterial).uniforms.uOccN?.value as number) > 0;
+  }
   /**
    * Eclipses: for each resolved body, up to four bodies that can stand between it and the Sun
    * this frame (moons on their planet, the planet on its moons, moons on each other).

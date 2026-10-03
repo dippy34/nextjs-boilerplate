@@ -7,6 +7,7 @@ import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
 import { TerrainPatch } from '../render/TerrainPatch';
 import { RingSpot } from '../universe/RingSpot';
+import { Landmark, LANDMARKS } from '../universe/Landmarks';
 import { CometTails } from '../render/CometTails';
 import { ExoPlanetLayer, type ExoView } from '../render/ExoPlanetLayer';
 import { GalaxyGlow } from '../render/GalaxyLayer';
@@ -450,7 +451,16 @@ export class App {
     }
     else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 4.5, 2e7);
     else if (obj instanceof Comet) d = obj.radius > 0 ? obj.radius * 60 : 2e7;
-    else if (obj instanceof RingSpot) d = 60;
+    else if (obj instanceof RingSpot) {
+      this.rig.flyTo(obj, 60, undefined, true, obj.approachDir());
+      this.hud.toast(`Going to ${obj.name}`);
+      return;
+    } else if (obj instanceof Landmark) {
+      // arrive above the place from the side lit by the Sun, looking down at it
+      this.rig.flyTo(obj, obj.def.view, undefined, true, obj.approachDir(this.system.sun.upos.sub(obj.world.upos, new Vector3()).normalize()));
+      this.hud.toast(`Going to ${obj.name}`);
+      return;
+    }
     else d = Math.max(obj.radius * 4, 1e6);
     this.rig.flyTo(obj, d);
     this.hud.toast(`Going to ${obj.name}`);
@@ -470,9 +480,22 @@ export class App {
   }
 
   private ringSpot: RingSpot | null = null;
+  private landmarkCache = new Map<string, Landmark>();
+
+  /** Named places on the landing terrain (Olympus Mons, the Apollo 11 site …). */
+  get landmarks(): Landmark[] {
+    for (const d of LANDMARKS) {
+      if (this.landmarkCache.has(d.name)) continue;
+      const w = this.system.bodies.find((b) => b.name === d.body);
+      if (w) this.landmarkCache.set(d.name, new Landmark(d, w));
+    }
+    return [...this.landmarkCache.values()];
+  }
 
   findByName(name: string): SpaceObject | null {
     const n = name.toLowerCase();
+    const lm = this.landmarks.find((l) => l.name.toLowerCase() === n || l.name.toLowerCase().startsWith(`${n} (`));
+    if (lm) return lm;
     if (/^(saturn'?s? rings?|rings of saturn|the rings|b ring)$/.test(n)) {
       const saturn = this.system.bodies.find((x) => x.name === 'Saturn');
       if (saturn) this.ringSpot ??= new RingSpot(saturn, this.system.sun.upos.sub(saturn.upos, new Vector3()).normalize());
@@ -559,6 +582,10 @@ export class App {
       const s = Math.min(...["Saturn's rings", 'Saturn rings', 'rings', 'B ring'].map(score).filter((x) => x >= 0));
       if (Number.isFinite(s)) out.push({ label: "Saturn's rings", detail: 'fly into the B ring, among its ice', id: 'place:rings', score: s + 0.1 });
     }
+    this.landmarks.forEach((l, i) => {
+      const sc = Math.min(...[l.name, l.def.body, 'landing', 'place'].map(score).filter((x) => x >= 0));
+      if (Number.isFinite(sc)) out.push({ label: l.name, detail: `place on ${l.def.body}`, id: `lm:${i}`, score: sc + 0.15 });
+    });
     this.craft.craft.forEach((c, i) => {
       const sc = Math.min(...[c.name, 'spacecraft', 'probe'].map(score).filter((x) => x >= 0));
       if (Number.isFinite(sc)) out.push({ label: c.name, detail: 'spacecraft', id: `sc:${i}`, score: sc - 0.1 });
@@ -581,6 +608,7 @@ export class App {
     if (kind === 'dso') return this.deepSky.objects[Number(v)] ?? null;
     if (kind === 'xp') return this.exoPlanet(Number(v), Number(id.split(':')[2]));
     if (kind === 'place' && v === 'rings') return this.findByName("Saturn's rings");
+    if (kind === 'lm') return this.landmarks[Number(v)] ?? null;
     return null;
   }
 

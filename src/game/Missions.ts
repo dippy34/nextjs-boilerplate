@@ -42,6 +42,13 @@ const DEFS: Def[] = [
   { id: 'andromeda', title: 'Visit Andromeda', detail: 'Within 3 of its radii', check: (a, near) => near(a.findByName('Andromeda Galaxy'), 3) },
   { id: 'dock', title: 'Dock at a space station', detail: 'Ship mode: fly slowly into a station docking port', check: (a) => !!a.game?.docked },
   { id: 'land', title: 'Land on another world', detail: 'Ship mode: come down slowly onto any solid surface', check: (a) => !!a.game?.landed },
+  { id: 'ringdive', title: "Dive into Saturn's rings", detail: 'Float among the ice of the B ring (search "rings")', check: (a) => !!a.bodies.ringParticles?.mesh.visible },
+  { id: 'shadow', title: 'Catch a moon shadow', detail: 'See a moon\'s shadow on its planet (Jupiter\'s moons cast one almost daily)', check: (a) => {
+    const j = a.findByName('Jupiter');
+    const v = j instanceof Body ? a.bodies.views.get(j) : undefined;
+    return !!v && v.resolved && v.pixelRadius > 80 && a.bodies.eclipsed(j as Body);
+  } },
+  { id: 'comet', title: 'Ride with a comet', detail: 'Within a million km of an active comet near the Sun', check: (a) => a.cometTails.near(a.rig.upos, 1e9) },
   { id: 'alien', title: 'Stand on an alien world', detail: 'Ship mode: land on a rocky planet of another star', check: (a) => a.game?.landed instanceof ExoPlanet },
   { id: 'olympus', title: 'Fly over Olympus Mons', detail: 'Below 40 km over the tallest volcano known (Mars, 18.7° N 226° E)', check: (a) => {
     const o = over(a, 'Mars');

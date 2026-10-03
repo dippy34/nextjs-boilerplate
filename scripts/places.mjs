@@ -150,6 +150,47 @@ if (st) {
   await page.screenshot({ path: path.join(outDir, 'p5-jupiter-shadow.png') });
 }
 
+// 8. landmarks: Valles Marineris and the Apollo 11 site, seen from where "go to" arrives
+for (const [id, name, body] of [['p6-valles-marineris', 'Valles Marineris', 'Mars'], ['p7-apollo-11', 'Apollo 11 landing site', 'Moon']]) {
+  await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=${body}&dist=3`, { waitUntil: 'load' });
+  await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
+  await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
+  // the hour when the Sun stands about 30 degrees over the place (the clock is paused)
+  await page.evaluate((n) => {
+    const a = window.app;
+    const l = a.findByName(n);
+    const jd0 = a.clock.jdTdb;
+    let best = jd0, err = Infinity;
+    for (let h = 0; h < 26; h += 0.25) {
+      a.system.update(jd0 + h / 24);
+      const el = Math.asin(a.system.sun.upos.sub(l.world.upos).normalize().dot(l.up())) * 57.3;
+      if (Math.abs(el - 30) < err) { err = Math.abs(el - 30); best = jd0 + h / 24; }
+    }
+    a.system.update(jd0);
+    a.clock.jdTdb = best;
+  }, name);
+  await frames(3);
+  const found = await page.evaluate((n) => {
+    const a = window.app;
+    const l = a.findByName(n);
+    if (!l) return null;
+    a.select(l);
+    const sun = a.system.sun.upos.sub(l.world.upos).normalize();
+    const dir = l.approachDir(sun);
+    a.rig.upos.copy(l.upos).addVec(dir, l.def.view);
+    a.rig.lookAt(dir.clone().negate(), l.up());
+    return { name: l.name, sunUp: sun.dot(l.up()) };
+  }, name);
+  console.log('landmark', JSON.stringify(found));
+  await page.waitForFunction((b) => window.app.terrain.owner?.name === b, body, { timeout: 120000 }).catch(() => undefined);
+  await frames(8);
+  const lt = await page.evaluate(() => window.app.terrain.owner?.name ?? null);
+  check(`${name}: found and shown on real terrain`, !!found && lt === body, JSON.stringify({ found, terrain: lt }));
+  await page.screenshot({ path: path.join(outDir, `${id}.png`), timeout: 180000 });
+}
+st = await page.evaluate(() => window.app.searchItems('mars').filter((r) => r.id.startsWith('lm:')).map((r) => r.label));
+check('search lists places on Mars', st.length >= 3, JSON.stringify(st));
+
 check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 const failed = results.filter((r) => !r.ok).length;
 console.log(`${results.length - failed}/${results.length} passed`);

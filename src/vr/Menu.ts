@@ -1,4 +1,6 @@
 import { Vector3 } from 'three';
+import { Landmark } from '../universe/Landmarks';
+import { RingSpot } from '../universe/RingSpot';
 import type { App } from '../app/App';
 import { formatUtc } from '../core/time';
 import { formatDistance, LY } from '../core/units';
@@ -27,8 +29,8 @@ export interface MenuHost {
   exitVR(): void;
 }
 
-type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'exo' | 'nebulae' | 'holes' | 'craft' | 'search' | 'settings';
-const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small'], ['stars', 'Stars'], ['exo', 'Exoplanets'], ['nebulae', 'Nebulae'], ['holes', 'Galaxies'], ['craft', 'Craft'], ['search', 'Search'], ['settings', 'Settings']];
+type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'exo' | 'nebulae' | 'holes' | 'craft' | 'places' | 'search' | 'settings';
+const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small'], ['stars', 'Stars'], ['exo', 'Exoplanets'], ['nebulae', 'Nebulae'], ['holes', 'Galaxies'], ['craft', 'Craft'], ['places', 'Places'], ['search', 'Search'], ['settings', 'Settings']];
 const NEBULAE = ['Orion Nebula', 'Carina Nebula', 'Eagle Nebula', 'Lagoon Nebula', 'Ring Nebula', 'Helix Nebula', 'Crab Nebula', 'Veil Nebula (Cygnus Loop)',
   'Tarantula Nebula', 'Pleiades', 'Omega Centauri', 'Hercules Cluster (M13)'];
 /** famous confirmed planets of other stars (NASA Exoplanet Archive names) */
@@ -111,6 +113,7 @@ export class VRMenu {
         if (!this.exoList.length) p.text('Loading the exoplanet catalogue…', area.x + 20, area.y + 40, 28, COLORS.dim);
         break;
       case 'craft': this.paintGrid(p, area, app.craft.craft.filter((c) => c.valid), 4, 3); break;
+      case 'places': this.paintGrid(p, area, [app.findByName("Saturn's rings"), ...app.landmarks].filter(nonNull), 3, 4); break;
       case 'nebulae': this.paintGrid(p, area, NEBULAE.map((n) => app.findByName(n)).filter(nonNull), 4, 3); break;
       case 'holes': this.paintGrid(p, area, [app.milkyWay, ...GALAXIES.map((n) => app.findByName(n)).filter(nonNull), ...HOLES.slice(0, 6).map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull)], 4, 4); break;
       case 'search': this.paintSearch(p, area); break;
@@ -123,6 +126,8 @@ export class VRMenu {
     const d = o.upos.sub(app.rig.upos, new Vector3()).length();
     if (o instanceof CatalogStar) return `${(d / LY).toFixed(d < 10 * LY ? 2 : 1)} light years`;
     if (o instanceof MilkyWay) return 'our galaxy, from outside';
+    if (o instanceof Landmark) return `on ${o.def.body} · ${o.def.about}`;
+    if (o instanceof RingSpot) return 'among the ice of the B ring';
     if (o instanceof Galaxy) {
       const mly = d / LY / 1e6;
       return `galaxy · ${mly < 1 ? `${Math.round(mly * 1000)} thousand ly` : `${mly.toFixed(mly < 10 ? 1 : 0)} million ly`}`;
@@ -150,7 +155,8 @@ export class VRMenu {
 
   private drawThumb(p: Panel, o: SpaceObject, cx: number, cy: number, r: number): void {
     const c = p.ctx;
-    const idx = this.thumbIndex?.bodies[o.name];
+    // places show the world they are on
+    const idx = this.thumbIndex?.bodies[o instanceof Landmark ? o.world.name : o instanceof RingSpot ? 'Saturn' : o.name];
     if (this.thumbs && this.thumbIndex && idx) {
       const s = this.thumbIndex.cell;
       c.drawImage(this.thumbs, idx[0] * s, idx[1] * s, s, s, cx - r, cy - r, 2 * r, 2 * r);

@@ -59,6 +59,16 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     frame, drawn with the body's material; the sphere gets a hole via `uHoleDir`/`uHoleCos`).
     `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`.
   - Cockpit HUD (`src/game/HudMarkers.ts`): target bracket, flight-path marker, boresight.
+  - Generated planets: `src/universe/ExoTerrain.ts` (CPU copy of EXO_FRAG `terrain()` so ground matches
+    colours), Earth-like atmosphere shells for temperate/ocean types (`Atmospheres.updateExo`).
+  - Saturn's rings up close: `src/render/RingParticles.ts` (instanced ice, density from the ring
+    opacity texture, inertial ring frame from `universe/RingSpot.ts`, which is also the search target).
+  - Comets: `src/render/CometTails.ts` (coma/ion/dust quad per active comet, sky display gain).
+  - Eclipses: `BodiesLayer.updateEclipses` picks up to 4 occluders per body; `sunVisible()` in
+    `shaders/body.ts` (disc-overlap penumbra, red glow in Earth's shadow); `sunlit` feeds the exposure.
+  - Walking: `App.keepAboveGround` keeps eye height within 4 m of the ground unless climbing.
+  - Tests: `scripts/terrain.mjs` (landing terrain, 9 checks), `scripts/places.mjs` (rings, comet,
+    lunar eclipse, Jupiter moon shadow).
 
 ## Next
 
@@ -74,7 +84,8 @@ procedural generation for the rest. Never use SpaceEngine's own files.
 `node scripts/interact.mjs http://127.0.0.1:4173/ out`, `node scripts/verify.mjs ...`,
 `node scripts/vr.mjs http://127.0.0.1:4173/ out` (IWER Quest 3 emulator; 26 checks),
 `node scripts/game.mjs http://127.0.0.1:4173/ out` (game mode; 16 checks),
-`node scripts/terrain.mjs http://127.0.0.1:4173/ out` (landing terrain). Run them one at a time
+`node scripts/terrain.mjs http://127.0.0.1:4173/ out` (landing terrain),
+`node scripts/places.mjs http://127.0.0.1:4173/ out` (rings, comets, eclipses). Run them one at a time
 (parallel runs starve the software renderer and screenshots time out). `SKIP_BUILD=1 bash
 scripts/deploy-pages.sh` publishes the exact build that was verified. On a machine
 with a real GPU these run far faster than in the cloud container (software rendering, ~1 fps).
