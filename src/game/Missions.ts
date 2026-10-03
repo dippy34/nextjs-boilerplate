@@ -6,6 +6,7 @@ import { Galaxy } from '../universe/Galaxies';
 import { ExoPlanet } from '../universe/Planets';
 import { Spacecraft } from '../universe/Spacecraft';
 import { baseRadius } from '../universe/Terrain';
+import { LANDMARKS } from '../universe/Landmarks';
 import { CatalogStar } from '../universe/Stars';
 import { cameraBodyFixed } from '../render/TerrainPatch';
 
@@ -29,6 +30,19 @@ function arc(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const r = Math.PI / 180;
   const c = Math.sin(lat1 * r) * Math.sin(lat2 * r) + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon1 - lon2) * r);
   return Math.acos(Math.max(-1, Math.min(1, c))) / r;
+}
+
+/** Below `altKm` and within `km` (ground distance) of one of the named landmarks. */
+function nearSite(app: App, names: string[], km: number, altKm: number): boolean {
+  for (const n of names) {
+    const d = LANDMARKS.find((l) => l.name === n);
+    if (!d) continue;
+    const o = over(app, d.body);
+    const b = app.findByName(d.body);
+    if (!o || !(b instanceof Body)) continue;
+    if (o.alt < altKm * 1e3 && (arc(o.lat, o.lon, d.lat, d.lon) * Math.PI) / 180 * b.radius < km * 1e3) return true;
+  }
+  return false;
 }
 
 const DEFS: Def[] = [
@@ -64,6 +78,12 @@ const DEFS: Def[] = [
     const o = over(a, 'Earth');
     return !!o && o.alt < 1.6e3 && arc(o.lat, o.lon, 36.06, -112.14) < 0.135;
   } },
+  { id: 'apollo', title: 'Visit an Apollo landing site', detail: 'Below 3 km, within 5 km of where Apollo 11, 15 or 17 landed', check: (a) =>
+    nearSite(a, ['Apollo 11 landing site', 'Apollo 15 landing site', 'Apollo 17 landing site'], 5, 3) },
+  { id: 'rovers', title: 'Fly over a Mars rover', detail: 'Below 5 km, within 10 km of the Spirit, Opportunity, Curiosity or Perseverance landing sites', check: (a) =>
+    nearSite(a, ['Spirit (Gusev crater)', 'Opportunity (Eagle crater)', 'Gale Crater (Curiosity)', 'Jezero Crater (Perseverance)'], 10, 5) },
+  { id: 'occator', title: "See Ceres' bright spots", detail: 'Below 30 km over Occator crater, on the dwarf planet Ceres', check: (a) =>
+    nearSite(a, ['Occator crater (Ceres)'], 50, 30) },
   { id: 'southpole', title: "Land at the Moon's south pole", detail: 'Ship mode: touch down south of 80° S, where Artemis astronauts are headed', check: (a) => {
     const o = over(a, 'Moon');
     return !!o && a.game?.landed?.name === 'Moon' && o.lat < -80;
