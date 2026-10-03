@@ -8,7 +8,7 @@ import { UPos } from '../core/upos';
 import type { SpaceObject } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
-import { FIX_LOGDEPTH, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { FIX_LOGDEPTH, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
 
 const ASTEROID_VERT = /* glsl */ `
 #include <common>
@@ -56,6 +56,7 @@ void main() {
   gl_Position = projectView(viewMatrix * vec4(rel, 1.0));
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
+${POINT_CLIP}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy;
   vColor = aOrb1.w > 9.5 ? vec3(0.95, 0.9, 1.0) : vec3(1.0, 0.93, 0.82);
@@ -80,6 +81,7 @@ void main() {
   gl_Position = projectView(viewMatrix * vec4(rel, 1.0));
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
+${POINT_CLIP}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy; vColor = vec3(0.75, 0.95, 1.0);
 }`;

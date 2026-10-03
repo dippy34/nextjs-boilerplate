@@ -5,6 +5,9 @@ import { formatDistance, LY } from '../core/units';
 import { BlackHole } from '../universe/BlackHoles';
 import { Body, type SpaceObject } from '../universe/Body';
 import { MilkyWay } from '../universe/MilkyWay';
+import { Galaxy } from '../universe/Galaxies';
+import { ExoPlanet, type PlanetType } from '../universe/Planets';
+import { Spacecraft } from '../universe/Spacecraft';
 import { CatalogStar } from '../universe/Stars';
 import { COLORS, Panel } from './Panel';
 
@@ -23,10 +26,18 @@ export interface MenuHost {
   exitVR(): void;
 }
 
-type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'holes' | 'search' | 'settings';
-const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small worlds'], ['stars', 'Stars'], ['holes', 'Deep space'], ['search', 'Search'], ['settings', 'Settings']];
+type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'exo' | 'holes' | 'craft' | 'search' | 'settings';
+const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small'], ['stars', 'Stars'], ['exo', 'Exoplanets'], ['holes', 'Deep space'], ['craft', 'Spacecraft'], ['search', 'Search'], ['settings', 'Settings']];
+/** famous confirmed planets of other stars (NASA Exoplanet Archive names) */
+const EXOPLANETS = ['Proxima Cen b', 'TRAPPIST-1 e', 'Kepler-186 f', '51 Peg b', 'HD 189733 b', '55 Cnc e', 'eps Eri b', 'TOI-700 d',
+  'LHS 1140 b', 'K2-18 b', 'Kepler-452 b', 'HR 8799 e'];
+const EXO_COLOR: Record<PlanetType, [number, number, number]> = {
+  lava: [0.55, 0.18, 0.08], hot: [0.62, 0.55, 0.5], desert: [0.85, 0.6, 0.35], terran: [0.35, 0.55, 0.45], ocean: [0.2, 0.42, 0.8],
+  ice: [0.88, 0.92, 0.98], subneptune: [0.55, 0.75, 0.85], icegiant: [0.35, 0.55, 0.95], giant: [0.85, 0.72, 0.55], hotgiant: [0.3, 0.22, 0.4],
+};
 const HOLES = ['Sagittarius A*', 'M87*', 'Cygnus X-1', 'Gaia BH1', 'Gaia BH2', 'Gaia BH3', '3A 0620-003', 'GS 2023+338', 'GRS 1915+105',
   'XTE J1118+480', '4U 1543-475'];
+const GALAXIES = ['Andromeda Galaxy', 'Triangulum Galaxy', 'Large Magellanic Cloud', 'Small Magellanic Cloud', 'Whirlpool Galaxy', 'Sombrero Galaxy', 'Centaurus A', 'Pinwheel Galaxy', 'M87'];
 const PLANETS = ['Sun', 'Mercury', 'Venus', 'Earth', 'Moon', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Ceres'];
 const MOON_PARENTS = ['Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
 const STARS = ['Proxima Centauri', 'Rigil Kentaurus', 'Sirius', 'Betelgeuse', 'Rigel', 'Vega', 'Polaris', 'Arcturus', 'Antares', 'Aldebaran',
@@ -42,6 +53,7 @@ export class VRMenu {
   private thumbs: HTMLImageElement | null = null;
   private thumbIndex: { cell: number; bodies: Record<string, [number, number]> } | null = null;
   private refreshTimer = 0;
+  private exoList: SpaceObject[] | null = null;
 
   constructor(private host: MenuHost, dataBase: string) {
     this.panel = new Panel(1600, 1000, 1.3, (p) => this.paint(p));
@@ -90,7 +102,13 @@ export class VRMenu {
       case 'moons': this.paintMoons(p, area); break;
       case 'small': this.paintSmall(p, area); break;
       case 'stars': this.paintGrid(p, area, STARS.map((n) => app.findByName(n)).filter(nonNull).slice(0, 16), 4, 4); break;
-      case 'holes': this.paintGrid(p, area, [app.milkyWay, ...HOLES.map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull)], 4, 3); break;
+      case 'exo':
+        if (!this.exoList || !this.exoList.length) this.exoList = EXOPLANETS.map((n) => app.findByName(n)).filter(nonNull);
+        this.paintGrid(p, area, this.exoList, 4, 3);
+        if (!this.exoList.length) p.text('Loading the exoplanet catalogue…', area.x + 20, area.y + 40, 28, COLORS.dim);
+        break;
+      case 'craft': this.paintGrid(p, area, app.craft.craft.filter((c) => c.valid), 4, 3); break;
+      case 'holes': this.paintGrid(p, area, [app.milkyWay, ...GALAXIES.map((n) => app.findByName(n)).filter(nonNull), ...HOLES.slice(0, 6).map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull)], 4, 4); break;
       case 'search': this.paintSearch(p, area); break;
       case 'settings': this.paintSettings(p, area); break;
     }
@@ -101,6 +119,18 @@ export class VRMenu {
     const d = o.upos.sub(app.rig.upos, new Vector3()).length();
     if (o instanceof CatalogStar) return `${(d / LY).toFixed(d < 10 * LY ? 2 : 1)} light years`;
     if (o instanceof MilkyWay) return 'our galaxy, from outside';
+    if (o instanceof Galaxy) {
+      const mly = d / LY / 1e6;
+      return `galaxy · ${mly < 1 ? `${Math.round(mly * 1000)} thousand ly` : `${mly.toFixed(mly < 10 ? 1 : 0)} million ly`}`;
+    }
+    if (o instanceof Spacecraft) {
+      const au = o.upos.sub(app.system.sun.upos, new Vector3()).length() / 1.495978707e11;
+      return o.isOrbiter ? `Earth orbit · ${formatDistance(d)}` : o.parentObject ? `near Earth · ${formatDistance(d)}` : `${au.toFixed(au > 10 ? 0 : 2)} AU from the Sun`;
+    }
+    if (o instanceof ExoPlanet) {
+      const ly = o.system.host.upos.sub(app.rig.upos, new Vector3()).length() / LY;
+      return `${o.info()[0][1].replace(/^Exoplanet: /, '').replace(/, found.*$/, '')} · ${ly < 0.01 ? formatDistance(d) : `${ly.toFixed(ly < 10 ? 2 : 0)} ly`}`;
+    }
     if (o instanceof BlackHole) {
       const ly = d / LY;
       const dist = ly > 1e6 ? `${(ly / 1e6).toFixed(0)} million ly` : ly > 0.01 ? `${Math.round(ly).toLocaleString()} ly` : formatDistance(d);
@@ -121,7 +151,7 @@ export class VRMenu {
       c.drawImage(this.thumbs, idx[0] * s, idx[1] * s, s, s, cx - r, cy - r, 2 * r, 2 * r);
       return;
     }
-    if (o instanceof MilkyWay) {
+    if (o instanceof MilkyWay || (o instanceof Galaxy && (o.shape === 'spiral' || o.shape === 'barred'))) {
       // a small barred spiral: warm core, two bluish arms
       const g = c.createRadialGradient(cx, cy, 0, cx, cy, r);
       g.addColorStop(0, 'rgba(255,236,200,1)');
@@ -162,7 +192,7 @@ export class VRMenu {
       c.fill();
       return;
     }
-    const col = o instanceof CatalogStar ? starColor(o) : o instanceof Body ? o.color : [0.7, 0.7, 0.7];
+    const col = o instanceof CatalogStar ? starColor(o) : o instanceof Body ? o.color : o instanceof ExoPlanet ? EXO_COLOR[o.spec.type] : o instanceof Spacecraft ? [0.95, 0.78, 0.4] : [0.7, 0.7, 0.7];
     const g = c.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
     const css = (k: number) => `rgb(${Math.round(255 * Math.min(1, col[0] * k))},${Math.round(255 * Math.min(1, col[1] * k))},${Math.round(255 * Math.min(1, col[2] * k))})`;
     const glow = o instanceof CatalogStar;
@@ -240,7 +270,7 @@ export class VRMenu {
     // results
     const rx = a.x + 950, rw = a.w - 950;
     const results = this.query.trim() ? app.searchItems(this.query.trim()).slice(0, 8) : [];
-    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars, 23 black holes, billions of generated stars', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
+    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars, 6,333 exoplanets, 23 black holes, billions of generated stars', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
     results.forEach((r, i) => {
       p.button(`res:${r.id}`, rx, a.y + i * 92, rw, 82, r.label, () => {
         const o = app.resolveSearchId(r.id);
@@ -279,6 +309,7 @@ export class VRMenu {
     p.button('st:-', X, y5, 120, 80, '−', () => { app.starMagLimit = Math.max(4, app.starMagLimit - 0.5); p.dirty = true; }, { size: 40 });
     p.text(`mag ${app.starMagLimit.toFixed(1)}`, X + 210, y5 + 40, 30, COLORS.text, 600, 'center');
     p.button('st:+', X + 294, y5, 120, 80, '+', () => { app.starMagLimit = Math.min(10, app.starMagLimit + 0.5); p.dirty = true; }, { size: 40 });
+    toggle('ship', X, row(6, 'Spaceship'), app.game.active, ['Cockpit', 'Off'], (v) => { app.game.setMode(v ? 'cockpit' : 'off'); });
     // time controls on the right
     const tx = a.x + 1000;
     p.text('Time', tx, a.y + 40, 32, COLORS.text, 600);
@@ -289,6 +320,9 @@ export class VRMenu {
     tb('t:rev', 2, '⇄ Reverse', () => app.timeReverse());
     tb('t:now', 3, 'Now', () => app.realTime());
     p.button('exit', tx, a.y + 400, 505, 90, 'Exit VR', () => this.host.exitVR(), { size: 32, color: COLORS.warn });
+    const ms = app.game.missions;
+    p.text(`Missions: ${ms.doneCount} / ${ms.total}`, tx, a.y + 540, 30, COLORS.warn, 600);
+    ms.list.filter((m) => !m.done).slice(0, 4).forEach((m, i) => p.text(`○ ${m.title}`, tx, a.y + 590 + i * 38, 24, COLORS.dim, 500, 'left', 520));
   }
 }
 

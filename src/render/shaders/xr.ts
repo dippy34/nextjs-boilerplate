@@ -16,6 +16,9 @@
  */
 export const GLOBALS = { uPullIn: { value: 0 }, uDepthK: { value: 1 } };
 
+/** Headset quality tier: 1 while presenting in VR (heavy procedural shaders do less per pixel). */
+export const LITE = { uLite: { value: 0 } };
+
 /** Largest distance (m) the depth buffer has to order: well beyond the observable universe. */
 export const MAX_DEPTH = 1e30;
 
@@ -23,6 +26,15 @@ export const MAX_DEPTH = 1e30;
 export function depthK(far: number): number {
   return Number.isFinite(far) && far < MAX_DEPTH ? Math.log2(far + 1) / Math.log2(MAX_DEPTH + 1) : 1;
 }
+
+/**
+ * Point sprites only: rescale clip coordinates so |w| <= 1. A positive factor changes neither
+ * the projected position nor the clip test, but keeps the clipper's arithmetic far from float
+ * overflow: positions are in metres, so a star at kiloparsecs has clip coordinates ~1e20 and the
+ * products a clipper forms (~1e40) overflow 32-bit floats (seen to crash software rasterisers).
+ * Not for triangles: per-vertex scaling would break perspective-correct interpolation.
+ */
+export const POINT_CLIP = /* glsl */ `  gl_Position /= max(abs(gl_Position.w), 1.0);`;
 
 export const PROJECT_PARS = /* glsl */ `
 uniform float uPullIn;

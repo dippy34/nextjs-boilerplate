@@ -14,7 +14,8 @@
     "verify": "node scripts/verify.mjs http://127.0.0.1:5173/ screenshots",
     "verify:interact": "node scripts/interact.mjs http://127.0.0.1:5173/ screenshots",
     "verify:vr": "node scripts/vr.mjs http://127.0.0.1:5173/ screenshots",
-    "deploy": "bash scripts/deploy-pages.sh"
+    "deploy": "bash scripts/deploy-pages.sh",
+    "verify:game": "node scripts/game.mjs http://127.0.0.1:5173/ screenshots"
   },
   "license": "MIT",
   "dependencies": {

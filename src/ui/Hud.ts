@@ -33,6 +33,10 @@ const HELP: [string, string][] = [
   ['L / O / M', 'Labels / orbits / minor-body orbits'],
   ['P', 'Screenshot (PNG)'],
   ['Esc', 'Stop autopilot / clear selection'],
+  ['V', 'Spaceship: cockpit view / chase view / off'],
+  ['J', 'Warp drive to the selection'],
+  ['X', 'Brake (in the ship)'],
+  ['K / N', 'Missions & discoveries / ship sound on-off'],
   ['H', 'Toggle this help'],
 ];
 
@@ -118,11 +122,11 @@ export class Hud {
     this.help.classList.toggle('hidden');
   }
 
-  toast(msg: string): void {
+  toast(msg: string, seconds = 2.2): void {
     this.toastEl.textContent = msg;
     this.toastEl.classList.add('show');
     clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => this.toastEl.classList.remove('show'), 2200);
+    this.toastTimer = window.setTimeout(() => this.toastEl.classList.remove('show'), seconds * 1000);
   }
 
   update(s: HudState): void {

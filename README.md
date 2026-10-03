@@ -1,9 +1,22 @@
 # Space Explorer
 
 A real-time, seamless, scale-free explorer of the real and procedurally generated universe — a
-SpaceEngine-style desktop experience built on **real astronomical data** (JPL ephemerides, AT-HYG /
-HYG / Gaia DR3 stars, JPL satellite and small-body catalogues, NASA/USGS planetary maps) with
-deterministic procedural generation to come for everything the catalogues don't cover.
+SpaceEngine-style experience for desktop and VR headsets, built on **real astronomical data** (JPL
+ephemerides, AT-HYG / HYG / Gaia DR3 stars, JPL satellite and small-body catalogues, NASA/USGS
+planetary maps, the NASA Exoplanet Archive, JPL Horizons spacecraft trajectories, SIMBAD galaxies)
+with deterministic procedural generation for everything the catalogues don't cover.
+
+**What you can visit:** the Solar System with 16k close-up maps of 15 worlds · 2.75 million catalogued
+stars, each with its own surface, plus billions of generated ones filling the Milky Way · **6,333
+confirmed exoplanets** in 4,743 systems and a generated planetary system around (almost) every other
+star · 23 black holes with lensing, accretion disks and jets · **real spacecraft** at their real
+positions (ISS, Hubble, JWST, Voyager 1 & 2, New Horizons, Parker Solar Probe, Europa Clipper, Juice,
+Lucy, Psyche) · **47 nearby galaxies** (Andromeda, Triangulum, the Magellanic Clouds, the Whirlpool,
+the Sombrero, Centaurus A, M87 …) · the Milky Way from outside.
+
+**Game mode (V):** fly your own ship — a cockpit with live navigation screens (sit inside it in VR),
+a chase view, inertial flight, a warp drive with streaks and engine sound, fictional traffic orbiting
+the planet you are near, missions and a discovery log.
 
 ### ▶ Live: **https://dippy34.github.io/nextjs-boilerplate/**
 
@@ -30,7 +43,7 @@ npm install
 npm run dev          # http://127.0.0.1:5173
 ```
 
-All processed data (≈125 MB) is committed under `public/data/`, so the app runs without the
+All processed data (≈400 MB, most of it close-up map tiles) is committed under `public/data/`, so the app runs without the
 pipeline. To rebuild every data file from the original sources, see [`pipeline/`](pipeline/README.md)
 (`npm run data`, needs Python 3.10+ and ~0.5 GB of downloads).
 
@@ -48,11 +61,13 @@ Deploy to GitHub Pages: `bash scripts/deploy-pages.sh` (builds and force-pushes 
 | Shift / Ctrl | ×10 / ×0.1 speed · Q / E roll |
 | Click / double-click | Select / select and go to |
 | G · C | Go to selection (autopilot) · centre selection |
-| Enter or `/` | Find by name (planets, 459 moons, 302 large asteroids/TNOs, 4,077 comets, 12,585 named stars) |
+| Enter or `/` | Find by name (planets, 459 moons, 302 large asteroids/TNOs, 4,077 comets, 12,585 named stars, 6,333 exoplanets, spacecraft, galaxies) |
 | 0–9 | Sun, Mercury … Pluto |
 | Space · `[` `]` · `\` · Backspace | Pause · slower/faster time · reverse · real time now |
 | L · O · M | Labels · orbits · minor-body orbits |
 | P · H · Esc | Screenshot · help · stop autopilot / deselect |
+| V · J · X | Spaceship (cockpit / chase / off) · warp drive to the selection · brake |
+| K · N | Missions and discoveries · ship sound on/off |
 
 ### VR (WebXR) — built for the headset
 
@@ -199,7 +214,13 @@ Known limitations (planned for later phases unless noted):
 * Venus uses procedural banding tinted with the Mariner 10 disk colour; the Viking Mars mosaic is
   somewhat over-saturated; OPAL maps miss the latitudes Hubble could not see (filled zonally).
 * The Milky Way model is smooth and idealised (arm positions, a clumpy noise for dust and star
-  clouds); no nebulae, star clusters or other galaxies yet. Procedural stars beyond the catalogues
+  clouds); no nebulae or star clusters yet. Other galaxies are procedural discs/spheroids with their
+  catalogued size, type and orientation (no individual stars inside them).
+* Generated planets are labelled as such; their counts and sizes follow occurrence statistics, not
+  observations. Orbit orientations and phases of most real exoplanets are unmeasured and chosen
+  deterministically.
+* Game-mode ships are fictional. The ISS and Hubble are propagated from one set of orbital elements
+  (2026-10-01), so they drift from their real positions over weeks. Procedural stars beyond the catalogues
   are plausible, not real: their densities, colours and luminosities follow the model.
 * Star radii are estimated from V magnitude and temperature (no bolometric correction). Gaia DR3
   places Sirius B 0.033 pc from Sirius A (a known astrometry problem for that binary).
@@ -220,8 +241,8 @@ Known limitations (planned for later phases unless noted):
 
 2. Planet rendering: cube-sphere quadtree terrain from real DEMs, Bruneton atmospheric scattering,
    oceans, clouds, space-to-surface descent and surface walking.
-3. Nebulae and star clusters (OpenNGC), other galaxies, a finer Milky Way seen from outside.
-4. Procedural planetary systems + NASA Exoplanet Archive systems.
+3. Nebulae and star clusters (OpenNGC), a finer Milky Way seen from outside.
+4. Landing on planets; docking at stations.
 5. Full UI: search panel, bookmarks, settings and quality presets.
 6. Polish: lens flares, eclipses, spinning (Kerr) black holes, performance tuning.
 

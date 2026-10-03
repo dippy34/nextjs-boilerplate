@@ -1,7 +1,7 @@
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, CustomBlending, DoubleSide, DynamicDrawUsage, FrontSide, Group,
   ImageBitmapLoader, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, NoColorSpace, OneFactor,
-  OneMinusSrcAlphaFactor, PlaneGeometry, Points, Quaternion, RepeatWrapping, ShaderMaterial, SRGBColorSpace, Texture,
+  OneMinusSrcAlphaFactor, PlaneGeometry, Points, Quaternion, RepeatWrapping, ShaderMaterial, SRGBColorSpace, Texture, Vector4, type WebGLRenderer,
   TextureLoader, Vector3, ClampToEdgeWrapping,
 } from 'three';
 import { blackbodyRGB, lambertPhase, luminance, sunIrradianceAt } from '../astro/photometry';
@@ -10,11 +10,12 @@ import type { UPos } from '../core/upos';
 import type { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
 import type { AtmosphereSpec } from './Atmospheres';
+import type { TileDetail } from './TileDetail';
 import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
 import { StarCorona } from './StarCorona';
 import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
-import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
 
 interface MapInfo {
   file: string; channels: string; lonLeft: number; credit: string; width: number; height: number;
@@ -93,6 +94,7 @@ void main() {
   gl_Position = projectView(viewMatrix * vec4(position, 1.0));
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
+${POINT_CLIP}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius; vEnergy = energy; vColor = aColor;
 }`;
@@ -333,6 +335,7 @@ export class BodiesLayer {
         uSeed: { value: hashString(b.name) * 500 },
         uProc: { value: 0 }, uIcy: { value: 0 }, uTint: { value: new Vector3(1, 1, 1) }, uCraters: { value: 0 },
         uLumpy: { value: 0 }, uRadiusM: { value: b.radius }, uMapW: { value: 0 },
+        uDetail: { value: null }, uDetailRect: { value: new Vector4(0, 0, 1, 1) }, uDetailOn: { value: 0 }, uLite: LITE.uLite,
         uSunDir: { value: new Vector3(1, 0, 0) },
         uSunIrr: { value: Math.PI },
         uSunColor: { value: new Vector3(...this.sunColor) },
@@ -600,6 +603,51 @@ export class BodiesLayer {
     (this.sprites.geometry.attributes.position as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aIrr as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aColor as BufferAttribute).needsUpdate = true;
+  }
+
+  private detailBody: Body | null = null;
+  /**
+   * Close-up tiles for the body that fills most of the view (if its map has a tile pyramid).
+   * `viewDir`: world direction of the view's centre.
+   */
+  updateDetail(gl: WebGLRenderer, detail: TileDetail, pixelAngle: number, viewDir: Vector3): void {
+    let best: BodyView | null = null;
+    for (const v of this.views.values()) {
+      if (!v.resolved || v.pixelRadius < 300) continue;
+      const key = this.textureKey(v.body);
+      if (!key || !detail.has(key)) continue;
+      if (!best || v.pixelRadius > best.pixelRadius) best = v;
+    }
+    let on = false;
+    if (best) {
+      const b = best.body;
+      const mesh = this.meshes.get(b);
+      const u = mesh ? (mesh.material as ShaderMaterial).uniforms : null;
+      const key = this.textureKey(b)!;
+      if (u && u.uHasMap.value === 1) {
+        const toBody = new Matrix3().copy(u.uBodyToWorld.value as Matrix3).transpose();
+        const camBF = best.rel.clone().negate().applyMatrix3(toBody);
+        const dirBF = viewDir.clone().applyMatrix3(toBody).normalize();
+        on = detail.update(gl, key, u.uMap.value as Texture, b.radius, camBF, dirBF, pixelAngle, this.manifest.maps[key].lonLeft);
+        if (on) {
+          u.uDetail.value = detail.binding.texture;
+          (u.uDetailRect.value as Vector4).copy(detail.binding.rect);
+          u.uDetailOn.value = 1;
+          if ((u.uMapW.value as number) > 0) u.uMapW.value = detail.binding.mapWidth;
+        }
+      }
+    }
+    const prev = this.detailBody;
+    this.detailBody = on ? best!.body : null;
+    if (prev && prev !== this.detailBody) {
+      const m = this.meshes.get(prev);
+      if (m) {
+        const u = (m.material as ShaderMaterial).uniforms;
+        u.uDetailOn.value = 0;
+        const key = this.textureKey(prev);
+        if (key && (u.uMapW.value as number) > 0) u.uMapW.value = this.hiTex.has(key) ? this.manifest.maps[key].hi?.width ?? this.manifest.maps[key].width : this.manifest.maps[key].width;
+      }
+    }
   }
 
   /** Swap in the high-resolution map and the relief map when the body is large on screen. */

@@ -107,17 +107,19 @@ export function generatePlanets(star: { key: string; name: string; absMag: numbe
   const r = rng(hashKey(star.key + '/planets'));
   const { lum, mass, kind } = starProps(star);
   const T = star.teff;
-  const mean = kind === 'wd' ? 0.3 : kind === 'giant' ? 1.6 : T > 10000 ? 1.0 : T > 7300 ? 2.2 : T < 3900 ? 3.2 : 4.6;
-  if (r() < (kind === 'dwarf' ? 0.12 : 0.35)) return [];
+  // mean number of (detectable-size) planets: compact multi-planet systems are common around
+  // Sun-like and M dwarfs; hot, massive stars have fewer close-in small planets
+  const mean = kind === 'wd' ? 0.3 : kind === 'giant' ? 1.6 : T > 10000 ? 1.4 : T > 7300 ? 2.6 : T < 3900 ? 3.2 : 4.4;
+  if (r() < (kind === 'dwarf' ? 0.1 : 0.3)) return [];
   let n = 0;
   for (let p = Math.exp(-mean), u = r(), c = p; u > c && n < 10; ) { n++; p *= mean / n; c += p; }
-  n = Math.max(1, Math.min(n, 9));
+  n = Math.max(1, Math.min(n, 8));
   const snow = 2.7 * Math.sqrt(lum) * AU;
-  // innermost orbit: a few stellar radii out (outside an evolved star's envelope)
-  let a = Math.max(star.radius * (kind === 'giant' ? 8 : 3), (0.025 + 0.06 * r()) * Math.cbrt(mass) * AU);
+  // innermost orbit: near the dust-sublimation radius (scales with the star's luminosity), and
+  // outside an evolved star's envelope
+  let a = Math.max(star.radius * (kind === 'giant' ? 8 : 3), (0.02 + 0.07 * r()) * lum ** 0.35 * AU);
   const giantRate = T < 3900 ? 0.08 : T > 7300 ? 0.25 : 0.2;
-  const out: PlanetSpec[] = [];
-  const letters = 'bcdefghijk';
+  const specs: { a: number; rad: number }[] = [];
   for (let i = 0; i < n; i++) {
     let rad: number;
     const beyond = a > snow;
@@ -126,23 +128,38 @@ export function generatePlanets(star: { key: string; name: string; absMag: numbe
     else if (beyond && u < giantRate) rad = 9 + 4 * r();
     else if (beyond && u < giantRate + 0.25) rad = 3.6 + 2.5 * r();
     else rad = r() < 0.55 ? 0.5 + 1.2 * r() : 1.75 + 2 * r();
+    specs.push({ a, rad });
+    a *= 1.35 + 0.85 * r();
+    if (a > 60 * AU * Math.sqrt(Math.max(mass, 0.2))) break;
+  }
+  // cold giants beyond the snow line (about one Sun-like star in five has one, fewer M dwarfs)
+  const coldRate = kind === 'wd' ? 0.05 : T < 3900 ? 0.07 : T > 7300 ? 0.35 : 0.22;
+  if (r() < coldRate) {
+    let ag = Math.max(a, snow * (1 + 2.5 * r()));
+    const count = 1 + (r() < 0.4 ? 1 : 0) + (r() < 0.25 ? 1 : 0);
+    for (let k = 0; k < count && specs.length < 10; k++) {
+      specs.push({ a: ag, rad: r() < 0.7 ? 9 + 4 * r() : 3.6 + 2.5 * r() });
+      ag *= 1.6 + 1.4 * r();
+    }
+  }
+  const out: PlanetSpec[] = [];
+  const letters = 'bcdefghijk';
+  specs.forEach(({ a: aM, rad }, i) => {
     const typeR = rng(hashKey(`${star.key}/${i}`));
-    const teq = eqTemp(lum, a, 0.3);
+    const teq = eqTemp(lum, aM, 0.3);
     const type = classify(rad, teq, typeR);
     const M = massFromRadius(rad);
-    const P = 2 * Math.PI * Math.sqrt(a ** 3 / (G * mass * MSUN));
+    const P = 2 * Math.PI * Math.sqrt(aM ** 3 / (G * mass * MSUN));
     const e = Math.min(0.6, Math.abs((rad > 8 ? 0.15 : 0.04) * Math.sqrt(-2 * Math.log(Math.max(r(), 1e-9))) * Math.cos(2 * Math.PI * r())));
-    const locked = a < 0.12 * AU * Math.cbrt(mass);
+    const locked = aM < 0.12 * AU * Math.cbrt(mass);
     out.push({
       name: `${star.name} ${letters[i]}`, real: false, est: [],
-      aM: a, e, inc: ((r() - 0.5) * 4 * Math.PI) / 180, node: r() * 2 * Math.PI, omega: r() * 2 * Math.PI, M0: r() * 2 * Math.PI,
+      aM, e, inc: ((r() - 0.5) * 4 * Math.PI) / 180, node: r() * 2 * Math.PI, omega: r() * 2 * Math.PI, M0: r() * 2 * Math.PI,
       periodS: P, radiusM: rad * REARTH, massKg: M * MEARTH, teqK: teq, type, albedo: ALBEDO[type],
       rings: (type === 'giant' || type === 'icegiant') && r() < 0.35, seed: r() * 1000,
       rotS: locked ? P : (8 + 40 * r()) * 3600,
     });
-    a *= 1.45 + 0.9 * r();
-    if (a > 60 * AU * Math.sqrt(Math.max(mass, 0.2))) break;
-  }
+  });
   return out;
 }
 
@@ -162,6 +179,12 @@ export class ExoPlanet implements SpaceObject {
 
   get name(): string { return this.spec.name; }
   get parentObject(): SpaceObject { return this.system.host; }
+
+  /** Hill-sphere radius (m), at least 20 planet radii: inside it the camera rides along with the planet */
+  get hill(): number {
+    const M = starProps(this.system.host).mass * MSUN;
+    return Math.max(this.spec.aM * Math.cbrt(this.spec.massKg / (3 * M)), this.radius * 20);
+  }
 
   info(): [string, string][] {
     const s = this.spec;

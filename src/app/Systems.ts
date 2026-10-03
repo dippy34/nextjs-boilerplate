@@ -1,8 +1,8 @@
 import { Vector3 } from 'three';
-import { AU, DAY, PC, SUN_ABS_MAG, SUN_RADIUS } from '../core/units';
+import { AU, DAY, PC, SUN_ABS_MAG } from '../core/units';
 import { raDecToVector } from '../core/frames';
 import { ALBEDO, classify, eqTemp, generatePlanets, hashKey, massFromRadius, PlanetarySystem, type PlanetSpec, REARTH, rng, starProps } from '../universe/Planets';
-import { CatalogStar } from '../universe/Stars';
+import { CatalogStar, type NamedStars } from '../universe/Stars';
 
 /** One system from public/data/exoplanets.json (pipeline/build_exoplanets.py). */
 interface ArchiveSystem {
@@ -26,6 +26,12 @@ export class Systems {
   private byName = new Map<string, number>();
   private systems = new Map<string, PlanetarySystem | null>();
   private hosts = new Map<number, CatalogStar>();
+  /** catalogue star key -> archive index, for stars matched by position rather than name */
+  private links = new Map<string, number>();
+  /** archive index -> key of the catalogue star that carries its planets */
+  private claimed = new Map<number, string>();
+  /** archive index -> named catalogue star (by designation), filled by indexNamed() */
+  private named = new Map<number, number>();
   loaded = false;
 
   async load(base: string): Promise<void> {
@@ -37,9 +43,26 @@ export class Systems {
     this.loaded = true;
   }
 
+  /** Match archive hosts to named catalogue stars by designation (HD, HIP, Gliese, proper names...). */
+  indexNamed(named: NamedStars): void {
+    named.list.forEach((st, idx) => {
+      for (const nm of st.names) {
+        const i = this.byName.get(norm(nm));
+        if (i !== undefined && !this.named.has(i)) this.named.set(i, idx);
+      }
+    });
+  }
+
+  /** Index into NamedStars.list of the catalogue star hosting archive system `i`, if known. */
+  namedHost(i: number): number | null {
+    return this.named.get(i) ?? null;
+  }
+
   /** The archive system for a catalogue star, by any of its designations. */
   private archiveFor(star: CatalogStar): number | null {
-    for (const d of star.designations) {
+    const l = this.links.get(star.key);
+    if (l !== undefined) return l;
+    for (const d of [star.name, ...star.designations]) {
       const i = this.byName.get(norm(d));
       if (i !== undefined) return i;
     }
@@ -105,13 +128,54 @@ export class Systems {
 
   /** The planetary system of `star` (cached; null if it has no planets). */
   of(star: CatalogStar): PlanetarySystem | null {
-    if (this.systems.has(star.key)) return this.systems.get(star.key)!;
-    if (star.radius < 0.02 * SUN_RADIUS && !this.loaded) return null;
-    const ai = this.loaded ? this.archiveFor(star) : null;
+    const hit = this.systems.get(star.key);
+    if (hit !== undefined) {
+      // least recently used last out
+      this.systems.delete(star.key);
+      this.systems.set(star.key, hit);
+      return hit;
+    }
+    // until the archive is in, a star's real planets are unknown: don't cache a guess
+    if (!this.loaded) return null;
+    const ai = star.key.startsWith('exohost:') ? Number(star.key.slice(8)) : this.archiveFor(star);
+    if (ai !== null) this.claimed.set(ai, star.key);
     const sys = this.build(star, ai);
-    if (this.systems.size > 300) this.systems.clear();
+    if (this.systems.size > 2000) for (const k of [...this.systems.keys()].slice(0, 500)) this.systems.delete(k);
     this.systems.set(star.key, sys);
     return sys;
+  }
+
+  /** Treat catalogue star `star` as archive host `i` (same star, matched by position). */
+  claim(star: CatalogStar, i: number): void {
+    if (this.links.get(star.key) === i) return;
+    this.links.set(star.key, i);
+    this.claimed.set(i, star.key);
+    this.systems.delete(star.key);
+  }
+
+  /** true if archive system `i` is already carried by the catalogue star `key` */
+  claimedBy(i: number): string | null {
+    return this.claimed.get(i) ?? null;
+  }
+
+  /** archive index and planet index of a confirmed planet, by name */
+  findPlanet(name: string): { i: number; k: number } | null {
+    const n = norm(name);
+    for (let i = 0; i < this.archive.length; i++) {
+      const k = this.archive[i].planets.findIndex((p) => norm(p.name) === n);
+      if (k >= 0) return { i, k };
+    }
+    return null;
+  }
+
+  /** archive index of a host star, by name or designation */
+  findHost(name: string): number | null {
+    return this.byName.get(norm(name)) ?? null;
+  }
+
+  /** archive index of a planet's host name; the archive's own name for planet k */
+  planetName(i: number, k: number): string {
+    return this.archive[i]?.planets[k]?.name ?? '';
   }
 
   /** The archive system for an exoplanet host index. */

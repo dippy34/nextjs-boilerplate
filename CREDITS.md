@@ -161,6 +161,60 @@ and Altair). The corona glow and prominences are artistic.
   Sgr A\* and M87\* are illustrative — their real accretion flows are faint and radiate mostly in
   radio. The streaky gas texture and its slowed-down rotation are procedural.
 
+## Planets of other stars (`public/data/exoplanets.json`, `pipeline/build_exoplanets.py`)
+
+| Dataset | Use | Licence | Files |
+|---|---|---|---|
+| **NASA Exoplanet Archive**, Planetary Systems Composite Parameters (`pscomppars`), queried via TAP <https://exoplanetarchive.ipac.caltech.edu/TAP> | 6,333 confirmed planets in 4,743 systems: orbits, sizes, masses, temperatures, discovery method and year, host-star properties and designations | US government work, no restrictions; acknowledgement requested (below) | `public/data/exoplanets.json` |
+
+Required acknowledgement: *This research has made use of the NASA Exoplanet Archive, which is
+operated by the California Institute of Technology, under contract with the National Aeronautics and
+Space Administration under the Exoplanet Exploration Program.*
+
+Values the archive lacks are filled in and flagged as estimated in the app: semi-major axis or period
+from Kepler's third law, radius from mass (or the reverse) with the mean mass–radius relation of
+Chen & Kipping (2017), *ApJ* 834, 17; eccentricity 0 and inclination 90° when unknown. The orientation
+of each orbit on the sky and the planet's phase are mostly unmeasured, so the engine chooses them per
+planet, deterministically (transit times set the phase where the archive has them).
+
+Every other star gets a **generated** planetary system, labelled as such in the app. Planet counts,
+sizes and spacings follow published occurrence statistics in spirit (small planets common around
+Sun-like and M dwarfs, e.g. Fressin et al. 2013 *ApJ* 766, 81; Dressing & Charbonneau 2015 *ApJ* 807,
+45; hot Jupiters around ~1 % of Sun-like stars, Wright et al. 2012 *ApJ* 753, 160), and surface
+types follow from size and equilibrium temperature. Planet surfaces, clouds and rings are procedural
+(`src/render/shaders/planet.ts`); no images are used.
+
+## Spacecraft (`public/data/spacecraft.json`, `pipeline/build_spacecraft.py`)
+
+| Dataset | Use | Licence | Files |
+|---|---|---|---|
+| **JPL Horizons** (NASA/JPL Solar System Dynamics), <https://ssd.jpl.nasa.gov/horizons/> | Trajectories of Voyager 1 & 2, New Horizons, Parker Solar Probe, Europa Clipper, Juice, Lucy, Psyche (barycentric state vectors) and the James Webb Space Telescope (Earth-centred); osculating orbital elements of the ISS and the Hubble Space Telescope | U.S. Government work (public domain) | `public/data/spacecraft.json` |
+
+Trajectories are interpolated (cubic Hermite) between the Horizons samples. The ISS and Hubble are
+propagated from one set of osculating elements (epoch 2026-10-01) with the Earth's J2 nodal and apsidal
+precession, so their along-track positions drift away from that date. The spacecraft models are built
+in code from simple shapes at their real sizes (`src/render/SpacecraftLayer.ts`); no 3D model files
+are used. Mission descriptions summarise public NASA/ESA mission facts.
+
+## Other galaxies (`public/data/galaxies.json`, `pipeline/build_galaxies.py`)
+
+| Dataset | Use | Licence | Files |
+|---|---|---|---|
+| **SIMBAD** astronomical database (CDS, Strasbourg; Wenger et al. 2000, *A&AS* 143, 9), via TAP | Positions, apparent sizes, position angles and morphological types of 47 nearby galaxies; distances (median of the published redshift-independent measurements in SIMBAD's `mesDistance` table); V magnitudes | Free for scientific and educational use with acknowledgement | `public/data/galaxies.json` |
+
+Acknowledgement: *This research has made use of the SIMBAD database, operated at CDS, Strasbourg,
+France.* Each galaxy is drawn procedurally (`src/render/GalaxiesLayer.ts`): a disc with spiral arms,
+bar, dust and star-forming knots chosen from its type, plus a bulge; ellipticals and dwarfs as a
+soft spheroid. The inclination follows from the catalogued axis ratio. No galaxy images are used.
+
+## Close-up map tiles (`public/data/tiles/`, `pipeline/build_tiles.py`)
+
+Tile pyramids (512-pixel JPEG tiles, up to 16384 x 8192) cut from the same full-resolution sources
+as the base maps listed above, plus the NASA SVS CGI Moon Kit LROC WAC colour mosaic at 16k
+(`lroc_color_poles_16k.tif`, <https://svs.gsfc.nasa.gov/4720>, public domain). Each pyramid is
+aligned to its base map by correlation; bodies whose source is no sharper than the 4k base map
+(Titan, Iapetus, Phobos) or that failed the alignment check (Pluto, Charon) have none.
+
 ## The Milky Way model and procedural stars (`src/universe/Galaxy.ts`, `ProceduralStars.ts`)
 
 A parametric model (parameters typed in, not downloaded data), after published values:

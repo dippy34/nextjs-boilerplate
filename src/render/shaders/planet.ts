@@ -31,6 +31,7 @@ uniform float uSunIrr;      // irradiance from the star (Sun at 1 AU = PI)
 uniform float uExposure;
 uniform float uTime;
 uniform mat3 uBodyToWorld;
+uniform float uLite;        // 1 in VR: fewer noise octaves, no domain warp
 varying vec3 vNormalBF;
 varying vec3 vPosView;
 varying vec2 vUv;
@@ -41,11 +42,11 @@ float pn(vec3 p) {
   return mix(mix(mix(ph(i), ph(i + vec3(1,0,0)), f.x), mix(ph(i + vec3(0,1,0)), ph(i + vec3(1,1,0)), f.x), f.y),
              mix(mix(ph(i + vec3(0,0,1)), ph(i + vec3(1,0,1)), f.x), mix(ph(i + vec3(0,1,1)), ph(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
-float fbm(vec3 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 6; i++) { s += a * pn(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
+float fbm(vec3 p) { float s = 0.0, a = 0.5; int n = uLite > 0.5 ? 4 : 6; for (int i = 0; i < 6; i++) { if (i >= n) break; s += a * pn(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
 float ridged(vec3 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { float n = 1.0 - abs(pn(p) * 2.0 - 1.0); s += a * n * n; p = p * 2.1 + 3.1; a *= 0.5; } return s; }
 float terrain(vec3 n) {
   vec3 q = n * 2.2 + uSeed;
-  vec3 w = vec3(fbm(q + 1.3), fbm(q + 7.9), fbm(q + 4.1)) - 0.5;
+  vec3 w = uLite > 0.5 ? vec3(pn(q * 0.7 + 1.3), pn(q * 0.7 + 7.9), pn(q * 0.7 + 4.1)) - 0.5 : vec3(fbm(q + 1.3), fbm(q + 7.9), fbm(q + 4.1)) - 0.5;
   return 0.65 * fbm(q + w * 1.6) + 0.35 * ridged(q * 1.7 + w);
 }
 

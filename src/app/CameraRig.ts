@@ -22,6 +22,15 @@ export class CameraRig {
   /** distance to the nearest surface (m), provided by the app every frame */
   altitude = 1e9;
   target: SpaceObject | null = null;
+  /**
+   * Ship flight (game mode): the velocity follows the controls over this many seconds and is kept
+   * (slowly damped by "flight assist") when they are released. 0 = classic free fly.
+   */
+  inertia = 0;
+  /** brake held (ship flight): stop quickly */
+  braking = false;
+  /** forward thrust command -1..1 (for the cockpit display) */
+  thrust = 0;
   private goto: GotoState | null = null;
   private velocity = new Vector3();
   private tmp = new Vector3();
@@ -29,6 +38,11 @@ export class CameraRig {
 
   get autopilot(): boolean {
     return this.goto !== null;
+  }
+
+  /** seconds left on the current autopilot flight (0 if none) */
+  get gotoRemaining(): number {
+    return this.goto ? this.goto.T - this.goto.t : 0;
   }
 
   /** Re-anchor without moving: the camera keeps its absolute position. */
@@ -222,10 +236,23 @@ export class CameraRig {
     const base = Math.max(this.altitude, 1) * 0.8 * mult;
     let wantVel = move.lengthSq() > 0 ? move.normalize().applyQuaternion(this.quat).multiplyScalar(base) : new Vector3();
     if (this.ext.move.lengthSq() > 1e-6) wantVel = this.ext.move.clone().multiplyScalar(base * this.ext.boost);
-    // Smooth acceleration
-    const a = 1 - Math.exp(-dt * 6);
-    this.velocity.lerp(wantVel, a);
-    if (move.lengthSq() === 0 && this.velocity.length() < base * 1e-3) this.velocity.set(0, 0, 0);
+    const fwd = this.forward(new Vector3());
+    this.thrust = wantVel.lengthSq() > 0 ? wantVel.dot(fwd) / wantVel.length() : 0;
+    if (this.inertia > 0) {
+      // ship: momentum carries on; flight assist (or the brake) bleeds it off
+      if (wantVel.lengthSq() > 0) this.velocity.lerp(wantVel, 1 - Math.exp(-dt / this.inertia));
+      else this.velocity.multiplyScalar(Math.exp(-dt / (this.braking ? 0.25 : 6)));
+      if (this.braking && wantVel.lengthSq() > 0) this.velocity.multiplyScalar(Math.exp(-dt / 0.25));
+      // never faster than the local speed scale allows (it shrinks near surfaces)
+      const vmax = Math.max(this.altitude, 1) * 0.8 * this.speedFactor * 12;
+      if (this.velocity.length() > vmax) this.velocity.setLength(vmax);
+      if (this.velocity.length() < base * 1e-4) this.velocity.set(0, 0, 0);
+    } else {
+      // Smooth acceleration
+      const a = 1 - Math.exp(-dt * 6);
+      this.velocity.lerp(wantVel, a);
+      if (move.lengthSq() === 0 && this.velocity.length() < base * 1e-3) this.velocity.set(0, 0, 0);
+    }
     // Never fly through a surface: limit the step to 90 % of the altitude
     let step = this.velocity.length() * dt;
     if (step > this.altitude * 0.9 && this.altitude > 0) step = this.altitude * 0.9;

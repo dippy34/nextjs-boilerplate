@@ -9,7 +9,9 @@ import { type ExoPlanet, hashKey, type PlanetarySystem, type PlanetType, rng } f
 import { SPRITE_FRAG, SPRITE_VERT } from './NearStars';
 import { BODY_VERT } from './shaders/body';
 import { EXO_FRAG } from './shaders/planet';
-import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { ExoPlanet as ExoPlanetClass, PlanetarySystem as SystemClass } from '../universe/Planets';
+import { CatalogStar } from '../universe/Stars';
 
 const TYPE_ID: Record<PlanetType, number> = { lava: 0, hot: 1, desert: 2, terran: 3, ocean: 4, ice: 5, subneptune: 6, icegiant: 7, giant: 8, hotgiant: 9 };
 type V3 = [number, number, number];
@@ -115,7 +117,7 @@ export class ExoPlanetLayer {
     g.setAttribute('aIrr', new BufferAttribute(this.sp.irr, 1).setUsage(DynamicDrawUsage));
     g.setAttribute('aColor', new BufferAttribute(this.sp.col, 3).setUsage(DynamicDrawUsage));
     this.sprites = new Points(g, new ShaderMaterial({
-      vertexShader: SPRITE_VERT, fragmentShader: SPRITE_FRAG, uniforms: { ...psf, uHalo: { value: 0.3 } },
+      name: 'exoplanet-sprites', vertexShader: SPRITE_VERT, fragmentShader: SPRITE_FRAG, uniforms: { ...psf, uHalo: { value: 0.3 } },
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     }));
     this.sprites.frustumCulled = false;
@@ -128,13 +130,13 @@ export class ExoPlanetLayer {
     if (d) return d;
     const pal = paletteFor(p);
     const u: Record<string, { value: unknown }> = {
-      uType: { value: TYPE_ID[p.spec.type] }, uSeed: { value: p.spec.seed % 97 },
+      uType: { value: TYPE_ID[p.spec.type] }, uSeed: { value: p.spec.seed % 97 }, uLumpy: { value: 0 },
       uSunDir: { value: new Vector3(1, 0, 0) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI },
       uExposure: this.exposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
-      uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+      uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK, uLite: LITE.uLite,
     };
     for (const [k, v] of Object.entries(pal)) u[k] = { value: Array.isArray(v) ? new Vector3(...v) : v };
-    const mesh = new Mesh(this.sphere, new ShaderMaterial({ vertexShader: BODY_VERT, fragmentShader: EXO_FRAG, uniforms: u }));
+    const mesh = new Mesh(this.sphere, new ShaderMaterial({ name: 'exoplanet', vertexShader: BODY_VERT, fragmentShader: EXO_FRAG, uniforms: u }));
     mesh.matrixAutoUpdate = false;
     mesh.frustumCulled = false;
     mesh.renderOrder = 1;
@@ -144,7 +146,7 @@ export class ExoPlanetLayer {
     if (p.spec.rings) {
       const c = (pal.uC3 as V3);
       ring = new Mesh(this.ringGeo, new ShaderMaterial({
-        vertexShader: RING_VERT, fragmentShader: RING_FRAG,
+        name: 'exoplanet-ring', vertexShader: RING_VERT, fragmentShader: RING_FRAG,
         uniforms: { uColor: { value: new Vector3(c[0] * 0.9, c[1] * 0.88, c[2] * 0.85) }, uSeed: { value: p.spec.seed % 13 }, uLight: { value: 1 },
           uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
         transparent: true, depthWrite: false, side: DoubleSide,
@@ -164,6 +166,22 @@ export class ExoPlanetLayer {
     d = { mesh, ring, orbit };
     this.draws.set(p, d);
     return d;
+  }
+
+  private dummy: PlanetDraw | null = null;
+  /** A hidden planet (with rings) whose materials the app compiles ahead of first use. */
+  warmupObjects(): Mesh[] {
+    if (!this.dummy) {
+      const host = new CatalogStar('warmup', new Vector3(1e6, 0, 0), 5, 5800, 'G2V', ['warmup'], null);
+      const sys = new SystemClass(host, [{
+        name: 'warmup b', real: false, est: [], aM: 1.5e11, e: 0, inc: 0, node: 0, omega: 0, M0: 0, periodS: 3e7, radiusM: 7e7,
+        massKg: 1e27, teqK: 120, type: 'giant', albedo: 0.5, rings: true, seed: 1, rotS: 4e4,
+      }], false, new Vector3(0, 0, 1));
+      this.dummy = this.draw(sys.planets[0] as ExoPlanetClass);
+      this.draws.delete(sys.planets[0]);
+      for (const o of [this.dummy.mesh, this.dummy.ring, this.dummy.orbit]) if (o) o.visible = false;
+    }
+    return [this.dummy.mesh, ...(this.dummy.ring ? [this.dummy.ring] : [])];
   }
 
   /** Release drawables of planets no longer in `systems`. */

@@ -5,6 +5,7 @@ import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/un
 import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
+import { ExoPlanetLayer, type ExoView } from '../render/ExoPlanetLayer';
 import { GalaxyGlow } from '../render/GalaxyLayer';
 import { JetsLayer } from '../render/Jets';
 import { Labels, type LabelCandidate } from '../render/Labels';
@@ -12,20 +13,29 @@ import { NearStarsLayer } from '../render/NearStars';
 import { OrbitsLayer } from '../render/Orbits';
 import { ProceduralStarLayer } from '../render/ProceduralStarLayer';
 import { Renderer, type ViewInfo } from '../render/Renderer';
-import { GLOBALS, depthK } from '../render/shaders/xr';
+import { GLOBALS, LITE, depthK } from '../render/shaders/xr';
 import { SkyLayer } from '../render/Sky';
 import { Comet, SmallBodiesLayer } from '../render/SmallBodies';
 import { StarFieldLayer } from '../render/StarField';
+import { TileDetail } from '../render/TileDetail';
+import { type CraftView, SpacecraftLayer } from '../render/SpacecraftLayer';
+import { GalaxiesLayer } from '../render/GalaxiesLayer';
+import { Galaxy, loadGalaxies } from '../universe/Galaxies';
+import { loadSpacecraft, Spacecraft } from '../universe/Spacecraft';
 import { Hud } from '../ui/Hud';
 import { BlackHole, loadBlackHoles } from '../universe/BlackHoles';
 import { Body, type SpaceObject } from '../universe/Body';
 import { GALAXY, glowColumn } from '../universe/Galaxy';
 import { MilkyWay } from '../universe/MilkyWay';
+import { ExoPlanet, type PlanetarySystem } from '../universe/Planets';
 import { SolarSystem } from '../universe/SolarSystem';
 import { StarCatalog } from '../universe/StarCatalog';
 import { CatalogStar, NamedStars } from '../universe/Stars';
 import { CameraRig } from './CameraRig';
+import { Game } from '../game/Game';
+import { TrafficShip } from '../game/Traffic';
 import { Input } from './Input';
+import { Systems } from './Systems';
 import { VRSupport } from './VR';
 
 const DATA = `${import.meta.env.BASE_URL}data`;
@@ -76,6 +86,18 @@ export class App {
   /** procedural stars filling the galaxy beyond the catalogues */
   procStars!: ProceduralStarLayer;
   readonly milkyWay = new MilkyWay();
+  exo!: ExoPlanetLayer;
+  /** game mode: ship, cockpit, warp, traffic, missions */
+  game!: Game;
+  /** other galaxies (SIMBAD) */
+  galaxies!: GalaxiesLayer;
+  /** real spacecraft (JPL Horizons trajectories) */
+  craft!: SpacecraftLayer;
+  /** close-up map tiles for the body being approached */
+  tiles!: TileDetail;
+  /** systems drawn this frame: those of the stars around the explorer, plus a selected/targeted one */
+  private nearSystems: PlanetarySystem[] = [];
+  activeSystems: PlanetarySystem[] = [];
   private camGal = new Vector3();
   private cssW = 1;
   private cssH = 1;
@@ -96,6 +118,7 @@ export class App {
     readonly small: SmallBodiesLayer,
     readonly near: NearStarsLayer,
     renderer: Renderer,
+    readonly systems: Systems,
   ) {
     this.renderer = renderer;
     this.input = new Input(canvas);
@@ -108,6 +131,7 @@ export class App {
     const xrCapable = await VRSupport.detect();
     const renderer = new Renderer(canvas, xrCapable);
     const useGaia = new URLSearchParams(location.search).get('gaia') !== '0';
+    const systems = new Systems();
     const [system, catalog, gaia, named, manifest, rings, atmoData, blackHoles] = await Promise.all([
       SolarSystem.load(DATA),
       StarCatalog.load('athyg', `${DATA}/stars`),
@@ -117,6 +141,7 @@ export class App {
       fetch(`${DATA}/solar/rings.json`).then((r) => r.json()),
       fetch(`${DATA}/solar/atmospheres.json`).then((r) => r.json()) as Promise<AtmosphereData>,
       loadBlackHoles(DATA).catch((e) => { console.warn('black holes', e); return [] as BlackHole[]; }),
+      systems.load(DATA).catch((e) => console.warn('exoplanets', e)),
     ]);
     // Titan's visible disk is the top of its haze: shade it with the measured albedo spectrum
     // (Karkoschka 1998) rather than the Cassini near-infrared surface map.
@@ -137,7 +162,8 @@ export class App {
     const orbits = new OrbitsLayer(system);
     const small = new SmallBodiesLayer(system, starField.psf);
     const near = new NearStarsLayer(starField.psf, bodies.surfaceExposure);
-    const app = new App(canvas, hudRoot, labelRoot, system, catalogs, named, starFields, bodies, orbits, small, near, renderer);
+    const app = new App(canvas, hudRoot, labelRoot, system, catalogs, named, starFields, bodies, orbits, small, near, renderer, systems);
+    systems.indexNamed(named);
     const sc = blackbodyRGB(system.sun.teff);
     const sl = luminance(sc);
     const atmospheres = new AtmospheresLayer(system, atmoData, bodies.surfaceExposure, [sc[0] / sl, sc[1] / sl, sc[2] / sl]);
@@ -150,13 +176,24 @@ export class App {
     app.jets = new JetsLayer(blackHoles);
     app.galaxy = new GalaxyGlow();
     app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
+    app.exo = new ExoPlanetLayer(starField.psf, bodies.surfaceExposure);
+    app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
+    const earthBody = system.byId.get(399)!;
+    const craft = await loadSpacecraft(DATA, system.sun, earthBody).catch((e) => { console.warn('spacecraft', e); return [] as Spacecraft[]; });
+    app.craft = new SpacecraftLayer(craft, bodies.surfaceExposure, starField.psf);
+    const galaxyList = await loadGalaxies(DATA).catch((e) => { console.warn('galaxies', e); return [] as Galaxy[]; });
+    // M87's light is centred on its black hole
+    const m87 = galaxyList.find((g) => g.name === 'M87'), m87bh = blackHoles.find((b) => b.name === 'M87*');
+    if (m87 && m87bh) m87.upos.copy(m87bh.upos);
+    app.galaxies = new GalaxiesLayer(galaxyList);
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.craft.group, app.galaxies.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
+    app.game = new Game(app);
     bodies.uploader = (t) => renderer.gl.initTexture(t);
     app.warmupPending = true;
     app.applyUrl();
@@ -199,6 +236,11 @@ export class App {
       if (obj) {
         const dist = Number(q.get('dist') ?? 4) * Math.max(obj.radius, 1);
         this.placeNear(obj, dist, Number(q.get('az') ?? 35), Number(q.get('el') ?? 15));
+        if (obj instanceof Galaxy && !q.get('el')) {
+          const dir = obj.viewDir(this.rig.upos.sub(obj.upos, new Vector3()));
+          this.rig.upos.copy(obj.upos).addVec(dir, dist);
+          this.rig.lookAt(dir.clone().negate(), obj.major);
+        }
         if (obj instanceof BlackHole && !q.get('el')) {
           // the view the autopilot arrives at: just above the disk plane
           const dir = obj.approachDir(this.rig.upos.sub(obj.upos, new Vector3()));
@@ -216,11 +258,15 @@ export class App {
       const obj = this.findByName(look);
       if (obj) this.rig.lookAt(obj.upos.sub(this.rig.upos, new Vector3()).normalize());
     }
+    const ship = q.get('ship');
+    if (ship === 'cockpit' || ship === 'chase') this.game.setMode(ship);
   }
 
   /** Put the camera at `dist` from `obj`, `az` degrees around from the sunward direction, looking at it. */
   placeNear(obj: SpaceObject, dist: number, az = 35, el = 15): void {
-    const sunDir = this.system.sun.upos.sub(obj.upos, new Vector3());
+    // lit side: towards the Sun, or towards its own star for a planet of another star
+    const light = obj instanceof ExoPlanet ? obj.system.host.upos : this.system.sun.upos;
+    const sunDir = light.sub(obj.upos, new Vector3());
     if (sunDir.lengthSq() < 1) sunDir.set(1, 0, 0);
     sunDir.normalize();
     const north = new Vector3(0, 0, 1);
@@ -228,7 +274,7 @@ export class App {
     const dir = sunDir.clone().applyAxisAngle(north, (az * Math.PI) / 180).applyAxisAngle(axis, (el * Math.PI) / 180);
     this.rig.upos.copy(obj.upos).addVec(dir, dist);
     this.rig.lookAt(dir.clone().negate(), north);
-    this.rig.setAnchor(obj instanceof Body || obj instanceof Comet || this.isCompanion(obj) ? obj : null);
+    this.rig.setAnchor(obj instanceof Body || obj instanceof Comet || obj instanceof ExoPlanet || obj instanceof Spacecraft || this.isCompanion(obj) ? obj : null);
   }
 
   /** true for the companion star of a black hole (it moves on its orbit). */
@@ -251,6 +297,7 @@ export class App {
       if (obj) { this.select(obj); this.goTo(obj); }
     };
     this.input.onKey = (e) => {
+      if (this.game?.active) this.game.audio.start();
       if (this.hud.searchOpen) return;
       switch (e.code) {
         case 'Space': this.togglePause(); e.preventDefault(); break;
@@ -269,6 +316,10 @@ export class App {
         case 'Equal': case 'NumpadAdd': this.rig.speedFactor *= 2; break;
         case 'Minus': case 'NumpadSubtract': this.rig.speedFactor /= 2; break;
         case 'Escape': this.cancelOrDeselect(); break;
+        case 'KeyV': this.game.cycle(); break;
+        case 'KeyJ': this.game.warp(); break;
+        case 'KeyN': this.game.audio.setEnabled(!this.game.audio.enabled); this.hud.toast(`Sound ${this.game.audio.enabled ? 'on' : 'off'}`); break;
+        case 'KeyK': this.showMissions(); break;
         default:
           if (/^Digit\d$/.test(e.code)) {
             const ids = [10, 199, 299, 399, 499, 599, 699, 799, 899, 999];
@@ -305,6 +356,14 @@ export class App {
     this.clock.paused = false;
     this.hud.toast('Real time');
   }
+  /** K: missions and recent discoveries. */
+  showMissions(): void {
+    const m = this.game.missions;
+    const lines = m.list.map((x) => `${x.done ? '✔' : '○'} ${x.title}`).join('\n');
+    const recent = m.log.slice(0, 5).map((e) => e.name).join(', ');
+    this.hud.toast(`Missions ${m.doneCount}/${m.total}\n${lines}${recent ? `\nRecently discovered: ${recent}` : ''}`, 9);
+  }
+
   cancelOrDeselect(): void {
     if (this.rig.autopilot) this.rig.cancelGoto();
     else this.select(null);
@@ -330,7 +389,7 @@ export class App {
    * is compiled while presenting.
    */
   private warmUp(): void {
-    const objs = [...this.bodies.warmupObjects(), ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects()];
+    const objs = [...this.bodies.warmupObjects(), ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...this.exo.warmupObjects(), ...this.craft.warmupObjects(), ...this.game.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
@@ -350,8 +409,16 @@ export class App {
       this.hud.toast('Leaving the galaxy');
       return;
     }
+    if (obj instanceof Galaxy) {
+      this.rig.flyTo(obj, obj.radius * 2.4, undefined, true, obj.viewDir(this.rig.upos.sub(obj.upos, new Vector3())));
+      this.hud.toast(`Going to ${obj.name}`);
+      return;
+    }
     let d: number;
     if (obj instanceof Body) d = obj.kind === 'star' ? obj.radius * 8 : Math.max(obj.radius * 3.5, 2e3);
+    else if (obj instanceof ExoPlanet) d = obj.radius * 3.5;
+    else if (obj instanceof Spacecraft) d = Math.max(obj.radius * 5, 10);
+    else if (obj instanceof TrafficShip) d = obj.radius * 6;
     else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 4.5, 2e7);
     else if (obj instanceof Comet) d = obj.radius > 0 ? obj.radius * 60 : 2e7;
     else d = Math.max(obj.radius * 4, 1e6);
@@ -376,6 +443,10 @@ export class App {
     const n = name.toLowerCase();
     const b = this.system.bodies.find((x) => x.name.toLowerCase() === n);
     if (b) return b;
+    const gx = this.galaxies.galaxies.find((g) => g.name.toLowerCase() === n || g.data.simbad.toLowerCase().replace(/\s+/g, '') === n.replace(/\s+/g, '') || (n === 'andromeda' && g.name.startsWith('Andromeda')));
+    if (gx) return gx;
+    const sc = this.craft.craft.find((c) => c.name.toLowerCase() === n || (n === 'iss' && c.name.startsWith('International')) || (n === 'jwst' && c.name.startsWith('James')) || (n === 'hubble' && c.name.startsWith('Hubble')));
+    if (sc) { sc.update(this.clock.jdTdb); return sc; }
     const c = this.small.cometObjects.find((x) => x.name.toLowerCase().includes(n));
     if (c) return c;
     const h = this.blackHoles.find((x) => x.name.toLowerCase() === n || x.data.aliases.some((a) => a.toLowerCase() === n));
@@ -383,8 +454,20 @@ export class App {
     const ps = this.procStars.find(name);
     if (ps) return ps;
     if (n === 'milky way' || n === 'galaxy' || n === 'the galaxy') return this.milkyWay;
+    const xp = this.systems.findPlanet(name);
+    if (xp) return this.exoPlanet(xp.i, xp.k);
     const s = this.named.list.find((x) => x.names.some((nm) => nm.toLowerCase() === n));
     if (s) return this.getStar(this.catalog, s.node, s.slot);
+    const xh = this.systems.findHost(name);
+    if (xh !== null) return this.exoHost(xh);
+    // a generated planet: "<star> <letter>"
+    const m = /^(.+)\s([b-k])$/i.exec(name.trim());
+    if (m) {
+      const host = this.findByName(m[1]);
+      const sys = host instanceof CatalogStar ? this.systems.of(host) : null;
+      const pl = sys?.planets.find((p) => p.name.toLowerCase() === n);
+      if (sys && pl) { sys.update(this.clock.jdTdb); return pl; }
+    }
     return null;
   }
 
@@ -424,6 +507,15 @@ export class App {
       }
       if (best >= 0) out.push({ label: st.names[0], detail: `star · ${st.names.slice(1, 3).join(', ')}`, id: `star:${st.index}`, score: best + (st.proper ? 0 : 0.3) });
     }
+    out.push(...this.systems.search(q, score));
+    this.galaxies.galaxies.forEach((g, i) => {
+      const sc = Math.min(...[g.name, g.data.simbad, g.data.simbad.replace(/\s+/g, ''), 'galaxy'].map(score).filter((x) => x >= 0));
+      if (Number.isFinite(sc)) out.push({ label: g.name, detail: `galaxy · ${((g.data.distPc * 3.2616) / 1e6).toFixed(g.data.distPc < 3e5 ? 2 : 1)} million ly`, id: `gx:${i}`, score: sc + (g.name === 'Milky Way' ? 0 : 0.05) });
+    });
+    this.craft.craft.forEach((c, i) => {
+      const sc = Math.min(...[c.name, 'spacecraft', 'probe'].map(score).filter((x) => x >= 0));
+      if (Number.isFinite(sc)) out.push({ label: c.name, detail: 'spacecraft', id: `sc:${i}`, score: sc - 0.1 });
+    });
     out.sort((a, b) => a.score - b.score);
     return out.slice(0, 14);
   }
@@ -436,7 +528,33 @@ export class App {
     if (kind === 'mw') return this.milkyWay;
     if (kind === 'bhc') return this.blackHoles[Number(v)]?.companion ?? null;
     if (kind === 'star') { const st = this.named.list[Number(v)]; return this.getStar(this.catalog, st.node, st.slot); }
+    if (kind === 'xh') return this.exoHost(Number(v));
+    if (kind === 'sc') return this.craft.craft[Number(v)] ?? null;
+    if (kind === 'gx') return this.galaxies.galaxies[Number(v)] ?? null;
+    if (kind === 'xp') return this.exoPlanet(Number(v), Number(id.split(':')[2]));
     return null;
+  }
+
+  /** The star of confirmed-planet system `i`: the catalogue's copy when the archive names one, else built from the archive. */
+  exoHost(i: number): CatalogStar {
+    const ni = this.systems.namedHost(i);
+    if (ni !== null) {
+      const st = this.named.list[ni];
+      const cs = this.getStar(this.catalog, st.node, st.slot);
+      this.systems.claim(cs, i);
+      return cs;
+    }
+    return this.systems.hostStar(i);
+  }
+
+  /** Planet `k` of confirmed-planet system `i` (its system becomes active so it moves and is drawn). */
+  exoPlanet(i: number, k: number): ExoPlanet | null {
+    const sys = this.systems.of(this.exoHost(i));
+    if (!sys) return null;
+    const name = this.systems.planetName(i, k);
+    const pl = sys.planets.find((p) => p.name === name) ?? sys.planets[k] ?? null;
+    if (pl) sys.update(this.clock.jdTdb);
+    return pl;
   }
 
   // ------------------------------------------------------------------ per-frame helpers
@@ -462,6 +580,22 @@ export class App {
       const d = b.upos.sub(this.rig.upos, rel).length();
       if (d < soi) { best = b; bestSoi = soi; }
     }
+    // close to a ship (game mode) or a spacecraft: ride along with it
+    for (const sh of this.game.traffic.ships) {
+      if (sh.upos.sub(this.rig.upos, rel).length() < sh.radius * 300) { this.rig.setAnchor(sh); return; }
+    }
+    for (const cv of this.craft.views) {
+      if (cv.dist < Math.max(300 * cv.craft.radius, 2000)) { this.rig.setAnchor(cv.craft); return; }
+    }
+    // an exoplanet whose Hill sphere we are in (planets of other stars carry the camera along)
+    if (!best) {
+      let bestExo: ExoPlanet | null = null;
+      let bestD = Infinity;
+      for (const ev of this.exo.views) {
+        if (ev.dist < ev.planet.hill && ev.dist < bestD) { bestExo = ev.planet; bestD = ev.dist; }
+      }
+      if (bestExo) { this.rig.setAnchor(bestExo); return; }
+    }
     const sel = this.selection;
     if (sel instanceof Comet) {
       const d = sel.upos.sub(this.rig.upos, rel).length();
@@ -484,6 +618,8 @@ export class App {
     }
     if (this.selection instanceof Comet) alt = Math.min(alt, this.selection.upos.sub(this.rig.upos, rel).length() - this.selection.radius);
     alt = Math.min(alt, this.nearestStarDist);
+    for (const ev of this.exo.views) alt = Math.min(alt, ev.dist - ev.planet.radius);
+    for (const cv of this.craft.views) alt = Math.min(alt, cv.dist - cv.craft.radius);
     for (const h of this.blackHoles) {
       alt = Math.min(alt, h.upos.sub(this.rig.upos, rel).length() - h.radius);
       if (h.companion) alt = Math.min(alt, h.companion.upos.sub(this.rig.upos, rel).length() - h.companion.radius);
@@ -552,7 +688,63 @@ export class App {
       this.nearestStarDist = Math.min(this.nearestStarDist, dist * PC - star.radius);
       if (dist < NEAR_STAR_RADIUS) list.push(star);
     }
+    // planetary systems of the stars around us; claim archive systems for their catalogue stars
+    const systems: PlanetarySystem[] = [];
+    for (const st of list) {
+      if (this.isCompanion(st)) continue;
+      const sys = this.systems.of(st);
+      if (sys) systems.push(sys);
+    }
+    // confirmed-planet hosts the catalogues lack (or know only under another name)
+    const tmp = new Vector3();
+    for (const i of this.systems.hostsNear(this.camPc, NEAR_STAR_RADIUS)) {
+      const h = this.systems.hostStar(i);
+      const claimedBy = this.systems.claimedBy(i);
+      if (claimedBy && list.some((x) => x.key === claimedBy)) continue;
+      // the same star from a catalogue: same place (within catalogue distance errors) and brightness
+      const twin = list.find((x) => !this.isCompanion(x) && x.upos.sub(h.upos, tmp).length() < 0.03 * PC && Math.abs(x.absMag - h.absMag) < 1.5);
+      if (twin) {
+        this.systems.claim(twin, i);
+        const at = systems.findIndex((y) => y.host === twin);
+        const sys = this.systems.of(twin);
+        if (at >= 0) systems.splice(at, 1);
+        if (sys) systems.push(sys);
+        continue;
+      }
+      list.push(h);
+      this.nearestStarDist = Math.min(this.nearestStarDist, h.upos.sub(this.rig.upos, tmp).length() - h.radius);
+      const sys = this.systems.of(h);
+      if (sys) systems.push(sys);
+    }
     this.near.stars = list;
+    this.nearSystems = systems;
+  }
+
+  /** A planet is labelled/pickable once resolved, or while the explorer is inside its system. */
+  private exoShown(ev: ExoView): boolean {
+    if (ev.pixelRadius >= 0.8 || ev.planet === this.selection) return true;
+    const host = ev.planet.system.host;
+    const dHost = host.upos.sub(this.rig.upos, new Vector3()).length();
+    return dHost < Math.max(400 * AU, ev.planet.spec.aM * 25);
+  }
+
+  /** Spacecraft are labelled/pickable once resolved, when selected, or when near enough to find. */
+  private craftShown(cv: CraftView): boolean {
+    if (cv.pixelRadius > 0.5 || cv.craft === this.selection) return true;
+    const reach = cv.craft.isOrbiter ? 3e7 : cv.craft.parentObject ? 5e9 : 0.3 * AU;
+    return cv.dist < reach;
+  }
+
+  /** Systems to draw: the stars' around us, plus those of a selected or targeted planet or host. */
+  private updateActiveSystems(): void {
+    const act = [...this.nearSystems];
+    for (const o of [this.selection, this.rig.target]) {
+      let sys: PlanetarySystem | null = null;
+      if (o instanceof ExoPlanet) sys = o.system;
+      else if (o instanceof CatalogStar && !this.isCompanion(o) && o.upos.sub(this.rig.upos, new Vector3()).length() < 0.5 * PC) sys = this.systems.of(o);
+      if (sys && !act.includes(sys)) act.push(sys);
+    }
+    this.activeSystems = act;
   }
 
   private updateExposure(dt: number): { xStar: number; xSurf: number; mLim: number; xDark: number } {
@@ -580,6 +772,23 @@ export class App {
       wBest = w;
       lBest = L;
       keyBest = b.kind === 'star' ? 1.1 : 0.45;
+    }
+    for (const cv of this.craft.views) {
+      if (cv.pixelRadius < 2) continue;
+      const p = this.project(cv.rel);
+      const pr = cv.pixelRadius / this.view.pixelRatio;
+      if (!p || p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
+      const w = smoothstep(0.0015, 0.08, Math.min(1, (Math.PI * pr * pr) / screen));
+      const L = (0.6 * sunIrradianceAt(Math.max(cv.craft.upos.sub(this.system.sun.upos, new Vector3()).length(), 1))) / Math.PI;
+      if (w > wBest) { wBest = w; lBest = L; keyBest = 0.45; }
+    }
+    for (const ev of this.exo.views) {
+      if (ev.pixelRadius < 2) continue;
+      const p = this.project(ev.rel);
+      const pr = ev.pixelRadius / this.view.pixelRatio;
+      if (!p || p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
+      const w = smoothstep(0.0015, 0.08, Math.min(1, (Math.PI * pr * pr) / screen));
+      if (w > wBest && ev.radiance > 0) { wBest = w; lBest = ev.radiance; keyBest = 0.45; }
     }
     for (const hv of this.holes.views) {
       if (!hv.diskRadiance) continue;
@@ -617,6 +826,14 @@ export class App {
       const b = v.body;
       if (b.kind === 'star') lightCap = Math.min(lightCap, 1.8 / (AU / SUN_RADIUS) ** 2);
       else diskCap = Math.min(diskCap, 1.6 / ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI));
+    }
+    for (const cv of this.craft.views) {
+      if (cv.pixelRadius <= 1.5 || !onScreen(cv.rel)) continue;
+      diskCap = Math.min(diskCap, 1.6 / ((0.6 * sunIrradianceAt(Math.max(cv.craft.upos.sub(this.system.sun.upos, new Vector3()).length(), 1))) / Math.PI));
+    }
+    for (const ev of this.exo.views) {
+      if (ev.pixelRadius <= 1.5 || ev.radiance <= 0 || !onScreen(ev.rel)) continue;
+      diskCap = Math.min(diskCap, 1.6 / ev.radiance);
     }
     for (const hv of this.holes.views) {
       // a hot inner disk only takes over the eye's adaptation once it covers part of the view
@@ -668,6 +885,13 @@ export class App {
     for (const c of this.small.cometObjects) {
       if (c.apparentMag > mLim) continue;
       consider(c, this.project(c.upos.sub(this.rig.upos, rel)), 0, 0);
+    }
+    for (const ev of this.exo.views) if (this.exoShown(ev)) consider(ev.planet, this.project(ev.rel), ev.pixelRadius / this.view.pixelRatio, ev.pixelRadius > 2 ? -6 : -3);
+    for (const cv of this.craft.views) if (this.craftShown(cv)) consider(cv.craft, this.project(cv.rel), cv.pixelRadius / this.view.pixelRatio, -5);
+    for (const gv of this.galaxies.views) if (gv.pixelRadius >= 2.5) consider(gv.galaxy, this.project(gv.rel), Math.min(gv.pixelRadius / this.view.pixelRatio, 80), 2);
+    for (const sh of this.game.traffic.ships) {
+      const r = sh.upos.sub(this.rig.upos, new Vector3());
+      if (r.length() < 2e6) consider(sh, this.project(r), (Math.atan2(sh.radius, r.length()) / this.view.pixelAngle) / this.view.pixelRatio, -4);
     }
     for (const s of this.near.stars) consider(s, this.project(s.upos.sub(this.rig.upos, rel)), 0, -2);
     for (const { bh, rel: r, shadowPx } of this.labelledHoles()) consider(bh, this.project(r), shadowPx / this.view.pixelRatio, -4);
@@ -742,6 +966,13 @@ export class App {
       if (c.apparentMag > mLim) continue;
       consider(c, c.upos.sub(this.rig.upos, rel).clone(), c.radius, 0);
     }
+    for (const ev of this.exo.views) if (this.exoShown(ev)) consider(ev.planet, ev.rel, ev.planet.radius, ev.pixelRadius > 2 ? -1 : -0.3);
+    for (const cv of this.craft.views) if (this.craftShown(cv)) consider(cv.craft, cv.rel, cv.craft.radius, -0.6);
+    for (const gv of this.galaxies.views) if (gv.pixelRadius >= 2.5) consider(gv.galaxy, gv.rel, gv.galaxy.radius * 0.5, 0.5);
+    for (const sh of this.game.traffic.ships) {
+      const r = sh.upos.sub(this.rig.upos, new Vector3());
+      if (r.length() < 2e6) consider(sh, r, sh.radius, -0.6);
+    }
     for (const st of this.near.stars) consider(st, st.upos.sub(this.rig.upos, rel).clone(), st.radius, -0.2);
     for (const { bh, rel: r } of this.labelledHoles()) consider(bh, r, bh.radius * 2.6, -0.5);
     if (best) return best;
@@ -777,8 +1008,8 @@ export class App {
   }
 
   /** Nearest resolved body whose sphere the ray actually hits (what you see along the ray). */
-  private rayHitBody(origin: Vector3, d: Vector3): Body | null {
-    let best: Body | null = null;
+  private rayHitBody(origin: Vector3, d: Vector3): SpaceObject | null {
+    let best: SpaceObject | null = null;
     let bestT = Infinity;
     const oc = new Vector3();
     for (const v of this.bodies.views.values()) {
@@ -790,6 +1021,15 @@ export class App {
       if (disc < 0) continue;
       const t = -b - Math.sqrt(disc);
       if (t > 0 && t < bestT) { bestT = t; best = v.body; }
+    }
+    for (const ev of this.exo.views) {
+      if (ev.pixelRadius < 0.8) continue;
+      oc.copy(origin).sub(ev.rel);
+      const b = oc.dot(d);
+      const disc = b * b - (oc.lengthSq() - ev.planet.radius * ev.planet.radius);
+      if (disc < 0) continue;
+      const t = -b - Math.sqrt(disc);
+      if (t > 0 && t < bestT) { bestT = t; best = ev.planet; }
     }
     return best;
   }
@@ -825,6 +1065,13 @@ export class App {
     for (const c of this.small.cometObjects) {
       if (c.apparentMag > mLim) continue;
       consider(c, c.upos.sub(this.rig.upos, rel).clone(), c.radius, 0);
+    }
+    for (const ev of this.exo.views) if (this.exoShown(ev)) consider(ev.planet, ev.rel, ev.planet.radius, ev.pixelRadius > 2 ? -1 : -0.3);
+    for (const cv of this.craft.views) if (this.craftShown(cv)) consider(cv.craft, cv.rel, cv.craft.radius, -0.6);
+    for (const gv of this.galaxies.views) if (gv.pixelRadius >= 2.5) consider(gv.galaxy, gv.rel, gv.galaxy.radius * 0.5, 0.5);
+    for (const sh of this.game.traffic.ships) {
+      const r = sh.upos.sub(this.rig.upos, new Vector3());
+      if (r.length() < 2e6) consider(sh, r, sh.radius, -0.6);
     }
     for (const st of this.near.stars) consider(st, st.upos.sub(this.rig.upos, rel).clone(), st.radius, -0.2);
     for (const { bh, rel: r } of this.labelledHoles()) consider(bh, r, bh.radius * 2.6, -0.5);
@@ -944,9 +1191,37 @@ export class App {
       const p = this.project(s.upos.sub(this.rig.upos, rel));
       if (p) out.push({ rel: rel.clone(), key: s.key, text: s.name, x: p.x, y: p.y, radius: 4, priority: s === sel ? 1e4 : 450, cls: s === sel ? 'selected' : 'star' });
     }
+    for (const sh of this.game.traffic.ships) {
+      const r = sh.upos.sub(this.rig.upos, new Vector3());
+      if (r.length() > 1.5e6 && sh !== sel) continue;
+      const p = this.project(r);
+      if (p && !this.occluded(r, null)) out.push({ rel: r, key: sh.key, text: sh.name, x: p.x, y: p.y, radius: 3, priority: sh === sel ? 1e4 : 300, cls: sh === sel ? 'selected' : 'ship' });
+    }
+    for (const cv of this.craft.views) {
+      if (!this.craftShown(cv)) continue;
+      const p = this.project(cv.rel);
+      if (p && !this.occluded(cv.rel, null)) {
+        const isSel = cv.craft === sel;
+        out.push({ rel: cv.rel.clone(), key: cv.craft.key, text: cv.craft.name, x: p.x, y: p.y, radius: cv.pixelRadius / dpr, priority: isSel ? 1e4 : 460, cls: isSel ? 'selected' : 'craft' });
+      }
+    }
+    for (const ev of this.exo.views) {
+      if (!this.exoShown(ev)) continue;
+      const p = this.project(ev.rel);
+      if (p && !this.occluded(ev.rel, null)) {
+        const isSel = ev.planet === sel;
+        out.push({ rel: ev.rel.clone(), key: ev.planet.key, text: ev.planet.name, x: p.x, y: p.y, radius: ev.pixelRadius / dpr, priority: isSel ? 1e4 : 470 + Math.min(ev.pixelRadius, 20), cls: isSel ? 'selected' : 'exoplanet' });
+      }
+    }
     for (const { bh, rel: r, shadowPx } of this.labelledHoles()) {
       const p = this.project(r);
       if (p && !this.occluded(r, bh)) out.push({ rel: r, key: bh.key, text: bh.name, x: p.x, y: p.y, radius: shadowPx / dpr, priority: bh === sel ? 1e4 : 420, cls: bh === sel ? 'selected' : 'blackhole' });
+    }
+    for (const gv of this.galaxies.views) {
+      const isSel = gv.galaxy === sel;
+      if (!isSel && gv.pixelRadius < 2.5) continue;
+      const p = this.project(gv.rel);
+      if (p) out.push({ rel: gv.rel.clone(), key: gv.galaxy.key, text: gv.galaxy.name, x: p.x, y: p.y, radius: Math.min(gv.pixelRadius / dpr, 60), priority: isSel ? 1e4 : 640 + Math.min(gv.pixelRadius, 50), cls: isSel ? 'selected' : 'galaxy' });
     }
     {
       const mw = this.milkyWay;
@@ -983,6 +1258,9 @@ export class App {
     const jd = this.clock.jdTdb;
     this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
     for (const h of this.blackHoles) h.update(jd);
+    // planets and spacecraft move before the camera follows its anchor (which may be one of them)
+    for (const sys of this.activeSystems) sys.update(jd);
+    for (const c of this.craft.craft) c.update(jd);
 
     if (this.selection instanceof CatalogStar && !this.selection.exact && this.selection.ref) {
       const r = this.selection.ref;
@@ -998,6 +1276,7 @@ export class App {
     }
     this.rig.altitude = this.computeAltitude();
     if (this.vr.active) this.vr.updateInput(dt);
+    this.rig.braking = this.input.keys.has('KeyX');
     this.rig.update(dt, this.input);
     this.keepOutsideHorizons();
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
@@ -1014,6 +1293,7 @@ export class App {
     // Headset runtimes may clamp the far plane: pull distant geometry inside it, and fit log depth to it.
     const finiteFar = this.view.xr && Number.isFinite(this.view.far);
     GLOBALS.uPullIn.value = finiteFar ? this.view.far * 0.5 : 0;
+    LITE.uLite.value = this.vr.active ? 1 : 0;
     GLOBALS.uDepthK.value = finiteFar ? depthK(this.renderer.camera.far) : 1;
 
     // 3. exposure and level of detail
@@ -1021,8 +1301,13 @@ export class App {
     this.bodies.glareOn = this.vr.active;
     this.bodies.allowHi = !this.vr.active;
     this.bodies.update(this.rig.upos, pixelAngle, dt, this.view.quat);
+    this.bodies.updateDetail(this.renderer.gl, this.tiles, pixelAngle, new Vector3(0, 0, -1).applyQuaternion(this.view.quat));
     this.atmospheres.steps = this.vr.active ? 10 : 16;
     this.atmospheres.update(this.rig.upos, this.bodies.views);
+    this.updateActiveSystems();
+    this.exo.showOrbits = this.orbits.enabled;
+    this.exo.update(this.rig.upos, pixelAngle, this.activeSystems, jd, now / 1000);
+    this.craft.update(this.rig.upos, pixelAngle, jd, this.system.sun, this.system.byId.get(399)!);
     this.holes.vr = this.vr.active;
     this.holes.update(this.rig.upos, pixelAngle, now / 1000);
     this.jets.update(this.rig.upos, pixelAngle, now / 1000);
@@ -1033,6 +1318,7 @@ export class App {
     // one face per frame while travelling; all at once if we find ourselves far out with no map yet
     if (sunDistPc > 60) this.galaxy.update(this.renderer.gl, this.camGal, !this.galaxy.ready && sunDistPc > 150 ? 6 : 1);
     this.sky.updateWith(xStar / xDark, sunDistPc, this.galaxy.ready ? this.galaxy.target.texture : null, this.camGal);
+    this.galaxies.update(this.rig.upos, pixelAngle, xStar / xDark, smoothstep(300, 1500, sunDistPc), this.view.quat);
     this.lastMLim = mLim;
     const psf = this.starFields[0].psf;
     psf.uExposure.value = xStar;
@@ -1047,6 +1333,8 @@ export class App {
     this.orbits.focus = this.rig.anchor instanceof Body ? this.rig.anchor : null;
     this.orbits.update(this.rig.upos, pixelAngle, jd);
     this.small.update(this.rig.upos, jd);
+
+    this.game.update(dt);
 
     // 4. draw
     if (this.warmupPending) {
@@ -1075,7 +1363,12 @@ export class App {
     let selection = null;
     if (this.selection) {
       const d = this.selection.upos.sub(this.rig.upos, new Vector3()).length();
-      selection = { name: this.selection.name, rows: this.selection.info(), distance: formatDistance(d) };
+      const rows = this.selection.info();
+      if (this.selection instanceof CatalogStar && !this.isCompanion(this.selection)) {
+        const sys = this.systems.of(this.selection);
+        if (sys) rows.push(['Planets', sys.real ? `${sys.planets.length} confirmed (NASA Exoplanet Archive)` : `${sys.planets.length} generated (not observed)`]);
+      }
+      selection = { name: this.selection.name, rows, distance: formatDistance(d) };
     }
     const drawn = this.starFields.reduce((a, f) => a + f.drawnStars, 0) + this.procStars.drawnStars;
     const loaded = this.catalogs.reduce((a, c) => a + c.loadedStars, 0);

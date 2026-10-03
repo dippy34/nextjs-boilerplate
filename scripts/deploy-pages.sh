@@ -11,6 +11,10 @@ cp -r dist/. "$TMP/"
 touch "$TMP/.nojekyll"            # serve files as-is, skip Jekyll
 cd "$TMP"
 git init -q -b gh-pages
+# Start from the published branch (shallow) so the push only uploads files that changed.
+if git fetch -q --depth=1 "$REMOTE" gh-pages 2>/dev/null; then
+  git reset -q --soft FETCH_HEAD
+fi
 git add -A
 git -c user.name="${GIT_AUTHOR_NAME:-deploy}" -c user.email="${GIT_AUTHOR_EMAIL:-deploy@localhost}" commit -q -m "Deploy Space Explorer ($SRC)"
 git push -f "$REMOTE" gh-pages

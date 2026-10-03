@@ -30,6 +30,19 @@ export const scenarios = [
   { name: '16-cygnus-x1-far', query: `time=${T}&paused=1&target=Cygnus X-1&dist=3000` },
   { name: '17-galactic-core-in-plane', query: `time=${T}&paused=1&campc=603,-2659,22&look=Sagittarius A*&fov=80` },
   { name: '18-milky-way-from-outside', query: `time=${T}&paused=1&campc=-35159,-15148,14226&look=Sagittarius A*&fov=60` },
+  { name: '19-proxima-b', query: `time=${T}&paused=1&target=Proxima Cen b&dist=3.5&az=40&el=10` },
+  { name: '20-trappist-1e', query: `time=${T}&paused=1&target=TRAPPIST-1 e&dist=3.5&az=30&el=10` },
+  { name: '21-hot-jupiter-51-peg-b', query: `time=${T}&paused=1&target=51 Peg b&dist=4&az=50&el=15` },
+  { name: '22-generated-planet-altair-f', query: `time=${T}&paused=1&target=Altair f&dist=3.5&az=40&el=10` },
+  { name: '23-generated-giant-procyon-c', query: `time=${T}&paused=1&target=Procyon c&dist=5&az=30&el=20` },
+  { name: '24-iss', query: `time=${T}&paused=1&target=ISS&dist=2.2&az=200&el=25` },
+  { name: '25-jwst', query: `time=${T}&paused=1&target=JWST&dist=2.6&az=120&el=20` },
+  { name: '26-voyager-1', query: `time=${T}&paused=1&target=Voyager 1&dist=4&az=150&el=15` },
+  { name: '27-andromeda', query: `time=${T}&paused=1&target=Andromeda Galaxy&dist=2.4&fov=60` },
+  { name: '28-whirlpool', query: `time=${T}&paused=1&target=Whirlpool Galaxy&dist=2.4&fov=60` },
+  { name: '29-local-group', query: `time=${T}&paused=1&campc=-900000,600000,700000&look=Andromeda Galaxy&fov=70` },
+  { name: '30-cockpit-earth', query: `time=${T}&paused=1&target=Earth&dist=1.8&az=60&el=10&ship=cockpit&fov=70` },
+  { name: '31-chase-saturn', query: `time=${T}&paused=1&target=Saturn&dist=5&az=40&el=15&ship=chase&fov=60` },
 ];
 
 const browser = await chromium.launch({

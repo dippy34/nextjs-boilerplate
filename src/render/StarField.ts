@@ -5,7 +5,7 @@ import {
 import { buildStarColorLut } from '../astro/photometry';
 import type { StarCatalog, StarNode } from '../universe/StarCatalog';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
-import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
 
 export const STAR_VERT = /* glsl */ `
 #include <common>
@@ -43,6 +43,7 @@ void main() {
   gl_Position = projectView(viewMatrix * vec4(rel * PC, 1.0));
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
+${POINT_CLIP}
   gl_PointSize = 2.0 * radius * uDpr;
   vRadius = radius;
   vEnergy = energy;

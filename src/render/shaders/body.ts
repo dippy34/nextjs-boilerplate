@@ -59,6 +59,10 @@ uniform float uCraters;       // crater density 0..1
 uniform float uLumpy;
 uniform float uRadiusM;       // mean radius (m), for bump heights
 uniform float uMapW;          // map width (texels) for close-up detail; 0 = none
+uniform sampler2D uDetail;     // tiles of the map around the view (render/TileDetail.ts)
+uniform vec4 uDetailRect;      // map-UV window of uDetail: u0, v0, du, dv (u wraps)
+uniform float uDetailOn;
+uniform float uLite;           // 1 in VR: fewer crater layers
 uniform vec3 uSunDir;         // world-space unit vector body -> Sun
 uniform float uSunIrr;        // solar irradiance at the body (PI at 1 AU)
 uniform vec3 uSunColor;
@@ -163,7 +167,7 @@ void main() {
     float f0;
     hProc = 1.6 * craters(nB, 1.4, uSeed + 3.0, 0.3 * uCraters, f0)
           + craters(nB, 3.0, uSeed, 0.55 * uCraters, f1) + craters(nB, 8.0, uSeed + 17.0, 0.7 * uCraters, f2)
-          + craters(nB, 21.0, uSeed + 41.0, 0.85 * uCraters, f3) + 0.015 * (bfbm(nB * 5.0 + uSeed) - 0.5);
+          + (uLite > 0.5 ? 0.0 : craters(nB, 21.0, uSeed + 41.0, 0.85 * uCraters, f3)) + 0.015 * (bfbm(nB * 5.0 + uSeed) - 0.5);
     freshAll = max(f1, max(f2 * 0.8, f3 * 0.6));
   } else if (uMapW > 0.0) {
     float texPerPx = fwidth(vUv.x) * uMapW;
@@ -171,7 +175,9 @@ void main() {
     if (w > 0.0) {
       float fd;
       float fq = uMapW / 25.0;
-      hProc = w * (craters(nB, fq, uSeed, 0.6, fd) + 0.4 * craters(nB, fq * 2.7, uSeed + 9.0, 0.7, fd));
+      // patchy, as on real surfaces: crater density varies from place to place
+      float patchy = smoothstep(0.3, 0.75, bfbm(nB * 7.0 + uSeed * 0.3));
+      hProc = w * 0.55 * (craters(nB, fq, uSeed, 0.12 + 0.45 * patchy, fd) + (uLite > 0.5 ? 0.0 : 0.5 * craters(nB, fq * 2.7, uSeed + 9.0, 0.2 + 0.45 * patchy, fd)));
     }
   }
   // relief fades towards the limb, where it would only alias into a ragged silhouette
@@ -183,6 +189,16 @@ void main() {
   vec3 albedo;
   if (uHasMap > 0.5) {
     vec3 t = texture2D(uMap, vUv).rgb;
+    if (uDetailOn > 0.5) {
+      // sharper tiles inside the detail window, blended out at its edges
+      vec2 d = vec2(fract(vUv.x - uDetailRect.x) / uDetailRect.z, (vUv.y - uDetailRect.y) / uDetailRect.w);
+      if (d.x < 1.0 && d.y > 0.0 && d.y < 1.0) {
+        vec2 e = min(d, 1.0 - d);
+        float wD = smoothstep(0.0, 0.06, min(e.x, e.y));
+        vec2 gx = dFdx(vUv) / uDetailRect.zw, gy = dFdy(vUv) / uDetailRect.zw;
+        t = mix(t, textureGrad(uDetail, d, gx, gy).rgb, wD);
+      }
+    }
     if (uMapGray > 0.5) t = vec3(t.r);
     albedo = srgbToLinear(t) * uAlbedoScale;
   } else {
