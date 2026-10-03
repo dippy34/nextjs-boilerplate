@@ -20,8 +20,9 @@ const VIEWS = [
   ['jupiter', 599, 3.0, 8, 30],
   ['sun-3r', 10, 3.0, 10, 0],
   ['sun-1.1r', 10, 1.1, 10, 0],
+  ['sun-1.02r', 10, 1.02, 10, 0],
 ];
-for (const [label, id, dist, el, az] of VIEWS) {
+for (const [label, id, dist, el, az] of VIEWS.filter(([l]) => !process.env.VIEWS || process.env.VIEWS.split(',').includes(l))) {
   await page.evaluate(({ id, dist, el, az }) => {
     const a = window.app; const b = a.system.byId.get(id);
     a.select(b);
