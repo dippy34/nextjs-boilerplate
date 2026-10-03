@@ -1,0 +1,35 @@
+{
+ "license": "Public domain (U.S. Government work)",
+ "maps": {
+  "moon": {
+   "file": "moon.png",
+   "width": 2048,
+   "height": 1024,
+   "lonLeft": -180,
+   "offset": -8697.5,
+   "scale": 1.0,
+   "credit": "NASA SVS CGI Moon Kit, LRO LOLA gridded elevation (LDEM 16 ppd)",
+   "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif"
+  },
+  "mars": {
+   "file": "mars.png",
+   "width": 2048,
+   "height": 1024,
+   "lonLeft": -180,
+   "offset": -8122.98876953125,
+   "scale": 1.0,
+   "credit": "NASA/JPL/GSFC MGS MOLA, global DEM 463 m, via USGS Astrogeology",
+   "source": "https://planetarymaps.usgs.gov/mosaic/Mars_MGS_MOLA_DEM_mosaic_global_463m.tif"
+  },
+  "mercury": {
+   "file": "mercury.png",
+   "width": 2048,
+   "height": 1024,
+   "lonLeft": -180,
+   "offset": -10717.7109375,
+   "scale": 1.0,
+   "credit": "NASA/JHUAPL/CIW, MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology",
+   "source": "https://planetarymaps.usgs.gov/mosaic/Mercury_Messenger_USGS_DEM_Global_665m_v2.tif"
+  }
+ }
+}
