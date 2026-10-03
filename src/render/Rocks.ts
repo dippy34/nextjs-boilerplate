@@ -1,7 +1,12 @@
-import { BufferGeometry, Color, Group, IcosahedronGeometry, InstancedMesh, Matrix4, NoBlending, Quaternion, ShaderMaterial, Vector3 } from 'three';
+import {
+  BufferGeometry, CircleGeometry, Color, CustomBlending, DoubleSide, Group, HalfFloatType, IcosahedronGeometry, InstancedBufferAttribute, InstancedMesh,
+  Matrix4, NearestFilter, MaxEquation, NoBlending, OneFactor, OrthographicCamera, Quaternion, RGBAFormat, Scene, ShaderMaterial, Vector3, Vector4,
+  WebGLRenderTarget, type WebGLRenderer,
+} from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { UPos } from '../core/upos';
 import { vnoise } from '../universe/Terrain';
-import { MAT, MATERIALS } from './Materials';
+import { MAT, MATERIALS, ROCK_SHADOW_GLSL } from './Materials';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import type { TerrainPatch } from './TerrainPatch';
 
@@ -9,13 +14,24 @@ const ROCK_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
 ${PROJECT_PARS}
+attribute vec4 aRock;   // map u, v of the rock's place; the Sun's clearance over the relief there; brightness
 varying vec3 vN;
 varying vec3 vObj;
 varying vec3 vPosView;
+varying vec4 vRock;
+varying vec3 vNo;
+varying vec3 vR0;
+varying vec3 vR1;
+varying vec3 vR2;
 void main() {
   vObj = position;
+  vRock = aRock;
+  vNo = normal;
   mat4 im = instanceMatrix;
-  vN = normalize(mat3(modelMatrix) * mat3(im) * normal);
+  // normals: object -> world is the inverse transpose (rotation times inverse scale)
+  mat3 nm = mat3(modelMatrix) * mat3(im) * mat3(1.0 / dot(im[0].xyz, im[0].xyz), 0.0, 0.0, 0.0, 1.0 / dot(im[1].xyz, im[1].xyz), 0.0, 0.0, 0.0, 1.0 / dot(im[2].xyz, im[2].xyz));
+  vR0 = nm[0]; vR1 = nm[1]; vR2 = nm[2];
+  vN = normalize(nm * normal);
   vec4 wp = modelMatrix * im * vec4(position, 1.0);
   vPosView = wp.xyz;
   gl_Position = projectView(viewMatrix * wp);
@@ -30,7 +46,12 @@ uniform highp sampler2DArray uMatCol;
 uniform highp sampler2DArray uMatNrm;
 uniform float uMatOn;
 uniform float uLayer;
-uniform vec3 uRockColor;
+uniform sampler2D uMap;
+uniform float uHasMap;
+uniform float uMapGray;
+uniform float uAlbedoScale;
+uniform vec3 uRockColor;     // without a map: the rock's colour; with one: tint of the map's colour
+uniform vec2 uRockSat;       // saturation kept from the map, brightness relative to the ground
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform float uSunIrr;
@@ -38,55 +59,130 @@ uniform float uExposure;
 uniform float uAirless;
 uniform float uSky;
 uniform float uFade;
+uniform float uLite;
+${ROCK_SHADOW_GLSL}
 varying vec3 vN;
 varying vec3 vObj;
 varying vec3 vPosView;
+varying vec4 vRock;
+varying vec3 vNo;
+varying vec3 vR0;
+varying vec3 vR1;
+varying vec3 vR2;
+vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 void main() {
   vec3 n = normalize(vN);
   vec3 V = normalize(-vPosView);
   vec3 col = uRockColor;
+  if (uHasMap > 0.5) {
+    // the ground's own colour where the rock lies (rocks are made of the same stuff), desaturated
+    // towards rock grey on worlds with soil or plants
+    vec3 t = textureLod(uMap, vRock.xy, 4.0).rgb;
+    if (uMapGray > 0.5) t = vec3(t.r);
+    vec3 g = srgbToLinear(t) * uAlbedoScale;
+    float l = dot(g, vec3(0.2126, 0.7152, 0.0722));
+    col = mix(vec3(l) * uRockColor, g, uRockSat.x) * uRockSat.y;
+  }
+  col *= vRock.w;
   if (uMatOn > 0.5) {
     // triplanar scan texture on the rock (object space, about two repeats across a rock)
     vec3 w = pow(abs(normalize(vObj)), vec3(4.0));
     w /= w.x + w.y + w.z;
     vec3 p = vObj * 0.9;
     vec3 c = texture(uMatCol, vec3(p.yz, uLayer)).rgb * w.x + texture(uMatCol, vec3(p.xz, uLayer)).rgb * w.y + texture(uMatCol, vec3(p.xy, uLayer)).rgb * w.z;
-    col *= c * 2.0;
+    // the scan's colour as contrast only (its own hue would tint every world's rocks alike)
+    float cl = dot(c, vec3(0.2126, 0.7152, 0.0722)) * 2.0;
+    col *= mix(vec3(cl), c * 2.0, 0.35);
     vec2 nx = texture(uMatNrm, vec3(p.yz, uLayer)).rg * 2.0 - 1.0, ny = texture(uMatNrm, vec3(p.xz, uLayer)).rg * 2.0 - 1.0, nz = texture(uMatNrm, vec3(p.xy, uLayer)).rg * 2.0 - 1.0;
-    n = normalize(n + (vec3(0.0, nx) * w.x + vec3(ny.x, 0.0, ny.y) * w.y + vec3(nz, 0.0) * w.z) * 0.6);
+    // (object space is the rock's own frame, scaled per instance: close enough for the grain's direction)
+    vec3 bend = vec3(0.0, nx.x, nx.y) * w.x + vec3(ny.x, 0.0, ny.y) * w.y + vec3(nz.x, nz.y, 0.0) * w.z;
+    n = normalize(mat3(vR0, vR1, vR2) * (normalize(vNo) + bend * 0.6));
   }
-  float mu0 = max(dot(n, uSunDir), 0.0);
+  // dust settles on the tops of rocks on worlds with wind (and regolith fillets bury the base)
+  float up = vObj.y;
+  float mu0 = dot(n, uSunDir);
   float mu = max(dot(n, V), 0.0);
-  float light = uAirless > 0.5 ? (mu0 > 0.0 ? 2.0 * mu0 / (mu0 + mu + 1e-4) : 0.0) : mu0;
+  // rough rock: between Lommel-Seeliger (regolith) and Lambert, no light past the terminator
+  float ls = mu0 > 0.0 ? 2.0 * mu0 / (mu0 + mu + 1e-4) : 0.0;
+  float light = uAirless > 0.5 ? mix(ls * 0.5, max(mu0, 0.0), 0.55) * 1.25 : max(mu0, 0.0);
+  // shadows: the relief's (per rock) and the rocks' own (shadow map)
+  float ao;
+  float bias = 0.02 + 0.03 * (1.0 - max(mu0, 0.0));
+  light *= clamp(0.5 + vRock.z, 0.0, 1.0) * rockShadow(vPosView, bias, uLite, ao);
   // dark where the rock meets the ground; a little sky light on worlds with air
-  float ao = smoothstep(-0.55, 0.35, vObj.y);
+  float aoBase = smoothstep(-0.35, 0.45, up);
   vec3 L = uSunColor * (uSunIrr / 3.14159265);
-  vec3 rad = col * L * (light * (0.55 + 0.45 * ao) + uSky * (0.4 + 0.6 * ao) * (0.5 + 0.5 * n.y));
+  vec3 rad = col * L * (light * (0.7 + 0.3 * aoBase) + uSky * aoBase * (0.55 + 0.45 * n.y));
   gl_FragColor = vec4(min(rad * uExposure * uFade, vec3(6.0e4)), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
-/** A lumpy rock shape (unit size, resting on y = 0 with a little below it). */
-function rockGeometry(seed: number): BufferGeometry {
-  const g = new IcosahedronGeometry(1, 3);
+/** Shadow pass: the rocks' depth towards the Sun (largest wins), in R. */
+const SHADOW_VERT = /* glsl */ `
+uniform mat4 uM;
+varying float vT;
+void main() {
+  vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+  vec3 s = (uM * wp).xyz;
+  vT = s.z;
+  gl_Position = vec4(s.xy * 2.0 - 1.0, 0.5, 1.0);
+}`;
+const SHADOW_FRAG = /* glsl */ `
+varying float vT;
+void main() { gl_FragColor = vec4(exp(vT / 16.0), 0.0, 0.0, 0.0); }   // (positive, so a clear to 0 means no rock)`;
+/** Contact pass: a soft disc around each rock's base seen from above, in G. */
+const AO_VERT = /* glsl */ `
+uniform mat4 uM;
+varying float vR;
+void main() {
+  vR = length(position.xz);
+  vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
+  vec3 s = (uM * wp).xyz;
+  gl_Position = vec4(s.xy * 2.0 - 1.0, 0.5, 1.0);
+}`;
+const AO_FRAG = /* glsl */ `
+varying float vR;
+void main() {
+  float a = 1.0 - smoothstep(0.75, 1.9, vR);
+  gl_FragColor = vec4(0.0, a * a, 0.0, 0.0);
+}`;
+
+/** Unit rock shapes: broken blocks (a lumpy body cut by fracture planes, softened), resting on y = 0. */
+function rockGeometry(seed: number, detail: number): BufferGeometry {
+  const g0 = new IcosahedronGeometry(1, detail);
+  g0.deleteAttribute('normal');
+  g0.deleteAttribute('uv');
+  const g = mergeVertices(g0);
+  g0.dispose();
   const p = g.attributes.position;
   const v = new Vector3();
+  // fracture planes: some steep (the sides), one or two shallow (the top)
+  const planes: { n: Vector3; d: number }[] = [];
+  const rnd = (k: number) => vnoise(seed * 3.1 + k * 1.37, seed * 0.7 + k * 2.11, k * 0.53, 777) * 1.6 - 0.3;
+  const np = 6 + (seed % 3);
+  for (let k = 0; k < np; k++) {
+    const a = (k / np) * Math.PI * 2 + rnd(k) * 1.2;
+    const el = k < 2 ? 0.9 + 0.5 * Math.abs(rnd(k + 20)) : (rnd(k + 40) - 0.2) * 0.6;
+    planes.push({ n: new Vector3(Math.cos(a) * Math.cos(el), Math.sin(el), Math.sin(a) * Math.cos(el)).normalize(), d: 0.62 + 0.25 * Math.abs(rnd(k + 60)) });
+  }
+  // soft minimum (rounded edges, as weathered rock)
+  const smin = (a: number, b: number, k: number) => { const h = Math.max(0, Math.min(1, 0.5 + (0.5 * (b - a)) / k)); return b + (a - b) * h - k * h * (1 - h); };
   for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    const n = v.clone().normalize();
-    const r = 1 + 0.32 * (vnoise(n.x * 1.6 + seed, n.y * 1.6, n.z * 1.6, seed) - 0.5) + 0.14 * (vnoise(n.x * 4.1, n.y * 4.1 + seed, n.z * 4.1, seed + 3) - 0.5)
-      + 0.06 * (vnoise(n.x * 9.0, n.y * 9.0, n.z * 9.0 + seed, seed + 7) - 0.5);
-    // flattened, and with flat-ish facets like broken rock
-    v.copy(n).multiplyScalar(r);
-    v.y *= 0.62;
+    v.fromBufferAttribute(p, i).normalize();
+    let r = 1 + 0.22 * (vnoise(v.x * 1.5 + seed, v.y * 1.5, v.z * 1.5, seed) - 0.5);
+    for (const pl of planes) {
+      const c = v.dot(pl.n);
+      if (c > 0.05) r = smin(r, pl.d / c, 0.07);
+    }
+    r *= 1 + 0.05 * (vnoise(v.x * 6 + seed, v.y * 6, v.z * 6, seed + 3) - 0.5) + 0.025 * (vnoise(v.x * 15, v.y * 15 + seed, v.z * 15, seed + 7) - 0.5);
+    v.multiplyScalar(r);
+    v.y *= 0.7;
     p.setXYZ(i, v.x, v.y, v.z);
   }
   g.computeVertexNormals();
   return g;
 }
-
-interface RockCell { key: string; pos: Float64Array; data: Float32Array; n: number }
 
 const hash = (x: number, y: number, z: number, s: number) => {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(z | 0, 1440662683) ^ Math.imul(s | 0, 1274126177);
@@ -94,18 +190,36 @@ const hash = (x: number, y: number, z: number, s: number) => {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
 
-const TIERS = [
-  // cell size (m), reach (m), rocks per cell (mean, at density 1), size range (m)
-  { cell: 3, reach: 28, perCell: 5, min: 0.05, max: 0.35 },
-  { cell: 12, reach: 170, perCell: 1.6, min: 0.3, max: 3.5 },
+interface Tier {
+  cell: number; reach: number; reachVr: number;
+  /** rocks per cell (mean, at density 1) */
+  perCell: number;
+  /** sizes (m): smallest, largest; cumulative count ~ size^-slope */
+  min: number; max: number; slope: number;
+  seed: number;
+}
+const TIERS: Tier[] = [
+  { cell: 2, reach: 24, reachVr: 14, perCell: 3.2, min: 0.04, max: 0.3, slope: 2.2, seed: 11 },
+  { cell: 9, reach: 110, reachVr: 70, perCell: 1.3, min: 0.25, max: 1.6, slope: 2.4, seed: 29 },
+  { cell: 40, reach: 320, reachVr: 220, perCell: 0.5, min: 1.2, max: 7, slope: 2.6, seed: 53 },
 ];
+const SHAPES = 6;
+/** rocks larger than this (m) use the detailed shapes */
+const BIG = 0.7;
+
+interface RockCell { key: string; serial: number; pos: Float64Array; data: Float32Array; n: number }
+// per rock in RockCell.data: size, turn, stretch, height, shape, tilt x, tilt y, tilt z (up), brightness, sun clearance, map u, map v
+const D = 12;
 
 /**
  * Rocks on the ground around the explorer: deterministic per cell of the body-fixed lattice
- * (so the same place always has the same rocks), sizes from a steep power law, set on the terrain
- * actually drawn (TerrainPatch.groundRadius) and sunk a little into it, textured with the rock
- * scans (render/Materials.ts) and lit like the ground. Only near the surface, once the terrain is
- * at full height.
+ * (the same place always has the same rocks), in three tiers (pebbles, rocks, boulders) with sizes
+ * from power laws and patchy density (strewn fields and bare ground). Each is set on the terrain
+ * actually drawn (TerrainPatch.groundRadius), tilted to the slope and sunk in at its lowest
+ * side, and re-placed whenever a new patch replaces the old. Coloured from the world's map where
+ * it lies, textured with the rock scans, shadowed by the relief (TerrainPatch.sunClearance), and
+ * casting shadows on the ground and on each other through a small shadow map (with a contact
+ * darkening around their bases), which the terrain shader samples (ROCK_SHADOW_GLSL).
  */
 export class Rocks {
   readonly group = new Group();
@@ -115,53 +229,98 @@ export class Rocks {
   private origin = new Vector3();
   private body: object | null = null;
   private dirty = true;
-  private max: number;
+  private cap: number;
+  private vr: boolean;
   budgetMs = 4;
+  // shadow map
+  private target: WebGLRenderTarget;
+  private shScene = new Scene();
+  private shGroup = new Group();
+  private shMat: ShaderMaterial;
+  private aoMat: ShaderMaterial;
+  private shMeshes: InstancedMesh[] = [];
+  private aoMeshes: InstancedMesh[] = [];
+  private shCam = new OrthographicCamera();
+  /** half-size (m) of the area the shadow map covers around the explorer */
+  shadowReach: number;
+  shadows = true;
 
   constructor(private terrain: TerrainPatch, vr = false) {
+    this.vr = vr;
     this.group.name = 'rocks';
     this.group.matrixAutoUpdate = false;
-    this.max = vr ? 900 : 3000;
+    this.cap = vr ? 1400 : 5000;
     this.mat = new ShaderMaterial({
       name: 'rocks', vertexShader: ROCK_VERT, fragmentShader: ROCK_FRAG,
       uniforms: {
-        ...MATERIALS, uLayer: { value: MAT.cliff }, uRockColor: { value: new Color(0.2, 0.2, 0.2) },
+        ...MATERIALS, uLayer: { value: MAT.cliff }, uRockColor: { value: new Color(0.2, 0.2, 0.2) }, uRockSat: { value: { x: 1, y: 1 } },
+        uMap: { value: null }, uHasMap: { value: 0 }, uMapGray: { value: 0 }, uAlbedoScale: { value: 1 },
         uSunDir: { value: new Vector3(1, 0, 0) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI }, uExposure: { value: 1 },
         uAirless: { value: 1 }, uSky: { value: 0 }, uFade: { value: 1 }, uLite: LITE.uLite, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       // opaque, but in the transparent pass like the terrain (after the atmosphere shell)
       transparent: true, blending: NoBlending,
     });
-    for (let k = 0; k < 4; k++) {
-      const m = new InstancedMesh(rockGeometry(k * 17.3 + 2), this.mat, Math.ceil(this.max / 4));
-      m.count = 0;
-      m.frustumCulled = false;
-      m.renderOrder = 19.92;   // after the terrain (19.9), before its haze (19.95)
-      this.meshes.push(m);
-      this.group.add(m);
+    const size = vr ? 1024 : 2048;
+    this.shadowReach = vr ? 30 : 48;
+    MATERIALS.uRockTexel.value = 1 / size;
+    this.target = new WebGLRenderTarget(size, size, { type: HalfFloatType, format: RGBAFormat, depthBuffer: false, minFilter: NearestFilter, magFilter: NearestFilter, generateMipmaps: false });
+    const blend = { blending: CustomBlending, blendEquation: MaxEquation, blendSrc: OneFactor, blendDst: OneFactor, depthTest: false, depthWrite: false, side: DoubleSide };
+    this.shMat = new ShaderMaterial({ name: 'rock-shadow', vertexShader: SHADOW_VERT, fragmentShader: SHADOW_FRAG, uniforms: { uM: { value: new Matrix4() } }, ...blend });
+    this.aoMat = new ShaderMaterial({ name: 'rock-contact', vertexShader: AO_VERT, fragmentShader: AO_FRAG, uniforms: { uM: { value: new Matrix4() } }, ...blend });
+    const disc = new CircleGeometry(1.9, 20).rotateX(-Math.PI / 2);
+    this.shGroup.matrixAutoUpdate = false;
+    this.shScene.add(this.shGroup);
+    this.shScene.matrixWorldAutoUpdate = true;
+    for (const big of [false, true]) {
+      for (let k = 0; k < SHAPES; k++) {
+        const n = big ? Math.ceil(this.cap / 10) : Math.ceil(this.cap / SHAPES);
+        const m = new InstancedMesh(rockGeometry(k * 17 + 2, big ? 4 : 2), this.mat, n);
+        m.geometry.setAttribute('aRock', new InstancedBufferAttribute(new Float32Array(n * 4), 4));
+        m.count = 0;
+        m.frustumCulled = false;
+        m.renderOrder = 19.92;   // after the terrain (19.9), before its haze (19.95)
+        this.meshes.push(m);
+        this.group.add(m);
+        const s = new InstancedMesh(m.geometry, this.shMat, n);
+        s.instanceMatrix = m.instanceMatrix;
+        s.frustumCulled = false;
+        const a = new InstancedMesh(disc, this.aoMat, n);
+        a.instanceMatrix = m.instanceMatrix;
+        a.frustumCulled = false;
+        this.shMeshes.push(s);
+        this.aoMeshes.push(a);
+        this.shGroup.add(s, a);
+      }
     }
     this.group.visible = false;
   }
 
-  /** Per frame, after the terrain patch. `cam`: the explorer's position. */
-  update(cam: UPos): void {
+  /** Per frame, after the terrain patch. `cam`: the explorer's position; `gl` renders the shadow map. */
+  update(cam: UPos, gl?: WebGLRenderer): void {
     const t = this.terrain;
     const c = t.current;
     const below = t.below(cam);
-    if (!c || !below || t.hScale < 0.99 || below.dist - below.ground > 600) { this.group.visible = false; return; }
+    const hide = () => { this.group.visible = false; MATERIALS.uRockOn.value = 0; };
+    if (!c || !below || t.hScale < 0.99 || below.dist - below.ground > 700) { hide(); return; }
     const g = c.ground;
     const density = this.density(c);
-    if (density <= 0) { this.group.visible = false; return; }
+    if (density <= 0) { hide(); return; }
     if (g.owner !== this.body) { this.cells.clear(); this.body = g.owner; this.dirty = true; }
     const R = below.ground;
     const camBF = below.dir.clone().multiplyScalar(below.dist);
     // rebase when the explorer has moved far from the instances' origin
     if (this.origin.distanceTo(camBF) > 120 || this.dirty) { this.origin.copy(below.dir).multiplyScalar(R); this.dirty = true; }
-    // cells wanted, generated within the time budget (nearest first)
+    // a new patch (or new shadows): every rock is placed again, nearest first, within the budget
+    const serial = t.serial;
     const t0 = performance.now();
     const want = new Set<string>();
+    const hAbove = below.dist - below.ground;
     for (const tier of TIERS) {
-      const s = tier.cell, reach = tier.reach;
+      const s = tier.cell;
+      // tiers that would be under a pixel are left out from high up
+      const reach = Math.min(this.vr ? tier.reachVr : tier.reach, (this.vr ? tier.reachVr : tier.reach) * (tier.max * 400) / Math.max(hAbove, 1));
+      if (reach < s) continue;
       const ground = below.dir.clone().multiplyScalar(R);
       const lo = ground.clone().subScalar(reach).divideScalar(s).floor(), hi = ground.clone().addScalar(reach).divideScalar(s).floor();
       const list: { k: string; d: number; x: number; y: number; z: number }[] = [];
@@ -176,9 +335,10 @@ export class Rocks {
       list.sort((a, b) => a.d - b.d);
       for (const e of list) {
         want.add(e.k);
-        if (this.cells.has(e.k)) continue;
+        const old = this.cells.get(e.k);
+        if (old && old.serial === serial) continue;
         if (performance.now() - t0 > this.budgetMs) continue;
-        this.cells.set(e.k, this.makeCell(e.k, e.x, e.y, e.z, tier, density));
+        this.cells.set(e.k, this.makeCell(e.k, e.x, e.y, e.z, tier, density, c.lonLeft, serial));
         this.dirty = true;
       }
     }
@@ -186,7 +346,8 @@ export class Rocks {
     if (this.dirty) this.fill();
     // place the group: body-fixed origin -> camera-relative world
     const q = new Quaternion().setFromRotationMatrix(c.orient);
-    const o = this.origin.clone().applyQuaternion(q).add(c.upos.sub(cam, new Vector3()));
+    const rel = c.upos.sub(cam, new Vector3());
+    const o = this.origin.clone().applyQuaternion(q).add(rel);
     this.group.matrix.compose(o, q, new Vector3(1, 1, 1));
     this.group.matrixWorldNeedsUpdate = true;
     // light and colour from the world's own material
@@ -196,10 +357,61 @@ export class Rocks {
     m.uSunIrr.value = u.uSunIrr.value;
     m.uExposure.value = (u.uExposure.value as number);
     m.uAirless.value = u.uAirless ? u.uAirless.value : 0;
-    m.uSky.value = u.uAtmo && (u.uAtmo.value as number) > 0.5 ? 0.12 : u.uAtmoColor ? 0.08 : 0;
-    this.rockColour(c, m.uRockColor.value as Color);
+    m.uSky.value = u.uAtmo && (u.uAtmo.value as number) > 0.5 ? 0.15 : u.uAtmoColor ? 0.08 : 0;
+    m.uMap.value = u.uMap?.value ?? null;
+    m.uHasMap.value = u.uHasMap?.value ?? 0;
+    m.uMapGray.value = u.uMapGray?.value ?? 0;
+    m.uAlbedoScale.value = u.uAlbedoScale?.value ?? 1;
+    this.rockColour(c, m.uRockColor.value as Color, m.uRockSat.value as { x: number; y: number });
     m.uLayer.value = u.uMatSel ? (u.uMatMode?.value === 3 ? MAT.snow : MAT.cliff) : MAT.cliff;
     this.group.visible = true;
+    // shadow map around the ground below the explorer
+    if (gl && this.shadows) this.renderShadows(gl, below.dir.clone().multiplyScalar(R).applyQuaternion(q).add(rel), below.dir.clone().applyQuaternion(q), u.uSunDir.value as Vector3);
+    else MATERIALS.uRockOn.value = 0;
+  }
+
+  private renderShadows(gl: WebGLRenderer, centre: Vector3, up: Vector3, sun: Vector3): void {
+    if (sun.dot(up) < -0.05) { MATERIALS.uRockOn.value = 0; return; }
+    const E = this.shadowReach;
+    // (u, v, depth) from camera-relative world positions: across the sunlight, and seen from above
+    const proj = (z: Vector3, out: Matrix4, depth: boolean) => {
+      const x = new Vector3().crossVectors(Math.abs(z.y) < 0.9 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0), z).normalize();
+      const y = new Vector3().crossVectors(z, x);
+      const k = 1 / (2 * E);
+      out.set(
+        x.x * k, x.y * k, x.z * k, 0.5 - centre.dot(x) * k,
+        y.x * k, y.y * k, y.z * k, 0.5 - centre.dot(y) * k,
+        depth ? z.x : 0, depth ? z.y : 0, depth ? z.z : 0, depth ? -centre.dot(z) : 0,
+        0, 0, 0, 1);
+    };
+    proj(sun, MATERIALS.uRockShM.value, true);
+    proj(up, MATERIALS.uRockAOM.value, false);
+    this.shMat.uniforms.uM.value.copy(MATERIALS.uRockShM.value);
+    this.aoMat.uniforms.uM.value.copy(MATERIALS.uRockAOM.value);
+    this.shGroup.matrix.copy(this.group.matrix);
+    this.shGroup.matrixWorldNeedsUpdate = true;
+    this.shMeshes.forEach((s, i) => { s.count = this.meshes[i].count; });
+    this.aoMeshes.forEach((s, i) => { s.count = this.meshes[i].count; });
+    const prev = gl.getRenderTarget();
+    const xr = gl.xr.enabled;
+    const clear = new Color(), ca = gl.getClearAlpha();
+    gl.getClearColor(clear);
+    gl.xr.enabled = false;
+    gl.setRenderTarget(this.target);
+    gl.setClearColor(0x000000, 0);
+    gl.clear(true, false, false);
+    // both passes in one target: R keeps the largest depth, G the strongest contact shading
+    for (const a of this.aoMeshes) a.visible = false;
+    gl.render(this.shScene, this.shCam);
+    for (const a of this.aoMeshes) a.visible = true;
+    for (const s of this.shMeshes) s.visible = false;
+    gl.render(this.shScene, this.shCam);
+    for (const s of this.shMeshes) s.visible = true;
+    gl.setRenderTarget(prev);
+    gl.setClearColor(clear, ca);
+    gl.xr.enabled = xr;
+    MATERIALS.uRockMap.value = this.target.texture;
+    MATERIALS.uRockOn.value = 1;
   }
 
   /** Rocks per cell relative to the lunar maria (1): fewer on worlds with soil and plants. */
@@ -210,74 +422,127 @@ export class Rocks {
       return t >= 6 ? 0 : [0.7, 1.0, 0.45, 0.2, 0.15, 0.25][t] ?? 0;
     }
     const mode = (u.uMatMode?.value as number) ?? 0;
-    return mode === 1 ? 0.12 : mode === 2 ? 0.8 : mode === 3 ? 0.3 : 1.0;
+    return mode === 1 ? 0.25 : mode === 2 ? 1.3 : mode === 3 ? 0.4 : 1.0;
   }
 
-  private rockColour(c: NonNullable<TerrainPatch['current']>, out: Color): void {
+  /** Rock colour: `out` is the colour without a map, or a tint of the map's grey; `sat`: saturation kept, brightness. */
+  private rockColour(c: NonNullable<TerrainPatch['current']>, out: Color, sat: { x: number; y: number }): void {
     const u = c.material.uniforms;
-    if (u.uC3) { const v = u.uC3.value as Vector3; out.setRGB(v.x * 0.8, v.y * 0.8, v.z * 0.8); return; }
+    if (u.uC3) { const v = u.uC3.value as Vector3; out.setRGB(v.x * 0.8, v.y * 0.8, v.z * 0.8); sat.x = 1; sat.y = 1; return; }
     const mode = (u.uMatMode?.value as number) ?? 0;
     const a = (u.uAlbedoScale?.value as number) ?? 0.12;
-    if (mode === 1) out.setRGB(0.22, 0.2, 0.18);
-    else if (mode === 2) out.setRGB(0.26, 0.15, 0.09);
-    else if (mode === 3) out.setRGB(0.6, 0.62, 0.65);
-    else { const g = Math.min(0.3, Math.max(0.08, a * 1.1)); out.setRGB(g, g * 0.97, g * 0.94); }
+    // Earth: grey-brown rock whatever grows around it; Mars: dark basalt under a little dust;
+    // ice worlds: blocks of the surface's ice; airless rock: the regolith's own colour, a little brighter
+    if (mode === 1) { out.setRGB(1.25, 1.12, 0.98); sat.x = 0.15; sat.y = 1.1; }
+    else if (mode === 2) { out.setRGB(0.95, 0.85, 0.75); sat.x = 0.5; sat.y = 0.75; }
+    else if (mode === 3) { out.setRGB(1, 1, 1); sat.x = 1; sat.y = 0.95; }
+    else { out.setRGB(1, 1, 1); sat.x = 1; sat.y = 1.08; }
+    if (!u.uHasMap?.value) {
+      if (mode === 1) out.setRGB(0.22, 0.2, 0.18);
+      else if (mode === 2) out.setRGB(0.2, 0.13, 0.09);
+      else if (mode === 3) out.setRGB(0.6, 0.62, 0.65);
+      else {
+        const col = u.uColor?.value as Vector3 | Color | undefined;
+        const g = Math.min(0.3, Math.max(0.06, a * 1.1));
+        if (col && 'x' in col) out.setRGB(col.x * a, col.y * a, col.z * a);
+        else if (col) out.setRGB(col.r * a, col.g * a, col.b * a);
+        else out.setRGB(g, g * 0.97, g * 0.94);
+      }
+    }
   }
 
-  private makeCell(key: string, x: number, y: number, z: number, tier: (typeof TIERS)[number], density: number): RockCell {
-    const s = tier.cell;
-    const seed = s === 3 ? 11 : 29;
-    const mean = tier.perCell * density;
+  private makeCell(key: string, x: number, y: number, z: number, tier: Tier, density: number, lonLeftDeg: number, serial: number): RockCell {
+    const s = tier.cell, seed = tier.seed;
+    // patchy: strewn fields (around fresh craters, below outcrops) and nearly bare ground
+    const cx = (x + 0.5) * s, cy = (y + 0.5) * s, cz = (z + 0.5) * s;
+    const f = vnoise(cx / 70, cy / 70, cz / 70, 5) * 0.65 + vnoise(cx / 260, cy / 260, cz / 260, 9) * 0.35;
+    const clump = 0.12 + 3.2 * Math.pow(Math.max(0, f - 0.25) / 0.75, 2.2);
+    const mean = tier.perCell * density * clump;
     // Poisson count from the cell's hash
     let n = 0;
-    for (let p = Math.exp(-mean), u = hash(x, y, z, seed), cum = p; u > cum && n < 30; ) { n++; p *= mean / n; cum += p; }
-    const pos = new Float64Array(n * 3), data = new Float32Array(n * 5);
+    for (let p = Math.exp(-mean), u = hash(x, y, z, seed), cum = p; u > cum && n < 40; ) { n++; p *= mean / n; cum += p; }
+    const pos = new Float64Array(n * 3), data = new Float32Array(n * D);
     const t = this.terrain;
-    const dir = new Vector3();
+    const dir = new Vector3(), up = new Vector3(), e1 = new Vector3(), e2 = new Vector3(), tmp = new Vector3();
+    const lon0 = (lonLeftDeg * Math.PI) / 180;
     let m = 0;
     for (let i = 0; i < n; i++) {
-      const hx = hash(x, y, z, seed + 7 * i + 1), hy = hash(x, y, z, seed + 7 * i + 2), hz = hash(x, y, z, seed + 7 * i + 3);
-      dir.set((x + hx) * s, (y + hy) * s, (z + hz) * s).normalize();
+      const hs = (j: number) => hash(x, y, z, seed + 13 * i + j);
+      dir.set((x + hs(1)) * s, (y + hs(2)) * s, (z + hs(3)) * s).normalize();
       const gr = t.groundRadius(dir);
       if (!(gr > 0)) continue;
-      // steep power law: most small, a few large
-      const u = hash(x, y, z, seed + 7 * i + 4);
-      const size = Math.min(tier.max, tier.min / Math.pow(Math.max(u, 1e-3), 0.55));
-      if (size > tier.max * 0.999 && hash(x, y, z, seed + 7 * i + 6) > 0.3) continue;
-      pos[m * 3] = dir.x * gr; pos[m * 3 + 1] = dir.y * gr; pos[m * 3 + 2] = dir.z * gr;
-      data[m * 5] = size;
-      data[m * 5 + 1] = hash(x, y, z, seed + 7 * i + 5) * Math.PI * 2;   // turn about the vertical
-      data[m * 5 + 2] = 0.75 + 0.6 * hash(x, y, z, seed + 7 * i + 6);    // stretch
-      data[m * 5 + 3] = 0.55 + 0.6 * hash(x, y, z, seed + 7 * i + 8);    // height
-      data[m * 5 + 4] = Math.floor(hash(x, y, z, seed + 7 * i + 9) * 4); // shape
+      // truncated power law: most small, a few large
+      const lo = Math.pow(tier.min, -tier.slope), hi = Math.pow(tier.max, -tier.slope);
+      const size = Math.pow(lo + (hi - lo) * hs(4), -1 / tier.slope);
+      const stretch = 0.7 + 0.7 * hs(6);
+      const height = (0.45 + 0.6 * hs(8)) * (size > 2 ? 0.8 : 1);
+      // resting on the slope: the ground at the rock's edges gives the tilt and the lowest point
+      up.copy(dir);
+      let base = gr;
+      if (size > 0.25) {
+        e1.crossVectors(Math.abs(dir.z) < 0.9 ? tmp.set(0, 0, 1) : tmp.set(1, 0, 0), dir).normalize();
+        e2.crossVectors(dir, e1);
+        const r = 0.6 * size / gr;
+        const h = [e1, e2].map((ax) => [1, -1].map((sg) => t.groundRadius(tmp.copy(dir).addScaledVector(ax, sg * r).normalize())));
+        if (h.every((p) => p.every((v) => v > 0))) {
+          base = Math.min(gr, h[0][0], h[0][1], h[1][0], h[1][1]);
+          const dx = (h[0][0] - h[0][1]) / (2 * 0.6 * size), dy = (h[1][0] - h[1][1]) / (2 * 0.6 * size);
+          up.addScaledVector(e1, -dx).addScaledVector(e2, -dy).normalize();
+        }
+      }
+      const rad = base;
+      pos[m * 3] = dir.x * rad; pos[m * 3 + 1] = dir.y * rad; pos[m * 3 + 2] = dir.z * rad;
+      const o = m * D;
+      data[o] = size;
+      data[o + 1] = hs(5) * Math.PI * 2;           // turn about the vertical
+      data[o + 2] = stretch;
+      data[o + 3] = height;
+      data[o + 4] = Math.floor(hs(9) * SHAPES);    // shape
+      data[o + 5] = up.x; data[o + 6] = up.y; data[o + 7] = up.z;
+      data[o + 8] = 0.8 + 0.4 * hs(10);             // brightness
+      data[o + 9] = t.sunClearance(tmp.copy(dir).multiplyScalar(rad).addScaledVector(up, size * height * 0.4).normalize());
+      const lon = Math.atan2(dir.y, dir.x), lat = Math.asin(Math.max(-1, Math.min(1, dir.z)));
+      let uu = (lon - lon0) / (2 * Math.PI);
+      uu -= Math.floor(uu);
+      data[o + 10] = uu; data[o + 11] = 0.5 + lat / Math.PI;
       m++;
     }
-    return { key, pos, data, n: m };
+    return { key, serial, pos, data, n: m };
   }
 
   /** Rebuild the instance matrices relative to the current origin. */
   private fill(): void {
     this.dirty = false;
-    const counts = [0, 0, 0, 0];
-    const cap = this.meshes[0].instanceMatrix.count;
+    const counts = this.meshes.map(() => 0);
     const mtx = new Matrix4(), q = new Quaternion(), q2 = new Quaternion(), sc = new Vector3(), p = new Vector3(), up = new Vector3();
     const Y = new Vector3(0, 1, 0);
+    const v4 = new Vector4();
     for (const c of this.cells.values()) {
       for (let i = 0; i < c.n; i++) {
-        const k = c.data[i * 5 + 4];
-        if (counts[k] >= cap) continue;
+        const o = i * D;
+        const size = c.data[o];
+        const k = c.data[o + 4] + (size > BIG ? SHAPES : 0);
+        const mesh = this.meshes[k];
+        if (counts[k] >= mesh.instanceMatrix.count) continue;
         p.set(c.pos[i * 3], c.pos[i * 3 + 1], c.pos[i * 3 + 2]);
-        up.copy(p).normalize();
-        const size = c.data[i * 5];
-        q.setFromUnitVectors(Y, up).multiply(q2.setFromAxisAngle(Y, c.data[i * 5 + 1]));
-        sc.set(size * c.data[i * 5 + 2], size * c.data[i * 5 + 3], size);
-        // sunk by a quarter of its height
-        p.sub(this.origin).addScaledVector(up, -0.25 * sc.y * 0.62);
+        up.set(c.data[o + 5], c.data[o + 6], c.data[o + 7]);
+        q.setFromUnitVectors(Y, up).multiply(q2.setFromAxisAngle(Y, c.data[o + 1]));
+        sc.set(size * c.data[o + 2], size * c.data[o + 3], size);
+        // sunk into the ground: a third of its (half-)height, more for small stones
+        const sink = (size < 0.15 ? 0.45 : 0.3) * sc.y * 0.7;
+        p.sub(this.origin).addScaledVector(up, -sink);
         mtx.compose(p, q, sc);
-        this.meshes[k].setMatrixAt(counts[k]++, mtx);
+        const j = counts[k]++;
+        mesh.setMatrixAt(j, mtx);
+        v4.set(c.data[o + 10], c.data[o + 11], c.data[o + 9], c.data[o + 8]);
+        (mesh.geometry.attributes.aRock as InstancedBufferAttribute).setXYZW(j, v4.x, v4.y, v4.z, v4.w);
       }
     }
-    this.meshes.forEach((m, k) => { m.count = counts[k]; m.instanceMatrix.needsUpdate = true; });
+    this.meshes.forEach((m, k) => {
+      m.count = counts[k];
+      m.instanceMatrix.needsUpdate = true;
+      m.geometry.attributes.aRock.needsUpdate = true;
+    });
   }
 
   /** Rock material and a mesh, for compiling the shader up front. */

@@ -337,6 +337,26 @@ export class TerrainSource {
     for (let L = top; L > minL && o < 16; L *= 0.5, o++) {
       h += (vnoise(px / L, py / L, pz / L, s + o * 7) - 0.5) * 2 * slope * L * (L > topP ? 1 - wP : 1);
     }
+    // a world with oceans: high ground gets mountain detail below the elevation model's resolution:
+    // sharp ridges and steep valley sides (ridged noise, warped so the ridges wander), strongest in
+    // the high ranges, so peaks seen up close are rock walls and arêtes rather than smooth domes
+    if (sea !== undefined) {
+      const t = Math.min(1, Math.max(0, (h - sea - 800) / 2600));
+      const mtn = t * t * (3 - 2 * t);
+      if (mtn > 0) {
+        const L0 = Math.min(top, 2400);
+        let a = 0.16;
+        for (let L = L0, k = 0; L > minL && k < 10; L *= 0.5, k++) {
+          const wx = (vnoise(px / L + 3.1, py / L, pz / L, s + 500 + k) - 0.5) * 0.9;
+          const wy = (vnoise(px / L, py / L + 5.3, pz / L, s + 520 + k) - 0.5) * 0.9;
+          const n = vnoise(px / L + wx, py / L + wy, pz / L, s + 540 + k);
+          const r = 1 - Math.abs(2 * n - 1);
+          h += (r * r - 0.42) * a * L * mtn * (L > topP ? 1 - wP : 1);
+          // finer octaves a little gentler (scree and snow soften the smallest forms)
+          if (L < 40) a = 0.1;
+        }
+      }
+    }
     // crater fields: cells of 40 km down to 30 m, each a fifth the size of the one before
     const dens = this.craters.get(b) ?? 0.8;
     if (dens > 0.05) {

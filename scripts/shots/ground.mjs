@@ -5,7 +5,7 @@ const out = process.argv[3] ?? '/tmp/claude-0/ground';
 const sites = (process.env.SITES ?? 'Apollo 17 landing site:Moon,Gale Crater (Curiosity):Mars,Mount Everest:Earth').split(',').map((s) => s.split(':'));
 const views = (process.env.VIEWS ?? '2,40,400').split(',').map(Number);
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 1280), height: Number(process.env.H ?? 720) } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -50,7 +50,7 @@ for (const [name, body] of sites) {
         a.rig.upos.addVec(out, hgt - (below.dist - below.ground));
       }, hgt);
     }
-    await frames(20);
+    await frames(Number(process.env.SETTLE ?? 20));
     const st = await page.evaluate(() => ({ alt: window.app.rig.altitude, owner: window.app.terrain.owner?.name, mat: (window.app.terrain.group.children.find((m) => m.material?.uniforms?.uMatOn)?.material.uniforms.uMatOn.value) ?? null, fps: Math.round(window.app.fps) }));
     await page.screenshot({ path: `${out}-${body}-${hgt}.png`, timeout: 240000 });
     console.log('shot', name, hgt, JSON.stringify(st));
