@@ -1,6 +1,6 @@
 import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, Points, Quaternion, ShaderMaterial, Vector2, Vector3, Vector4 } from 'three';
 import type { UPos } from '../core/upos';
-import { discFrame, type Galaxy, type GalaxyShape } from '../universe/Galaxies';
+import { discFrame, type Galaxy } from '../universe/Galaxies';
 import { noise3D, sampleNoise } from './Noise3D';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, POINT_CLIP, PROJECT_PARS } from './shaders/xr';
 
@@ -889,4 +889,3 @@ export class GalaxiesLayer {
   }
 }
 
-export type { GalaxyShape };
