@@ -81,7 +81,8 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   - Walking: `App.keepAboveGround` keeps eye height within 4 m of the ground unless climbing.
   - Nebula volumes: `DeepSkyLayer` (VOL_FRAG ray-marches the nearest nebula within ~3 radii, cross-fading
     with the billboards).
-  - Tests: `scripts/terrain.mjs` (landing terrain and the Tycho / Olympus Mons patches, 11 checks),
+  - Tests: `scripts/terrain.mjs` (landing terrain, the Tycho / Olympus Mons / Everest patches and the
+    atmosphere over terrain, 14 checks),
     `scripts/places.mjs` (rings, comet, lunar eclipse, Jupiter moon shadow, landmarks, inside the
     Orion Nebula).
 
