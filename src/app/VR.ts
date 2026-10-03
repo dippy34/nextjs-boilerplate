@@ -76,6 +76,8 @@ export class VRSupport {
   private wristTimer = 0;
   private saved = { starLimit: 7.5, orbits: true };
   private button: HTMLButtonElement | null = null;
+  /** comfort vignette strength asked for by walking (src/app/Walk.ts), 0..1 */
+  comfort = 0;
 
   constructor(private app: App, readonly supported: boolean, dataBase: string) {
     this.labelsGroup.name = 'vr-labels';
@@ -405,6 +407,7 @@ export class VRSupport {
     if (!tr) {
       v.fade.value = Math.max(0, v.fade.value - dt * 3);
       v.tunnel.value = Math.max(0, v.tunnel.value - dt * 2);
+      v.tunnel.value += (Math.max(v.tunnel.value, this.comfort) - v.tunnel.value) * Math.min(1, dt * 6); // walking comfort
       return;
     }
     tr.t += dt;
@@ -515,7 +518,8 @@ export class VRSupport {
       const edge = (i: number) => !!pressed[i] && !h.prev[i];
       const squeeze = (gp.buttons[1]?.value ?? 0) > 0.5;
       if (h.handedness === 'left') {
-        if ((x || y) && !this.travel) {
+        if (app.walk.walking) app.walk.vrMove(x, y, squeeze); // walking: stick moves along the ground, grip runs
+        else if ((x || y) && !this.travel) {
           const ctrlQ = h.obj.getWorldQuaternion(new Quaternion());
           const fwd = new Vector3(0, 0, -1).applyQuaternion(ctrlQ);
           const up = new Vector3(0, 1, 0).applyQuaternion(headQ);
@@ -525,7 +529,8 @@ export class VRSupport {
           rig.ext.move.copy(move.normalize().multiplyScalar(mag * mag));
         }
         rig.ext.boost = squeeze ? 10 : 1;
-        if (edge(4)) { app.togglePause(); this.flash(app.clock.paused ? 'Time paused' : `Time: ${app.rateText()}`); }
+        if (edge(4) && app.walk.walking) app.walk.jump();
+        else if (edge(4)) { app.togglePause(); this.flash(app.clock.paused ? 'Time paused' : `Time: ${app.rateText()}`); }
         if (edge(5)) this.toggleMenu();
         if (edge(3)) app.realTime();
       } else if (h.handedness === 'right') {
@@ -535,17 +540,19 @@ export class VRSupport {
         } else if (!this.travel) {
           if (this.settings.turn === 'snap') {
             if (Math.abs(x) > 0.7 && this.turnArmed) {
-              rig.turn(-Math.sign(x) * SNAP);
+              (app.walk.walking ? app.walk : rig).turn(-Math.sign(x) * SNAP);
               this.turnArmed = false;
             } else if (Math.abs(x) < 0.3) {
               this.turnArmed = true;
             }
           } else if (x) {
-            rig.turn(-x * dt * 1.2);
+            (app.walk.walking ? app.walk : rig).turn(-x * dt * 1.2);
+            app.walk.vrTurning(Math.abs(x));
           }
-          if (y) rig.speedFactor = Math.min(1e6, Math.max(1e-4, rig.speedFactor * Math.exp(-y * dt * 1.5)));
+          if (y && !app.walk.walking) rig.speedFactor = Math.min(1e6, Math.max(1e-4, rig.speedFactor * Math.exp(-y * dt * 1.5)));
         }
-        if (edge(4) && app.selection) this.travelTo(app.selection);
+        if (edge(4) && app.walk.walking) app.walk.jump();
+        else if (edge(4) && app.selection) this.travelTo(app.selection);
         if (edge(5)) this.back();
         if (edge(3)) { this.settings.labels = !this.settings.labels; this.flash(`Labels ${this.settings.labels ? 'on' : 'off'}`); }
       }
@@ -703,12 +710,13 @@ export class VRSupport {
     } else {
       p.text('Nothing selected', 34, 160, 34, COLORS.dim, 500);
     }
-    p.text(`Speed ${formatSpeed(app.rig.speed)}`, 34, 258, 26, COLORS.dim);
+    p.text(app.walk.walking ? app.walk.status : `Speed ${formatSpeed(app.rig.speed)}`, 34, 258, 26, COLORS.dim, 400, 'left', p.width - 60);
     if (performance.now() < this.flashUntil) p.text(this.flashText, 34, 310, 28, COLORS.sel, 600, 'left', p.width - 60);
-    p.button('w:menu', 24, 360, 270, 100, 'MENU', () => this.toggleMenu(), { active: this.menu.isOpen, size: 34 });
-    p.button('w:go', 312, 360, 270, 100, 'FLY TO', () => { if (app.selection) this.travelTo(app.selection); }, { size: 34, disabled: !sel });
-    p.button('w:time', 600, 360, 270, 100, app.clock.paused ? '▶ PLAY' : '⏸ PAUSE', () => app.togglePause(), { size: 30 });
-    p.text('Y menu · A fly · B back · X pause', 34, 520, 24, COLORS.dim);
+    p.button('w:menu', 24, 360, 200, 100, 'MENU', () => this.toggleMenu(), { active: this.menu.isOpen, size: 30 });
+    p.button('w:go', 236, 360, 200, 100, 'FLY TO', () => { if (app.selection) this.travelTo(app.selection); }, { size: 30, disabled: !sel });
+    p.button('w:walk', 448, 360, 200, 100, app.walk.active ? 'FLY' : 'WALK', () => app.walk.toggle(), { size: 30, active: app.walk.active });
+    p.button('w:time', 660, 360, 216, 100, app.clock.paused ? '▶ PLAY' : '⏸ PAUSE', () => app.togglePause(), { size: 28 });
+    p.text(app.walk.walking ? 'stick walk · grip run · A/X jump · Y menu' : 'Y menu · A fly · B back · X pause', 34, 520, 24, COLORS.dim);
   }
 
   private paintCard(p: Panel): void {

@@ -9,6 +9,8 @@ export class Input {
   onDoubleClick: ((x: number, y: number) => void) | null = null;
   onKey: ((ev: KeyboardEvent) => void) | null = null;
   mouse = { x: 0, y: 0 };
+  /** mouse motion while the pointer is locked (walking, src/app/Walk.ts) */
+  look = { dx: 0, dy: 0 };
 
   constructor(private el: HTMLElement) {
     el.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -19,6 +21,7 @@ export class Input {
     el.addEventListener('pointermove', (e) => {
       this.mouse.x = e.clientX;
       this.mouse.y = e.clientY;
+      if (document.pointerLockElement === el) { this.look.dx += e.movementX; this.look.dy += e.movementY; return; }
       if (!this.down) return;
       const dx = e.movementX, dy = e.movementY;
       if (Math.abs(e.clientX - this.down.x) + Math.abs(e.clientY - this.down.y) > 4) this.down.moved = true;
