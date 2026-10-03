@@ -75,7 +75,9 @@ void main() {
   // coma: column through the glow at the ray's closest approach to the nucleus
   float tc = max(-dot(uCam, d), 0.0);
   float b = length(uCam + d * tc);
-  float coma = 0.7 * exp(-b * b * 0.5) + 0.3 * exp(-b / 0.25);
+  // a 1/r^2 cloud of gas and dust seen in projection: brightness ~ 1/b with a bright central
+  // condensation, fading out beyond the coma radius (same total light as before)
+  float coma = 0.791 * exp(-b) / (b + 0.03);
   // tails: march through the box, with steps that shrink near the ion tail's axis and the dust fan's plane
   vec3 inv = 1.0 / (sign(d) * max(abs(d), vec3(1e-6)));
   vec3 lo = uBoxC - uBoxE, hi = uBoxC + uBoxE;
@@ -122,7 +124,9 @@ void main() {
       dust += ds * fan * exp(-xd / uLd) * smoothstep(-1.0, 1.0, x) * stri;
     }
   }
-  vec3 c = coma * vec3(1.0, 0.98, 0.92) + ion * 0.35 * vec3(0.45, 0.7, 1.4) + dust * 0.4 * vec3(1.1, 0.95, 0.75);
+  // tails: a few to tens of times the Milky Way's surface brightness near the head (Hale-Bopp's
+  // dust tail ~19 mag per square arcsecond)
+  vec3 c = coma * vec3(1.0, 0.98, 0.92) + ion * 1.4 * vec3(0.45, 0.7, 1.4) + dust * 1.8 * vec3(1.1, 0.95, 0.75);
   // glow, not a wall of white: soft ceiling on the displayed level (like the eye's response to the sky)
   vec3 xx = c * uL0 * 0.1 * uGain;
   gl_FragColor = vec4(1.2 * (1.0 - exp(-xx / 1.2)), 1.0);

@@ -24,7 +24,7 @@ const name = await page.evaluate(() => {
   return `${best.c.name} r=${best.r.toFixed(2)} AU`;
 });
 await frames(5);
-const VIEWS = [['face', [0, 0, 1]], ['edge', [0, 1, 0]], ['oblique', [-0.3, 0.6, 0.75]], ['behind', [-1, 0.12, 0.08]]];
+const VIEWS = [['face', [0, 0, 1]], ['edge', [0, 1, 0]], ['oblique', [-0.3, 0.6, 0.75]], ['behind', [-1, 0.12, 0.08]]].filter(([l]) => !process.env.VIEWS || process.env.VIEWS.split(',').includes(l));
 for (const [label, w] of VIEWS) {
   const info = await page.evaluate((w) => {
     const a = window.app; const c = a.selection;
@@ -37,8 +37,8 @@ for (const [label, w] of VIEWS) {
     const L = Math.max(u.uLi.value, u.uLd.value) * Rc;
     const dir = X.clone().multiplyScalar(w[0]).addScaledVector(Y, w[1]).addScaledVector(Z, w[2]).normalize();
     const behind = w[0] < -0.5;
-    const centre = behind ? c.upos.clone() : c.upos.clone().addVec(X, 0.9 * L);
-    const d = behind ? 6 * Rc : 3.2 * L;
+    const centre = behind ? c.upos.clone() : c.upos.clone().addVec(X, 0.7 * L);
+    const d = behind ? 6 * Rc : 1.9 * L;
     a.rig.upos.copy(centre).addVec(dir, d);
     a.rig.lookAt(behind ? X.clone() : dir.clone().negate());
     return { Rc: +(Rc / 1e3).toFixed(0), L: +(L / 1e3).toFixed(0), li: +u.uLi.value.toFixed(1), ld: +u.uLd.value.toFixed(1), L0: +u.uL0.value.toExponential(2), visible: m.visible };
