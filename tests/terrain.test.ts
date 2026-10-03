@@ -119,7 +119,7 @@ describe('terrain patch', () => {
     const low = up.clone().multiplyScalar(Math.sin(0.05)).addScaledVector(side, Math.cos(0.05)).normalize();   // 3 degrees up
     const lit = (sun: Vector3) => {
       const a = run(sun).g.attributes.aSun.array as Float32Array;
-      return a.filter((v) => v < 0.5).length / a.length;
+      return a.filter((v) => v < 0).length / a.length;   // less than half the Sun's disk
     };
     const shadowedLow = lit(low);
     const shadowedHigh = lit(up);

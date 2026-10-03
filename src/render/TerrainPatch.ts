@@ -33,7 +33,7 @@ attribute vec3 aN;      // body-fixed unit direction
 attribute vec3 aTN;     // body-fixed normal of the full-height terrain
 attribute float aH;     // height above the reference surface (m)
 attribute vec2 aUv;     // map coordinates
-attribute float aSun;   // fraction of the Sun's disk visible over the surrounding relief
+attribute float aSun;   // clearance of the Sun over the surrounding relief, in penumbra widths (lit above -0.5)
 uniform float uHScale;
 varying vec3 vNormalBF;
 varying vec3 vTerrN;
@@ -434,15 +434,19 @@ export class TerrainPatch {
     const nv = 1 + RINGS * SEGS;
     const vis_ = new Float32Array(nv);
     const PEN = 0.016;      // angular width of the penumbra (rad): the Sun's disk, softened
+    const CLEAR = 2;        // clearance kept (penumbra widths): enough to place the edge
     for (let i = 0; i < nv; i++) {
       const px = o.x + full[i * 3], py = o.y + full[i * 3 + 1], pz = o.z + full[i * 3 + 2];
       const rP = Math.sqrt(px * px + py * py + pz * pz);
       // Sun below the local horizon: the shading is dark already
-      if ((px * sx + py * sy + pz * sz) / rP < -0.05) { vis_[i] = 1; continue; }
+      if ((px * sx + py * sy + pz * sz) / rP < -0.05) { vis_[i] = CLEAR; continue; }
       const k = i === 0 ? 0 : Math.floor((i - 1) / SEGS);
       const rho = i === 0 ? 0 : t.inner * Math.pow(t.q, k);
       const spacing = Math.max(t.inner, rho * Math.max(t.q - 1, (2 * Math.PI) / SEGS));
-      let vis = 1;
+      // the smallest clearance angle of the ray towards the Sun over the ground, in penumbra
+      // widths and clamped: a signed distance to the shadow edge, interpolated across the
+      // triangles and thresholded per pixel (sharper, straighter edges than a 0..1 visibility)
+      let vis = CLEAR;
       for (let d = spacing * 2; d < t.outer * 2; d *= 1.45) {
         const qx = px + sx * d, qy = py + sy * d, qz = pz + sz * d;
         const rQ = Math.sqrt(qx * qx + qy * qy + qz * qz);
@@ -451,13 +455,13 @@ export class TerrainPatch {
         if (rQ - baseR > hMax) break;            // above the highest ground in the patch
         const gr = ground();
         if (Number.isNaN(gr)) break;
-        vis = Math.min(vis, Math.max(0, Math.min(1, 0.5 - ((gr - rQ) / d - 0.003) / PEN)));
-        if (vis <= 0) break;
+        vis = Math.min(vis, ((rQ - gr) / d + 0.003) / PEN);
+        if (vis <= -CLEAR) { vis = -CLEAR; break; }
       }
       vis_[i] = vis;
       if (i % 700 === 699) yield;
     }
-    // soften: each vertex with its ring and spoke neighbours (shadow edges follow the grid otherwise)
+    // soften: each vertex with its ring and spoke neighbours (ray-march noise)
     const at = (k: number, sIdx: number) => vis_[1 + k * SEGS + (((sIdx % SEGS) + SEGS) % SEGS)];
     aSun.setX(0, vis_[0]);
     for (let k = 0; k < RINGS; k++) {

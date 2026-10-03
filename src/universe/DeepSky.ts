@@ -47,7 +47,7 @@ export class DeepSkyObject implements SpaceObject {
       ['Type', KIND_NAME[d.kind]],
       ['Distance from Sun', ly < 1e5 ? `${Math.round(ly).toLocaleString()} light years` : `${(ly / 1e3).toFixed(0)} thousand light years`],
       ['Size', `about ${((2 * this.radius) / LY).toFixed(this.radius / LY < 5 ? 1 : 0)} light years across`],
-      ['Apparent size', `${d.majArcmin.toFixed(d.majArcmin < 2 ? 2 : 1)}′`],
+      ['Size seen from Earth', `${d.majArcmin.toFixed(d.majArcmin < 2 ? 2 : 1)}′`],
     ];
     if (d.vmag !== null) rows.push(['Magnitude (V)', d.vmag.toFixed(1)]);
     rows.push(['Catalogue', `${d.simbad} (SIMBAD)${d.notes.length ? `; ${d.notes.join('; ')}` : ''}`]);

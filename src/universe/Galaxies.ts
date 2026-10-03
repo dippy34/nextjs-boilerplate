@@ -89,7 +89,7 @@ export class Galaxy implements SpaceObject {
       ['Type', `${typeName[this.shape]}${d.morph ? ` (${d.morph})` : ''}`],
       ['Distance from Sun', mly < 1 ? `${Math.round(mly * 1000).toLocaleString()} thousand light years` : `${mly.toFixed(mly < 10 ? 2 : 1)} million light years`],
       ['Size', `about ${Math.round((2 * this.radius) / LY).toLocaleString()} light years across`],
-      ['Apparent size', `${d.majArcmin.toFixed(1)}′ × ${d.minArcmin.toFixed(1)}′`],
+      ['Size seen from Earth', `${d.majArcmin.toFixed(1)}′ × ${d.minArcmin.toFixed(1)}′`],
       ...(d.vmag !== null ? [['Magnitude (V)', d.vmag.toFixed(1)] as [string, string]] : []),
       ['Catalogue', `${d.simbad}; distance: median of ${d.nDist} measurements (SIMBAD)`],
       ['Look', 'procedural, from the catalogued type, size and orientation'],

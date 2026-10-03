@@ -214,6 +214,39 @@ for (const [id, name, body] of [['p6-valles-marineris', 'Valles Marineris', 'Mar
 st = await page.evaluate(() => window.app.searchItems('mars').filter((r) => r.id.startsWith('lm:')).map((r) => r.label));
 check('search lists places on Mars', st.length >= 3, JSON.stringify(st));
 
+// 9. inside the Orion Nebula: a volume replaces the billboards; far away, only the billboards
+await page.evaluate(() => {
+  const a = window.app;
+  const o = a.findByName('Orion Nebula');
+  a.select(o);
+  const d = o.upos.sub(a.rig.upos).normalize();
+  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 0.6);
+  a.rig.lookAt(d);
+});
+await frames(15);
+const volume = () => page.evaluate(() => window.app.deepSky.group.children.find((m) => m.material?.name === 'nebula-volume')?.visible ?? false);
+st = await volume();
+check('inside the Orion Nebula the cloud is a volume', st);
+await page.screenshot({ path: path.join(outDir, 'p8-inside-orion.png'), timeout: 180000 });
+await page.evaluate(() => {
+  const a = window.app;
+  const o = a.findByName('Orion Nebula');
+  const d = o.upos.sub(a.rig.upos).normalize();
+  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 2.2);
+  a.rig.lookAt(d);
+});
+await frames(10);
+await page.screenshot({ path: path.join(outDir, 'p9-orion-approach.png'), timeout: 180000 });
+await page.evaluate(() => {
+  const a = window.app;
+  const o = a.findByName('Orion Nebula');
+  const d = o.upos.sub(a.rig.upos).normalize();
+  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 6);
+});
+await frames(5);
+st = await volume();
+check('far from the nebula, no volume is drawn', !st);
+
 check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 const failed = results.filter((r) => !r.ok).length;
 console.log(`${results.length - failed}/${results.length} passed`);

@@ -119,7 +119,7 @@ void main() {
   if (uTerrain > 0.5) {
     // landing terrain: the relief's own normal and shadows, inside the geometric day side
     vec3 nT = normalize(mix(nW, uBodyToWorld * normalize(vTerrN), uHScale));
-    light = max(dot(nT, uSunDir), 0.0) * smoothstep(-0.04, 0.06, mu0) * mix(1.0, vSun, uHScale);
+    light = max(dot(nT, uSunDir), 0.0) * smoothstep(-0.04, 0.06, mu0) * mix(1.0, clamp(0.5 + vSun, 0.0, 1.0), uHScale);
   }
   vec3 sunL = uSunColor * (uSunIrr / 3.14159265);
   vec3 radiance = albedo * sunL * light;

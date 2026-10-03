@@ -10,7 +10,7 @@ uniform float uLumpy;     // irregular shape of small bodies (relative radius va
 uniform float uSeed;
 varying vec3 vNormalBF;   // body-fixed unit normal
 varying vec3 vTerrN;      // body-fixed normal of the landing terrain (render/TerrainPatch.ts)
-varying float vSun;       // terrain only: unshadowed fraction of the Sun
+varying float vSun;       // terrain only: clearance of the Sun over the relief (penumbra widths)
 varying vec3 vLocal;      // terrain only: body-fixed position relative to the patch origin (m)
 varying vec3 vPosView;    // camera-relative world position (m)
 varying vec2 vUv;
@@ -343,7 +343,7 @@ void main() {
     light = max(mix(mu0, mu0g, cloud), 0.0);                // Lambert (clouds hide the relief)
   }
   light *= dayside;
-  if (uTerrain > 0.5) light *= mix(1.0, vSun, uHScale);   // shadows of the relief
+  if (uTerrain > 0.5) light *= mix(1.0, clamp(0.5 + vSun, 0.0, 1.0), uHScale);   // shadows of the relief
   // eclipses: shadows of moons and planets (with a coppery glow where sunlight is bent through an atmosphere)
   float eclRed = 0.0;
   float ecl = sunVisible(vPosView, eclRed);
