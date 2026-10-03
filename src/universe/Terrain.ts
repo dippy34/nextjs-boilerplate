@@ -194,6 +194,14 @@ export class TerrainSource {
   private patches = new Map<string, Patch[]>();          // loaded, by body key
   private patchRequested = new Set<string>();
   private versions = new Map<string, number>();
+  /**
+   * Optional sharper global elevation (universe/Elevation.ts), plugged in by the tile worker:
+   * returns the ground height (m above this source's reference surface, already reconciled) and the
+   * sample spacing (m) of the data used, or null where no loaded tile covers the direction. When it
+   * answers, it replaces the coarse global map as the base and generated relief fills in below its
+   * resolution; otherwise the global map (or pure generated relief) is used, unchanged.
+   */
+  elevSample: ((n: Vector3, spacing: number) => { h: number; mpp: number } | null) | null = null;
 
   constructor(private base: string) {
     fetch(`${base}/terrain/terrain.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { this.manifest = j; }).catch(() => undefined);
@@ -313,7 +321,13 @@ export class TerrainSource {
     // a sharper regional patch takes over (blended in at its edges), and generated relief
     // between its resolution and the global map's fades out there
     let wP = 0, topP = Infinity;
-    if (m) {
+    // sharper global elevation tiles (universe/Elevation.ts), when the worker has them loaded here:
+    // the real base, generated relief only below the data's own sample spacing
+    const elev = this.elevSample ? this.elevSample(n, spacing) : null;
+    if (elev) {
+      h = elev.h;
+      top = Math.max(elev.mpp * 3, spacing * 2.5);
+    } else if (m) {
       h = this.dem(m, n, spacing);
       top = m.pixelM * 3;
       const pl = this.patches.get(k!);
