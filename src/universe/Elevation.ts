@@ -441,9 +441,9 @@ export class ElevationStore {
   }
 
   /**
-   * Fetch the tiles around direction `dirBF` for `metresPerSample`: the tile containing it on
-   * every level down to that resolution, and its neighbours (`ring` tiles each way) on the target
-   * level. Resolves when all have loaded or failed.
+   * Fetch the tiles around direction `dirBF` for `metresPerSample` (0: the finest there is): on
+   * every level down to that resolution, the tile containing it and its neighbours (`ring` tiles
+   * each way), where the pyramid has them. Resolves when all have loaded or failed.
    */
   async prefetch(bodyKey: string, dirBF: Vec3Like, metresPerSample: number, ring = 1): Promise<void> {
     const man = this.manifest(bodyKey) ?? (await this.load(bodyKey));
@@ -456,7 +456,7 @@ export class ElevationStore {
     const d: Vec3Like = { x: 0, y: 0, z: 0 };
     for (let l = 1; l <= target; l++) {
       const n = 1 << l;
-      const r = l === target ? ring : 0;
+      const r = ring;
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
           // one tile step on this face; beyond its edge the direction lands on the neighbouring face
