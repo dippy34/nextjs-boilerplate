@@ -274,7 +274,7 @@ requests from:
   Gale and Jezero craters).
 - **Earth**: ETOPO 2022 15 arc-second (about 460 m) surface elevation tiles, NOAA NCEI,
   <https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/15s_surface_elev_gtif/>
-  (Mount Everest, the Grand Canyon, Kilimanjaro, the Matterhorn, Mauna Kea).
+  (Mount Everest, the Grand Canyon, Kilimanjaro, the Matterhorn, Mauna Kea, Mount Fuji, Denali).
 
 Landmark coordinates (`src/universe/Landmarks.ts`): the USGS/IAU Gazetteer of Planetary Nomenclature
 (<https://planetarynames.wr.usgs.gov/>) for feature centres; the Apollo 11, Curiosity and Perseverance

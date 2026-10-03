@@ -36,6 +36,8 @@ export const LANDMARKS: LandmarkDef[] = [
   { name: 'Kilimanjaro', body: 'Earth', lat: -3.0674, lon: 37.3556, h: 5.9e3, view: 40e3, about: 'the highest mountain in Africa, 5,895 m, a dormant volcano' },
   { name: 'Matterhorn (Alps)', body: 'Earth', lat: 45.9763, lon: 7.6586, h: 4.5e3, view: 35e3, about: 'a 4,478 m peak of the Alps on the Swiss-Italian border' },
   { name: 'Mauna Kea (Hawaii)', body: 'Earth', lat: 19.8207, lon: -155.468, h: 4.2e3, view: 70e3, about: 'a volcano 4,207 m above the sea and over 10 km from its base on the ocean floor' },
+  { name: 'Mount Fuji', body: 'Earth', lat: 35.3606, lon: 138.7274, h: 3.7e3, view: 35e3, about: 'Japan\'s highest mountain, 3,776 m, a near-symmetrical volcanic cone' },
+  { name: 'Denali', body: 'Earth', lat: 63.0695, lon: -151.0074, h: 6.1e3, view: 45e3, about: 'the highest mountain in North America, 6,190 m, in the Alaska Range' },
 ];
 
 /** A landmark as a destination: a point on the ground there, turning with its world. */

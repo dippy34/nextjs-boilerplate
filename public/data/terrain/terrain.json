@@ -211,6 +211,34 @@
    "name": "maunakea",
    "body": "earth",
    "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
+  },
+  {
+   "file": "patches/fuji.png",
+   "width": 512,
+   "height": 512,
+   "offset": -200.0,
+   "scale": 0.5,
+   "lat0": 34.295833333333334,
+   "lat1": 36.42916666666667,
+   "lon0": 137.6625,
+   "lon1": 139.79583333333332,
+   "name": "fuji",
+   "body": "earth",
+   "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
+  },
+  {
+   "file": "patches/denali.png",
+   "width": 768,
+   "height": 768,
+   "offset": -200.0,
+   "scale": 0.5,
+   "lat0": 61.47083333333333,
+   "lat1": 64.67083333333333,
+   "lon0": -152.60833333333332,
+   "lon1": -149.40833333333333,
+   "name": "denali",
+   "body": "earth",
+   "credit": "NOAA NCEI ETOPO 2022 15 arc-second (surface)"
   }
  ]
 }

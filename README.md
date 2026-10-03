@@ -16,7 +16,7 @@ the Sombrero, Centaurus A, M87 …) · **41 nebulae and star clusters** (the Ori
 Ring, Helix and Crab nebulae, the Pleiades, Omega Centauri, 47 Tucanae …) · the Milky Way from outside ·
 **real 3D ground to land on**: NASA elevation models for the Moon, Mars and Mercury and NOAA's for
 Earth, with a tour of landmarks to fly to (Mount Everest, the Grand Canyon, Kilimanjaro, the
-Matterhorn, Mauna Kea, Olympus Mons, Valles Marineris, the Curiosity and Perseverance sites, the
+Matterhorn, Mauna Kea, Mount Fuji, Denali, Olympus Mons, Valles Marineris, the Curiosity and Perseverance sites, the
 Apollo 11 site, Tycho, Copernicus, Shackleton at the lunar south pole, the Caloris Basin), generated hills, craters
 and shadows on other moons, and on rocky planets of other stars (their mountains and seas match their
 colours; temperate worlds have blue skies) · **inside Saturn's

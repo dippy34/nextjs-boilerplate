@@ -49,6 +49,8 @@ EARTH_PATCHES = [
     ("kilimanjaro", -3.0674, 37.3556, 512),
     ("matterhorn", 45.976, 7.658, 768),
     ("maunakea", 19.82, -155.47, 768),
+    ("fuji", 35.3606, 138.7274, 512),
+    ("denali", 63.0695, -151.0074, 768),
 ]
 ETOPO15 = "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/15s_surface_elev_gtif/"
 
