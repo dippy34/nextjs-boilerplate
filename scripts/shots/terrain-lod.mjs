@@ -55,8 +55,8 @@ for (const [name, body] of sites) {
       await frames(4);
       await place();
       st = await page.evaluate(() => ({ ...window.app.terrain.stats, owner: window.app.terrain.owner?.name ?? null, fps: Math.round(window.app.fps) }));
-      if (i > 3 && st.pending === 0 && st.owner) break;
-      if (Date.now() - t0 > 300000) break;
+      if (i > 3 && (st.pending === 0 || st.pending === undefined) && st.owner) break;
+      if (Date.now() - t0 > Number(process.env.MAXWAIT ?? 150) * 1000) break;
     }
     await frames(Number(process.env.SETTLE ?? 6));
     await page.screenshot({ path: `${out}-${body}-${name.replace(/\W+/g, '')}-${hgt}.png`, timeout: 240000 });

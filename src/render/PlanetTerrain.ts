@@ -157,8 +157,11 @@ export class PlanetTerrain {
   /** the view (App.view): direction and pixel size, for refinement */
   view: { quat: Quaternion; pixelAngle: number; pixelRatio?: number; fovY?: number; aspect?: number } | null = null;
   /** pixels per grid cell before a tile splits (desktop, headset) */
-  pixPerCell = 12;
-  pixPerCellVr = 18;
+  pixPerCell = 14;
+  pixPerCellVr = 22;
+  /** tiles each worker may build at once (desktop, headset) */
+  perWorker = 6;
+  perWorkerVr = 3;
   /** most tiles kept (desktop, headset) */
   maxTiles = 900;
   maxTilesVr = 400;
@@ -166,7 +169,7 @@ export class PlanetTerrain {
   budgetMs = 4;
   budgetVrMs = 2;
   /** finest vertex spacing (m) */
-  minSpacing = 0.22;
+  minSpacing = 0.4;
   /** statistics of the last frame */
   stats = { drawn: 0, tiles: 0, pending: 0, built: 0, level: 0 };
 
@@ -180,6 +183,10 @@ export class PlanetTerrain {
   private jobs = new Map<number, { node: Node; world: World; worker: number; serialAtStart: number }>();
   private jobSeq = 0;
   private frame = 0;
+  private queue: Node[] = [];
+  private queueHead = 0;
+  private queueSun = new Vector3();
+  private queueLon = -180;
   private drawn: Node[] = [];
   private lastT = performance.now();
   private anchor = { ground: null as Ground | null, pos: new Vector3(), e: new Vector3(1, 0, 0), n: new Vector3(0, 1, 0), up: new Vector3(0, 0, 1) };
@@ -189,7 +196,7 @@ export class PlanetTerrain {
     this.group.name = 'planet terrain';
     if (typeof Worker !== 'undefined') {
       const hc = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
-      const n = Math.max(1, Math.min(3, hc - 2));
+      const n = Math.max(1, Math.min(4, hc - 1));
       for (let i = 0; i < n; i++) {
         try {
           const w = new Worker(new URL('../workers/terrainTiles.worker.ts', import.meta.url), { type: 'module', name: `terrain-${workerSeq++}` });
@@ -362,9 +369,10 @@ export class PlanetTerrain {
     const P = this.vr ? this.pixPerCellVr : this.pixPerCell;
     const rot = new Matrix3().setFromMatrix4(c.orient);
     const toBF = rot.clone().transpose();
-    const viewBF = new Vector3(0, 0, -1);
-    if (this.view) viewBF.applyQuaternion(this.view.quat).applyMatrix3(toBF).normalize();
-    const halfFov = this.vr ? 1.1 : Math.max(0.6, Math.atan(Math.tan(((this.view?.fovY ?? 50) * Math.PI) / 360) * Math.max(1, this.view?.aspect ?? 1.8)) + 0.1);
+    const viewW = new Vector3(0, 0, -1);
+    if (this.view) viewW.applyQuaternion(this.view.quat);
+    const viewBF = viewW.clone().applyMatrix3(toBF).normalize();
+    const halfFov = this.vr ? 1.2 : Math.max(0.6, Math.atan(Math.tan(((this.view?.fovY ?? 50) * Math.PI) / 360) * Math.max(1, this.view?.aspect ?? 1.8)) + 0.1);
     const rOcc = this.occluder(w, up, D);
     const horEye = Math.acos(Math.min(1, rOcc / D));
     const want: { n: Node; p: number }[] = [];
@@ -450,15 +458,25 @@ export class PlanetTerrain {
     for (const n of this.drawn) if (!n.drawn) { if (n.mesh) n.mesh.visible = false; if (n.haze) n.haze.visible = false; }
     this.drawn = sel;
     const rel = c.rel;
-    const air = c.air ? this.hazeFor(c.air) : null;
+    // aerial perspective over the terrain matters within the atmosphere; from orbit the shell (drawn
+    // behind, render/Atmospheres.ts) covers the limb, so no per-tile haze draws there
+    const air = c.air && alt < 160e3 ? this.hazeFor(c.air) : null;
     let deepest = 0;
     for (const n of sel) {
       deepest = Math.max(deepest, n.level);
       const mesh = n.mesh!;
       mesh.material = mat;
-      mesh.visible = true;
       const [x, y, z] = n.data!.centre;
       tmp.set(x, y, z).applyMatrix3(rot).add(rel);
+      // headset: a cone around the view (three's frustum test uses the runtime's finite far plane,
+      // while the shaders pull far geometry in)
+      let inCone = true;
+      if (this.vr) {
+        const dc = tmp.length(), rb = n.data!.bound;
+        inCone = dc < rb * 1.5 || tmp.dot(viewW) / dc > Math.cos(Math.min(Math.PI, halfFov + Math.asin(Math.min(1, rb / dc))));
+      }
+      mesh.visible = inCone;
+      if (!inCone) { if (n.haze) n.haze.visible = false; continue; }
       mesh.matrix.copy(c.orient).setPosition(tmp);
       mesh.matrixWorldNeedsUpdate = true;
       mesh.frustumCulled = !this.vr;
@@ -550,53 +568,74 @@ export class PlanetTerrain {
 
   // ------------------------------------------------------------------------------ building
 
+  private reqOf(w: World, n: Node, sunBF: Vector3, lonLeftDeg: number): TileRequest {
+    const p = n.parent;
+    return {
+      face: n.face, level: n.level, x: n.x, y: n.y, radii: [...w.ground.radii], radius: w.ground.radius,
+      sun: [sunBF.x, sunBF.y, sunBF.z], lonLeft: (lonLeftDeg * Math.PI) / 180, hTop: w.hTop,
+      parent: p?.data ? { pos: p.data.pos, tn: p.data.tn, centre: p.data.centre, qx: n.x & 1, qy: n.y & 1 } : null,
+      minSpacing: 0,
+    };
+  }
+
+  /** This frame's wanted tiles become the build queue (most important first); then keep workers fed. */
   private dispatch(w: World, nodes: Node[], c: TerrainCandidate, sunBF: Vector3): void {
     const spec = (w as World & { spec: HeightSpec | null }).spec;
-    const req = (n: Node): TileRequest => {
-      const p = n.parent;
-      return {
-        face: n.face, level: n.level, x: n.x, y: n.y, radii: [...w.ground.radii], radius: w.ground.radius,
-        sun: [sunBF.x, sunBF.y, sunBF.z], lonLeft: (c.lonLeft * Math.PI) / 180, hTop: w.hTop,
-        parent: p?.data ? { pos: p.data.pos, tn: p.data.tn, centre: p.data.centre, qx: n.x & 1, qy: n.y & 1 } : null,
-        minSpacing: 0,
-      };
-    };
+    this.queueSun.copy(sunBF);
+    this.queueLon = c.lonLeft;
     if (!this.workers.length || !spec) {
-      // main thread: one tile per frame within a few milliseconds
+      // no workers: build a few tiles on the main thread within a small time budget
       const t0 = performance.now();
       for (const n of nodes) {
         if (performance.now() - t0 > (this.vr ? this.budgetVrMs : this.budgetMs)) break;
-        const r = req(n);
-        const data = buildTile(r, (d, sp) => w.ground.height(d, sp));
+        const data = buildTile(this.reqOf(w, n, sunBF, c.lonLeft), (d, sp) => w.ground.height(d, sp));
         n.sunBF.copy(sunBF);
         this.accept(w, n, data);
       }
       return;
     }
-    const perWorker = this.vr ? 1 : 2;
-    for (const n of nodes) {
+    this.queue = nodes;
+    this.queueHead = 0;
+    this.pump(w, spec);
+  }
+
+  /** Send queued tiles to every free worker slot (called each frame and whenever a worker finishes). */
+  private pump(w: World, _spec: HeightSpec): void {
+    const perWorker = this.vr ? this.perWorkerVr : this.perWorker;
+    for (;;) {
       let k = -1;
       for (let i = 0; i < this.workers.length; i++) if (this.busy[i] < perWorker && (k < 0 || this.busy[i] < this.busy[k])) k = i;
       if (k < 0) break;
+      let n: Node | null = null;
+      while (this.queueHead < this.queue.length) {
+        const cand = this.queue[this.queueHead++];
+        if (cand.used >= this.frame - 1 && !cand.job && (cand.stale || !cand.data)) { n = cand; break; }
+      }
+      if (!n) break;
       const job = ++this.jobSeq;
       n.job = job;
-      n.sunBF.copy(sunBF);
+      n.sunBF.copy(this.queueSun);
       this.busy[k]++;
       this.jobs.set(job, { node: n, world: w, worker: k, serialAtStart: 0 });
-      this.workers[k].postMessage({ type: 'tile', job, id: w.id, req: req(n) });
+      this.workers[k].postMessage({ type: 'tile', job, id: w.id, req: this.reqOf(w, n, this.queueSun, this.queueLon) });
     }
   }
 
   private receive(worker: number, msg: { job: number; data: TileData | null }): void {
     this.busy[worker] = Math.max(0, this.busy[worker] - 1);
     const j = this.jobs.get(msg.job);
-    if (!j) return;
-    this.jobs.delete(msg.job);
-    const n = j.node;
-    if (n.job !== msg.job) return;
-    n.job = 0;
-    if (!msg.data || j.world !== this.world) return;
-    this.accept(j.world, n, msg.data);
+    if (j) {
+      this.jobs.delete(msg.job);
+      const n = j.node;
+      if (n.job === msg.job) {
+        n.job = 0;
+        if (msg.data && j.world === this.world) this.accept(j.world, n, msg.data);
+      }
+    }
+    // keep the worker fed from this frame's queue without waiting for the next frame
+    const w = this.world;
+    const spec = w ? (w as World & { spec: HeightSpec | null }).spec : null;
+    if (w && spec) this.pump(w, spec);
   }
 
   private accept(w: World, n: Node, data: TileData): void {
@@ -618,9 +657,12 @@ export class PlanetTerrain {
       mesh.visible = false;
       mesh.renderOrder = ORDER_TERRAIN;
       mesh.name = 'terrain tile';
+      // the morph weight is the only per-tile uniform; flag a re-upload only when it actually
+      // changes (three skips re-uploading a shared material's uniforms otherwise), so in the
+      // steady state (every drawn tile fully morphed to 1) the heavy uniform set uploads once
       mesh.onBeforeRender = (_r, _s, _c, _g, material) => {
         const u = (material as ShaderMaterial).uniforms;
-        if (u?.uMorph) {
+        if (u?.uMorph && u.uMorph.value !== n.m) {
           u.uMorph.value = n.m;
           (material as ShaderMaterial).uniformsNeedUpdate = true;
         }
