@@ -839,10 +839,15 @@ export class App {
     }
     for (const ev of this.exo.views) {
       if (ev.pixelRadius < 2) continue;
-      const p = this.project(ev.rel);
-      const pr = ev.pixelRadius / this.view.pixelRatio;
-      if (!p || p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
-      const w = smoothstep(0.0015, 0.08, Math.min(1, (Math.PI * pr * pr) / screen));
+      // close up (or standing on it) the disk fills the view from off-screen
+      let coverage = this.bigCoverage(ev.rel, ev.planet.radius);
+      if (coverage === 0) {
+        const p = this.project(ev.rel);
+        const pr = ev.pixelRadius / this.view.pixelRatio;
+        if (!p || p.x < -pr || p.y < -pr || p.x > this.view.width + pr || p.y > this.view.height + pr) continue;
+        coverage = Math.min(1, (Math.PI * pr * pr) / screen);
+      }
+      const w = smoothstep(0.0015, 0.08, coverage);
       if (w > wBest && ev.radiance > 0) { wBest = w; lBest = ev.radiance; keyBest = 0.45; }
     }
     for (const hv of this.holes.views) {
@@ -887,7 +892,7 @@ export class App {
       diskCap = Math.min(diskCap, 1.6 / ((0.6 * sunIrradianceAt(Math.max(cv.craft.upos.sub(this.system.sun.upos, new Vector3()).length(), 1))) / Math.PI));
     }
     for (const ev of this.exo.views) {
-      if (ev.pixelRadius <= 1.5 || ev.radiance <= 0 || !onScreen(ev.rel)) continue;
+      if (ev.pixelRadius <= 1.5 || ev.radiance <= 0 || (!onScreen(ev.rel) && this.bigCoverage(ev.rel, ev.planet.radius) < 0.02)) continue;
       diskCap = Math.min(diskCap, 1.6 / ev.radiance);
     }
     for (const hv of this.holes.views) {

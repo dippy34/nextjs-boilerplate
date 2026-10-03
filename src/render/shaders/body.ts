@@ -224,13 +224,18 @@ void main() {
     }
   }
   // relief fades towards the limb, where it would only alias into a ragged silhouette
+  // Up close on the terrain the orbital-scale craters above (computed from the body-fixed direction,
+  // good to only a few centimetres in float32) would turn into per-pixel noise: they fade out where a
+  // pixel spans less than a couple of metres, and the precise local lattices below take over.
+  float mppT = length(fwidth(vPosView));
+  if (uTerrain > 0.5) hProc *= smoothstep(0.4, 2.5, mppT);
   // (the terrain is seen at grazing angles all the time: only the very edge-on parts fade)
   float limbFade = uTerrain > 0.5 ? smoothstep(0.0, 0.12, dot(nP, V)) : smoothstep(0.05, 0.4, dot(nP, V));
   float hBump = hProc * uRadiusM * (uProc > 0.5 ? 1.0 : 0.6);
   if (uTerrain > 0.5 && uCraters > 0.05) {
     // landing terrain: small craters below the mesh's resolution, each scale faded in once its
     // craters span several pixels
-    float mpp = length(fwidth(vPosView));
+    float mpp = mppT;
     float fr, frT = 0.0;
     float d = 0.45 * uCraters;
     float w0 = smoothstep(400.0 / 12.0, 400.0 / 30.0, mpp);

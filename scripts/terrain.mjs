@@ -28,47 +28,52 @@ await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
  * `yaw` degrees from the direction away from the Sun.
  */
 async function stand(name, { lat = null, lon = null, sunEl = 12, alt, pitch, yaw = 90 }) {
-  await page.evaluate(({ name, lat, lon, sunEl, alt, pitch, yaw }) => {
-    const a = window.app;
-    const b = a.findByName(name);
-    a.select(b);
-    const V = b.upos.sub(a.rig.upos).constructor;
-    let sun = a.system.sun.upos.sub(b.upos).normalize();
-    let up;
-    if (lat !== null) {
-      // a fixed site: step the clock (paused) to the hour when the Sun stands closest to sunEl there
+  if (lat !== null) {
+    // a fixed site: step the (paused) clock to the hour when the Sun stands closest to sunEl there,
+    // then let a few frames pass so the world (and the camera riding with it) settle at that time
+    await page.evaluate(({ name, lat, lon, sunEl }) => {
+      const a = window.app;
+      const b = a.findByName(name);
+      const V = b.upos.sub(a.rig.upos).constructor;
       const la = (lat * Math.PI) / 180, lo = (lon * Math.PI) / 180;
       const site = () => new V(Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)).applyMatrix4(b.orientation.clone()).normalize();
       const jd0 = a.clock.jdTdb;
       let best = jd0, bestErr = Infinity;
       for (let h = 0; h < 26; h += 0.25) {
-        a.clock.jdTdb = jd0 + h / 24;
-        a.system.update(a.clock.jdTdb);
+        a.system.update(jd0 + h / 24);
         const s = a.system.sun.upos.sub(b.upos).normalize();
-        const el = (Math.asin(site().dot(s)) * 180) / Math.PI;
-        const err = Math.abs(el - sunEl) + (el > 0 && h > 0 ? 0 : 0);
-        if (err < bestErr) { bestErr = err; best = a.clock.jdTdb; }
+        const err = Math.abs((Math.asin(site().dot(s)) * 180) / Math.PI - sunEl);
+        if (err < bestErr) { bestErr = err; best = jd0 + h / 24; }
       }
+      a.system.update(jd0);
       a.clock.jdTdb = best;
-      a.system.update(best);
-      sun = a.system.sun.upos.sub(b.upos).normalize();
-      up = site();
+    }, { name, lat, lon, sunEl });
+    await frames(3);
+  }
+  await page.evaluate(({ name, lat, lon, sunEl, alt, pitch, yaw }) => {
+    const a = window.app;
+    const b = a.findByName(name);
+    a.select(b);
+    const V = b.upos.sub(a.rig.upos).constructor;
+    const sun = a.system.sun.upos.sub(b.upos).normalize();
+    let up;
+    if (lat !== null) {
+      const la = (lat * Math.PI) / 180, lo = (lon * Math.PI) / 180;
+      up = new V(Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)).applyMatrix4(b.orientation.clone()).normalize();
     } else {
       // a point where the Sun stands sunEl degrees above the horizon
       const side = new V(0, 0, 1).cross(sun).normalize();
       const s = Math.sin((sunEl * Math.PI) / 180);
       up = sun.clone().multiplyScalar(s).addScaledVector(side, Math.sqrt(1 - s * s)).normalize();
     }
-    const r = b.radius;
-    a.rig.upos.copy(b.upos).addVec(up, r + alt);
+    a.rig.upos.copy(b.upos).addVec(up, b.radius + alt);
     // horizontal direction: `yaw` degrees around the vertical from "away from the Sun"
     const away = sun.clone().negate().addScaledVector(up, sun.dot(up)).normalize();
     const y = (yaw * Math.PI) / 180;
     const east = up.clone().cross(away).normalize();
     const hor = away.clone().multiplyScalar(Math.cos(y)).addScaledVector(east, Math.sin(y)).normalize();
     const p = (pitch * Math.PI) / 180;
-    const look = hor.multiplyScalar(Math.cos(p)).addScaledVector(up, -Math.sin(p)).normalize();
-    a.rig.lookAt(look, up);
+    a.rig.lookAt(hor.multiplyScalar(Math.cos(p)).addScaledVector(up, -Math.sin(p)).normalize(), up);
   }, { name, lat, lon, sunEl, alt, pitch, yaw });
 }
 
