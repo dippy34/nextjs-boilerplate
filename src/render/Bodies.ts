@@ -115,7 +115,7 @@ ${OUTPUT_FRAGMENT}
 }`;
 
 /** Area of overlap of two discs of radii r1, r2 whose centres are d apart (as in the body shader). */
-function discOverlap(r1: number, r2: number, d: number): number {
+export function discOverlap(r1: number, r2: number, d: number): number {
   if (d >= r1 + r2) return 0;
   if (d <= Math.abs(r1 - r2)) return Math.PI * Math.min(r1, r2) ** 2;
   const a1 = Math.acos(Math.max(-1, Math.min(1, (d * d + r1 * r1 - r2 * r2) / (2 * d * r1))));

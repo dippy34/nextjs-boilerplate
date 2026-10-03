@@ -1,5 +1,5 @@
 import { BufferAttribute, IcosahedronGeometry, InstancedMesh, Matrix3, Matrix4, Quaternion, ShaderMaterial, Vector3 } from 'three';
-import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const VERT = /* glsl */ `
 #include <common>
@@ -78,6 +78,8 @@ export class RingParticles {
   private cellX = NaN;
   private cellY = NaN;
   private origin = new Vector3();     // ring-frame position (m) the instance matrices are relative to
+  /** headset: half as many particles */
+  private lite = false;
 
   constructor(texUrl: string, private inner: number, private outer: number, color: [number, number, number], exposure: { value: number }) {
     const geo = new IcosahedronGeometry(1, 1);
@@ -140,7 +142,8 @@ export class RingParticles {
     const r = Math.hypot(cam.x, cam.y);
     if (Math.abs(cam.z) > RANGE * 1.5 || r < this.inner - RANGE || r > this.outer + RANGE) { this.mesh.visible = false; this.cellX = NaN; return; }
     const cx = Math.floor(cam.x / CELL), cy = Math.floor(cam.y / CELL);
-    if (cx !== this.cellX || cy !== this.cellY) this.rebuild(cx, cy);
+    const lite = LITE.uLite.value > 0.5;
+    if (cx !== this.cellX || cy !== this.cellY || lite !== this.lite) { this.lite = lite; this.rebuild(cx, cy); }
     // place: the instances are relative to `origin` in the ring frame
     const m = this.mesh.matrix.copy(orient);
     m.setPosition(this.origin.clone().sub(cam).applyMatrix4(new Matrix4().extractRotation(orient)));
@@ -171,7 +174,7 @@ export class RingParticles {
         const tau = this.tauAt(r);
         if (tau <= 0) continue;
         // particles per cell: proportional to the optical depth (a few in the faint C ring, a crowd in the B ring)
-        const expected = Math.min(4, tau) * 2;
+        const expected = Math.min(4, tau) * (this.lite ? 1 : 2);
         const k = Math.floor(expected) + (hash(gx, gy, 99) < expected % 1 ? 1 : 0);
         for (let j = 0; j < k && count < MAX; j++) {
           const h = (t: number) => hash(gx, gy, j * 16 + t);

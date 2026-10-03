@@ -63,7 +63,9 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     colours), Earth-like atmosphere shells for temperate/ocean types (`Atmospheres.updateExo`).
   - Saturn's rings up close: `src/render/RingParticles.ts` (instanced ice, density from the ring
     opacity texture, inertial ring frame from `universe/RingSpot.ts`, which is also the search target).
-  - Comets: `src/render/CometTails.ts` (coma/ion/dust quad per active comet, sky display gain).
+  - Comets: `src/render/CometTails.ts` (coma/ion/dust quad per active comet, sky display gain; nucleus
+    mesh + jets for the nearest one within 30,000 km, fed to the exposure as `nucleusView`).
+  - Landmarks: `src/universe/Landmarks.ts` (places with coordinates; search ids `lm:`; VR Places tab).
   - Eclipses: `BodiesLayer.updateEclipses` picks up to 4 occluders per body; `sunVisible()` in
     `shaders/body.ts` (disc-overlap penumbra, red glow in Earth's shadow); `sunlit` feeds the exposure.
   - Walking: `App.keepAboveGround` keeps eye height within 4 m of the ground unless climbing.

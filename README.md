@@ -19,7 +19,8 @@ landmarks to fly to (Olympus Mons, Valles Marineris, the Curiosity and Persevera
 site, Tycho, Copernicus, Shackleton at the lunar south pole, the Caloris Basin), generated hills, craters
 and shadows on other moons, and on rocky planets of other stars (their mountains and seas match their
 colours; temperate worlds have blue skies) · **inside Saturn's
-rings** among their ice (search "rings") · comets near the Sun with comas and tails · **eclipses at their
+rings** among their ice (search "rings") · comets near the Sun with comas, tails and (up close) a
+dark nucleus with jets · **eclipses at their
 real times** (moon shadows crossing Jupiter, the Moon turning copper in Earth's shadow).
 
 **Game mode (V):** fly your own ship — a cockpit with live navigation screens (sit inside it in VR),

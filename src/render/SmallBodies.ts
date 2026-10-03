@@ -116,7 +116,8 @@ export class Comet implements SpaceObject {
     const rows: [string, string][] = [['Type', kinds[prefix] ?? 'Comet']];
     rows.push(['Perihelion distance', `${q.toFixed(4)} AU`], ['Eccentricity', e.toFixed(6)], ['Inclination', `${i.toFixed(3)}°`]);
     if (e < 1) rows.push(['Period', `${(Math.pow(q / (1 - e), 1.5)).toFixed(2)} yr`]);
-    if (this.row[10]) rows.push(['Nucleus diameter', `${this.row[10]} km`]);
+    if (this.row[10]) rows.push(['Nucleus diameter', `${this.row[10]} km (shape generated)`]);
+    else rows.push(['Nucleus', 'size unknown: drawn 4 km across, shape generated']);
     if (this.apparentMag < 90) rows.push(['Total magnitude (est.)', this.apparentMag.toFixed(1)]);
     return rows;
   }

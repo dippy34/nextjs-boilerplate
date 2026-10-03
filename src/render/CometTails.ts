@@ -1,4 +1,4 @@
-import { AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, Group, Mesh, ShaderMaterial, Vector3 } from 'three';
+import { AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, Group, IcosahedronGeometry, Mesh, Quaternion, ShaderMaterial, Vector3 } from 'three';
 import { magToIrradiance } from '../astro/photometry';
 import { AU } from '../core/units';
 import type { UPos } from '../core/upos';
@@ -53,6 +53,79 @@ ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
+const NUC_VERT = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
+varying vec3 vN;
+varying vec3 vPos;
+void main() {
+  vN = normalize(mat3(modelMatrix) * normal);
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vPos = wp.xyz;
+  gl_Position = projectView(viewMatrix * wp);
+  #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
+}`;
+const NUC_FRAG = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+uniform vec3 uSunDir;
+uniform float uSunIrr;
+uniform float uExposure;
+varying vec3 vN;
+varying vec3 vPos;
+void main() {
+  vec3 n = normalize(vN);
+  float mu0 = max(dot(n, uSunDir), 0.0);
+  // very dark, slightly reddish organic-rich dust (albedo ~0.05, as measured for 67P and others)
+  vec3 rad = vec3(0.055, 0.05, 0.045) * (mu0 + 0.03) * (uSunIrr / 3.14159265);
+  gl_FragColor = vec4(min(rad * uExposure, vec3(6.0e4)), 1.0);
+${OUTPUT_FRAGMENT}
+  #include <logdepthbuf_fragment>
+}`;
+const JET_FRAG = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+uniform float uRc;       // jet width at the base (m)
+uniform float uLi;       // jet length (m)
+uniform float uL0;
+uniform float uGain;
+varying vec2 vST;
+void main() {
+  float s = vST.x, t = vST.y;
+  float w = uRc * (1.0 + 2.5 * max(s, 0.0) / uLi);
+  float j = s > 0.0 ? exp(-t * t / (2.0 * w * w)) * exp(-s / uLi) * smoothstep(0.0, uRc * 0.5, s) : 0.0;
+  gl_FragColor = vec4(min(vec3(0.95, 0.97, 1.0) * j * uL0 * 0.1 * uGain, vec3(6.0e4)), 1.0);
+${OUTPUT_FRAGMENT}
+  #include <logdepthbuf_fragment>
+}`;
+
+/** A two-lobed nucleus (like 67P/Churyumov-Gerasimenko): union of two spheres, roughened. */
+function nucleusGeometry(): BufferGeometry {
+  const g = new IcosahedronGeometry(1, 4);
+  const p = g.attributes.position as BufferAttribute;
+  const lobes: [number, number, number][] = [[-0.42, 0, 0.72], [0.5, 0.08, 0.52]];   // centre x, centre y, radius
+  const v = new Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.set(p.getX(i), p.getY(i), p.getZ(i)).normalize();
+    // farthest intersection of the ray from the origin with either lobe
+    let r = 0;
+    for (const [cx, cy, rr] of lobes) {
+      const b = v.x * cx + v.y * cy;
+      const c = cx * cx + cy * cy - rr * rr;
+      const disc = b * b - c;
+      if (disc >= 0) r = Math.max(r, b + Math.sqrt(disc));
+    }
+    // rough, terraced surface
+    const h = Math.sin(v.x * 9.1 + v.y * 4.3) * Math.sin(v.y * 7.7 - v.z * 5.9) * Math.sin(v.z * 11.3 + v.x * 3.1);
+    r *= 1 + 0.06 * h;
+    p.setXYZ(i, v.x * r, v.y * r, v.z * r);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 const MAX = 12;
 /** radiance of 21.5 mag per square arcsecond, photometric units */
 const MW_RADIANCE = magToIrradiance(21.5) / 2.3504e-11;
@@ -71,9 +144,22 @@ export class CometTails {
 
   /** display gain of the sky (xStar / xDark): comets are shown on the same scale as the Milky Way */
   readonly gain = { value: 1 };
+  /** the nucleus of the comet the explorer is closest to (drawn only up close) */
+  readonly nucleus: Mesh;
+  private jets: Mesh[] = [];
+  /** for the eye's adaptation: the drawn nucleus (camera-relative), its radius and radiance */
+  nucleusView: { rel: Vector3; radius: number; radiance: number } | null = null;
 
-  constructor() {
+  constructor(surfaceExposure: { value: number }) {
     this.group.name = 'comet-tails';
+    this.nucleus = new Mesh(nucleusGeometry(), new ShaderMaterial({
+      name: 'comet-nucleus', vertexShader: NUC_VERT, fragmentShader: NUC_FRAG,
+      uniforms: { uSunDir: { value: new Vector3(1, 0, 0) }, uSunIrr: { value: Math.PI }, uExposure: surfaceExposure, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+    }));
+    this.nucleus.frustumCulled = false;
+    this.nucleus.visible = false;
+    this.nucleus.renderOrder = 1;
+    this.group.add(this.nucleus);
     const g = new BufferGeometry();
     g.setAttribute('position', new BufferAttribute(new Float32Array(12), 3));
     g.setAttribute('aST', new BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
@@ -94,6 +180,63 @@ export class CometTails {
       this.meshes.push(m);
       this.group.add(m);
     }
+    for (let i = 0; i < 4; i++) {
+      const m = new Mesh(g, new ShaderMaterial({
+        name: 'comet-jet', vertexShader: VERT, fragmentShader: JET_FRAG,
+        uniforms: {
+          uNucleus: { value: new Vector3() }, uAxis: { value: new Vector3(1, 0, 0) }, uAcross: { value: new Vector3(0, 1, 0) },
+          uExtent: { value: [0, 1, 1, 0] }, uRc: { value: 1 }, uLi: { value: 1 }, uL0: { value: 0 },
+          uGain: this.gain, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+        },
+        transparent: true, depthWrite: false, blending: AdditiveBlending, side: DoubleSide,
+      }));
+      m.frustumCulled = false;
+      m.visible = false;
+      m.renderOrder = 9;
+      this.jets.push(m);
+      this.group.add(m);
+    }
+  }
+
+  /** The nucleus and its jets, for the active comet `c` within reach of the camera. */
+  private updateNucleus(c: Comet | null, cam: UPos, sun: UPos, r: number, sunIrr: number, jetL0: number): void {
+    const show = !!c && c.upos.sub(cam, new Vector3()).length() < 3e7;
+    this.nucleus.visible = show;
+    for (const j of this.jets) j.visible = show;
+    this.nucleusView = null;
+    if (!show || !c) return;
+    const R = c.radius > 0 ? c.radius : 2000;
+    const rel = c.upos.sub(cam, new Vector3());
+    const toSun = sun.sub(c.upos, new Vector3()).normalize();
+    // a fixed, comet-specific orientation (the nucleus turns slowly; not modelled)
+    let h = 0;
+    for (const ch of c.name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const q = new Quaternion().setFromAxisAngle(new Vector3(Math.sin(h), Math.cos(h * 0.7), Math.sin(h * 1.3)).normalize(), (h % 628) / 100);
+    this.nucleus.position.copy(rel);
+    this.nucleus.quaternion.copy(q);
+    this.nucleus.scale.setScalar(R);
+    const u = (this.nucleus.material as ShaderMaterial).uniforms;
+    (u.uSunDir.value as Vector3).copy(toSun);
+    u.uSunIrr.value = sunIrr;
+    this.nucleusView = { rel, radius: R, radiance: (0.05 * sunIrr) / Math.PI };
+    // jets from the sunlit side, fanning out a little; stronger near the Sun
+    const viewDir = rel.clone().normalize();
+    this.jets.forEach((j, i) => {
+      const a = new Vector3(Math.sin(h * (i + 1) * 1.7), Math.cos(h * (i + 2) * 0.9), Math.sin(h * (i + 3) * 1.1)).normalize();
+      const dir = toSun.clone().addScaledVector(a, 0.55).normalize();
+      const across = new Vector3().crossVectors(dir, viewDir);
+      if (across.lengthSq() < 1e-10) across.set(0, 0, 1).cross(dir);
+      across.normalize();
+      const ju = (j.material as ShaderMaterial).uniforms;
+      (ju.uNucleus.value as Vector3).copy(rel).addScaledVector(dir, R * 0.6);
+      (ju.uAxis.value as Vector3).copy(dir);
+      (ju.uAcross.value as Vector3).copy(across);
+      const L = R * 12;
+      ju.uExtent.value = [-R, L * 3, R * 12, 0];
+      ju.uRc.value = R * 0.25;
+      ju.uLi.value = L;
+      ju.uL0.value = jetL0 * (0.6 + 0.4 * Math.sin(h + i)) / Math.max(r, 0.3);
+    });
   }
 
   private drawn: Comet[] = [];
@@ -163,5 +306,14 @@ export class CometTails {
       m.visible = L0 > 0;
     }
     if (this.last.size > 400) this.last.clear();
+    // the nucleus of the nearest drawn comet
+    let nearest: { c: Comet; r: number } | null = null;
+    let nd = Infinity;
+    for (const e of scored.slice(0, MAX)) {
+      const d = e.c.upos.sub(cam, tmp).length();
+      if (d < nd) { nd = d; nearest = e; }
+    }
+    const sunIrr = nearest ? Math.PI / Math.max(nearest.r, 0.05) ** 2 : 0;
+    this.updateNucleus(nearest?.c ?? null, cam, sun, nearest?.r ?? 1, sunIrr, 40);
   }
 }

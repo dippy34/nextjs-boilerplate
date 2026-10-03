@@ -93,6 +93,20 @@ if (st) {
   const t = await page.evaluate(() => window.app.cometTails.group.children.filter((m) => m.visible).length);
   check('an active comet has a coma and tails', t > 0, `${t} drawn`);
   await page.screenshot({ path: path.join(outDir, 'p3-comet.png') });
+  // up close: the nucleus with jets on its sunlit side
+  await page.evaluate(() => {
+    const a = window.app;
+    const c = a.selection;
+    const sun = a.system.sun.upos.sub(c.upos).normalize();
+    const side = new sun.constructor(0, 0, 1).cross(sun).normalize();
+    const dir = sun.clone().multiplyScalar(0.5).addScaledVector(side, 0.85).normalize();
+    a.rig.upos.copy(c.upos).addVec(dir, 60e3);
+    a.rig.lookAt(dir.clone().negate());
+  });
+  await frames(12);
+  const n = await page.evaluate(() => ({ nucleus: window.app.cometTails.nucleus.visible, r: window.app.cometTails.nucleusView?.radius ?? 0 }));
+  check('up close the comet has a nucleus', n.nucleus && n.r > 0, JSON.stringify(n));
+  await page.screenshot({ path: path.join(outDir, 'p3b-comet-nucleus.png'), timeout: 180000 });
 }
 
 // 6. eclipses: the total lunar eclipse of 2026-03-03 (greatest 11:33 UTC): the Moon inside Earth's shadow

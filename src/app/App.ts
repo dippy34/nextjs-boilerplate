@@ -191,7 +191,7 @@ export class App {
     app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
     app.exo = new ExoPlanetLayer(starField.psf, bodies.surfaceExposure);
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
-    app.cometTails = new CometTails();
+    app.cometTails = new CometTails(bodies.surfaceExposure);
     const earthBody = system.byId.get(399)!;
     const craft = await loadSpacecraft(DATA, system.sun, earthBody).catch((e) => { console.warn('spacecraft', e); return [] as Spacecraft[]; });
     app.craft = new SpacecraftLayer(craft, bodies.surfaceExposure, starField.psf);
@@ -450,7 +450,7 @@ export class App {
       return;
     }
     else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 4.5, 2e7);
-    else if (obj instanceof Comet) d = obj.radius > 0 ? obj.radius * 60 : 2e7;
+    else if (obj instanceof Comet) d = Math.max(obj.radius, 2000) * 40;   // close enough to see the nucleus
     else if (obj instanceof RingSpot) {
       this.rig.flyTo(obj, 60, undefined, true, obj.approachDir());
       this.hud.toast(`Going to ${obj.name}`);
@@ -700,7 +700,7 @@ export class App {
       const d = b.upos.sub(this.rig.upos, rel).length() - b.radius;
       if (d < alt) alt = d;
     }
-    if (this.selection instanceof Comet) alt = Math.min(alt, this.selection.upos.sub(this.rig.upos, rel).length() - this.selection.radius);
+    if (this.selection instanceof Comet) alt = Math.min(alt, this.selection.upos.sub(this.rig.upos, rel).length() - Math.max(this.selection.radius, 2000));
     alt = Math.min(alt, this.nearestStarDist);
     for (const ev of this.exo.views) if (ev.planet !== tb) alt = Math.min(alt, ev.dist - ev.planet.radius);
     for (const cv of this.craft.views) alt = Math.min(alt, cv.dist - cv.craft.radius);
@@ -890,6 +890,15 @@ export class App {
       const w = smoothstep(0.0015, 0.08, Math.min(1, (Math.PI * pr * pr) / screen));
       const L = (0.6 * sunIrradianceAt(Math.max(cv.craft.upos.sub(this.system.sun.upos, new Vector3()).length(), 1))) / Math.PI;
       if (w > wBest) { wBest = w; lBest = L; keyBest = 0.45; }
+    }
+    const nv = this.cometTails.nucleusView;
+    if (nv) {
+      const p = this.project(nv.rel);
+      const pr = Math.asin(Math.min(1, nv.radius / Math.max(nv.rel.length(), nv.radius))) / this.view.pixelAngle / this.view.pixelRatio;
+      if (p && pr > 2) {
+        const w = smoothstep(0.0015, 0.08, Math.min(1, (Math.PI * pr * pr) / screen));
+        if (w > wBest) { wBest = w; lBest = nv.radiance; keyBest = 0.45; }
+      }
     }
     for (const ev of this.exo.views) {
       if (ev.pixelRadius < 2) continue;

@@ -40,6 +40,9 @@ All from NASA/JPL or NASA PDS (U.S. Government works, freely available):
   parameters M1 and K1 from this database: the coma radius grows with the comet's brightness at its
   distance from the Sun (about 10^5 km for a bright comet near 1 AU), the ion tail points away from the
   Sun and the dust tail lags along the orbit. Their integrated light follows the catalogue magnitude.
+  Up close, the nucleus is drawn with the catalogue diameter where known (otherwise 4 km), a generated
+  two-lobed shape in the manner of 67P/Churyumov-Gerasimenko, a dark surface (albedo about 0.05, as
+  Rosetta measured for 67P) and gas jets on the sunlit side.
 * **PDS Ring-Moon Systems Node**, volume VG_2801: Voyager 2 PPS δ Scorpii occultation, Saturn ring normal opacity at 10 km resolution (`PS1P01.TAB`) — <https://pds-rings.seti.org/>
   Inside the rings (`src/render/RingParticles.ts`) the number of drawn particles per area follows this
   optical depth; their sizes follow a power law with exponent about −3 between centimetres and metres
