@@ -81,7 +81,8 @@ for (const sc of scenarios) {
   }
   const state = await page.evaluate(() => (window.app ? window.app.debugState() : null)).catch(() => null);
   const file = path.join(outDir, `${sc.name}.png`);
-  await page.screenshot({ path: file });
+  // (software GL can take several seconds per frame in volume-heavy scenes; same limit as the other scripts)
+  await page.screenshot({ path: file, timeout: 180000 });
   const ms = Date.now() - t0;
   console.log(`${sc.name}: ${ms} ms`, JSON.stringify(state));
   if (errors.length) {
