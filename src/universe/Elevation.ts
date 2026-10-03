@@ -309,6 +309,21 @@ export class ElevationStore {
     return ((bits[i >> 3] >> (i & 7)) & 1) === 1;
   }
 
+  /**
+   * Deepest level the pyramid has at direction d (-1 before the manifest loads): below its
+   * spacing, relief has to be generated.
+   */
+  maxLevelAt(bodyKey: string, d: Vec3Like): number {
+    const s = this.bodies.get(bodyKey);
+    if (!s?.man) return -1;
+    const p = dirToFace(d, this.fp);
+    for (let l = s.maxLevel; l > 0; l--) {
+      const n = 1 << l;
+      if (this.exists(bodyKey, p.face, l, Math.min(n - 1, Math.floor(p.u * n)), Math.min(n - 1, Math.floor(p.v * n)))) return l;
+    }
+    return 0;
+  }
+
   loaded(bodyKey: string, face: number, level: number, x: number, y: number): boolean {
     const s = this.bodies.get(bodyKey);
     return !!s?.man && level <= s.maxLevel && s.tiles.has(this.key(s, face, level, x, y));

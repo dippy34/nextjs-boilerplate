@@ -137,6 +137,37 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     `scripts/places.mjs` (rings, comet, lunar eclipse, Jupiter moon shadow, landmarks, inside the
     Orion Nebula).
 
+## Global elevation pyramids (elevation worker)
+
+`pipeline/build_elevation.py` (sources and resumable downloads in `pipeline/elevation_sources.py`,
+raw files and int16 work grids in `data-raw/elevation/`, ~25 GB while building) ->
+`public/data/elevation/<body>/<level>/<face>-<x>-<y>.png` + `manifest.json`, and `index.json`.
+Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/elevation.test.ts`
+(fixture `tests/fixtures/elevation_points.json` is written by the build).
+
+* Cube: faces 0..5 = +X,-X,+Y,-Y,+Z,-Z of the body-fixed frame (+X = 0 deg E, +Z = north); image
+  right/down axes +X:(+Y,-Z) -X:(-Y,-Z) +Y:(-X,-Z) -Y:(+X,-Z) +Z:(+Y,+X) -Z:(+Y,-X); equi-angular
+  (`normalize(N + tan((2u-1)pi/4) U + tan((2v-1)pi/4) V)`). Level L: 2^L x 2^L tiles a face, 256
+  intervals a tile, 257 vertex-registered samples + a 1-sample apron = 259 x 259 16-bit greyscale
+  PNG; height = manifest `offset` + `step` (1 m) x value.
+* Bodies, MB, finest level: Moon 115 MB (all to 1.3 km, half to 666 m, landmarks 333 m), Mars 105
+  (all to 2.6 km, most to 1.3 km, 650/325 m at the volcanoes, canyons and landing sites), Earth 80
+  (sea floor to 9.8 km; land to 4.9 km, mountains to 1.2 km/611 m, landmarks 305 m), Mercury 25
+  (1.9 km), Ceres 7.6, Vesta 7.0: 340 MB in all. Deep tiles are chosen greedily by the RMS detail
+  they add over the parent x 2^(-level/2) under a per-body byte budget (`BODIES` in the script).
+* API: `Elevation.configure({ base, maxBytes })` (absolute base inside a worker), `load(body)`,
+  `levels(body)`, `request(body, face, level, x, y)`, `prefetch(body, dir, metresPerSample, ring)`,
+  `sample(body, dirBF, metresPerSample)` (sync bicubic, metres above the reference, null when
+  nothing loaded covers the point; blends adjacent levels; `lastMetresPerSample`/`lastLevel` say
+  what it used), `maxLevelAt(body, dir)`, `exists`, `loaded`, `version(body)`; helpers
+  `faceToDir`, `dirToFace`, `tileOf`, `decodePng16` (own PNG decoder over `DecompressionStream`,
+  so heights stay exact 16-bit). LRU cache, 96 MB default, levels 0-1 never evicted.
+* Regenerate: `cd pipeline && python3 build_elevation.py [body ...]` (downloads ~14 GB once).
+* Known: Mercury in the older `public/data/terrain/mercury.png` is twice too tall (the GeoTIFF's 0.5 m
+  scale was not applied there); the pyramids are right. Mars/Earth heights are relative to the
+  areoid/geoid but the engine adds them to the ellipsoid (as before: the difference is a smooth,
+  very long-wavelength undulation, kilometre-scale on Mars, ~100 m on Earth). Earth land below sea level (Dead Sea, Caspian) is stored as ocean in the fine levels.
+
 ## Next
 
 1. Quest performance pass on a real headset (cockpit, planet/galaxy/nebula shaders, tile atlas size,

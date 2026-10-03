@@ -151,6 +151,12 @@ describe.skipIf(!bodies.length)('elevation tiles', () => {
       const d = norm({ x: 0.2, y: 0.5, z: -0.4 });
       const fresh = new ElevationStore({ base: 'disk://elevation', fetch: diskFetch });
       expect(fresh.sample(body, d, 100)).toBeNull();
+      expect(fresh.maxLevelAt(body, d)).toBe(-1);
+      await fresh.load(body);
+      const top = fresh.maxLevelAt(body, d);
+      expect(top).toBeGreaterThanOrEqual(man.levels.filter((l) => !l.bitmap).length - 1);
+      const t = tileOf(d, top);
+      expect(fresh.exists(body, t.face, top, t.x, t.y)).toBe(true);
       await fresh.prefetch(body, d, man.levels[1].metresPerSample);
       const coarse = fresh.sample(body, d, 1);           // asks for more than is loaded
       expect(coarse).not.toBeNull();
