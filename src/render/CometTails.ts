@@ -48,7 +48,9 @@ void main() {
   float wd = 0.35 * uRc + 0.1 * max(s, 0.0);
   float dust = exp(-(t - tc) * (t - tc) / (2.0 * wd * wd)) * exp(-max(s, 0.0) / uLd) * smoothstep(-uRc, uRc, s);
   vec3 c = coma * vec3(1.0, 0.98, 0.92) + ion * 0.35 * vec3(0.45, 0.7, 1.4) + dust * 0.4 * vec3(1.1, 0.95, 0.75);
-  gl_FragColor = vec4(min(c * uL0 * 0.1 * uGain, vec3(6.0e4)), 1.0);
+  // glow, not a wall of white: soft ceiling on the displayed level (like the eye's response to the sky)
+  vec3 x = c * uL0 * 0.1 * uGain;
+  gl_FragColor = vec4(1.2 * (1.0 - exp(-x / 1.2)), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
@@ -96,7 +98,8 @@ void main() {
   float s = vST.x, t = vST.y;
   float w = uRc * (1.0 + 2.5 * max(s, 0.0) / uLi);
   float j = s > 0.0 ? exp(-t * t / (2.0 * w * w)) * exp(-s / uLi) * smoothstep(0.0, uRc * 0.5, s) : 0.0;
-  gl_FragColor = vec4(min(vec3(0.95, 0.97, 1.0) * j * uL0 * 0.1 * uGain, vec3(6.0e4)), 1.0);
+  vec3 x = vec3(0.95, 0.97, 1.0) * j * uL0 * 0.1 * uGain;
+  gl_FragColor = vec4(1.0 - exp(-x), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
@@ -199,7 +202,7 @@ export class CometTails {
   }
 
   /** The nucleus and its jets, for the active comet `c` within reach of the camera. */
-  private updateNucleus(c: Comet | null, cam: UPos, sun: UPos, r: number, sunIrr: number, jetL0: number): void {
+  private updateNucleus(c: Comet | null, cam: UPos, sun: UPos, sunIrr: number, jetL0: number): void {
     const show = !!c && c.upos.sub(cam, new Vector3()).length() < 3e7;
     this.nucleus.visible = show;
     for (const j of this.jets) j.visible = show;
@@ -235,7 +238,7 @@ export class CometTails {
       ju.uExtent.value = [-R, L * 3, R * 12, 0];
       ju.uRc.value = R * 0.25;
       ju.uLi.value = L;
-      ju.uL0.value = jetL0 * (0.6 + 0.4 * Math.sin(h + i)) / Math.max(r, 0.3);
+      ju.uL0.value = jetL0 * (0.6 + 0.4 * Math.sin(h + i));
     });
   }
 
@@ -307,13 +310,15 @@ export class CometTails {
     }
     if (this.last.size > 400) this.last.clear();
     // the nucleus of the nearest drawn comet
-    let nearest: { c: Comet; r: number } | null = null;
+    let nearest: { c: Comet; r: number; score: number } | null = null;
     let nd = Infinity;
     for (const e of scored.slice(0, MAX)) {
       const d = e.c.upos.sub(cam, tmp).length();
       if (d < nd) { nd = d; nearest = e; }
     }
     const sunIrr = nearest ? Math.PI / Math.max(nearest.r, 0.05) ** 2 : 0;
-    this.updateNucleus(nearest?.c ?? null, cam, sun, nearest?.r ?? 1, sunIrr, 40);
+    const nearestMesh = nearest ? this.meshes[scored.indexOf(nearest)] : null;
+    const comaL0 = nearestMesh ? ((nearestMesh.material as ShaderMaterial).uniforms.uL0.value as number) : 0;
+    this.updateNucleus(nearest?.c ?? null, cam, sun, sunIrr, comaL0 * 2);
   }
 }

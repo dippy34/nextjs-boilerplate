@@ -309,6 +309,7 @@ export class App {
     };
     this.hud.onSearch = (q) => this.searchItems(q);
     this.hud.onSearchPick = (id) => {
+      if (id.startsWith('tour:')) { this.tourAction(id.slice(5)); return; }
       const obj = this.resolveSearchId(id);
       if (obj) { this.select(obj); this.goTo(obj); }
     };
@@ -329,6 +330,7 @@ export class App {
         case 'KeyH': case 'F1': this.hud.toggleHelp(); e.preventDefault(); break;
         case 'KeyP': this.screenshot(); break;
         case 'Enter': case 'Slash': this.hud.openSearch(); e.preventDefault(); break;
+        case 'KeyT': this.hud.openList('Tour: pick a place (or type to search)', this.tourItems()); e.preventDefault(); break;
         case 'Equal': case 'NumpadAdd': this.rig.speedFactor *= 2; break;
         case 'Minus': case 'NumpadSubtract': this.rig.speedFactor /= 2; break;
         case 'Escape': this.cancelOrDeselect(); break;
@@ -372,6 +374,73 @@ export class App {
     this.clock.paused = false;
     this.hud.toast('Real time');
   }
+  /** T: a short list of places that show what the explorer can do. */
+  tourItems(): { label: string; detail: string; id: string }[] {
+    const lm = (n: string) => this.landmarks.findIndex((l) => l.name === n);
+    const idx = (arr: { name: string }[], n: string) => arr.findIndex((o) => o.name === n);
+    const items: { label: string; detail: string; id: string }[] = [
+      { label: "Inside Saturn's rings", detail: 'float among the ice of the B ring', id: 'place:rings' },
+      { label: 'Olympus Mons', detail: 'Mars · the tallest volcano known (real elevation data)', id: `lm:${lm('Olympus Mons')}` },
+      { label: 'Valles Marineris', detail: 'Mars · a canyon 4,000 km long', id: `lm:${lm('Valles Marineris')}` },
+      { label: 'Apollo 11 landing site', detail: 'the Moon · fly down and walk', id: `lm:${lm('Apollo 11 landing site')}` },
+      { label: 'Shackleton crater', detail: 'the Moon\'s south pole · long shadows', id: `lm:${lm('Shackleton (lunar south pole)')}` },
+      { label: 'A moon\'s shadow on Jupiter', detail: 'jumps to the next shadow transit', id: 'tour:shadow' },
+      { label: 'Total lunar eclipse', detail: '3 March 2026 · the Moon in Earth\'s shadow', id: 'tour:eclipse' },
+      { label: 'The brightest comet now', detail: 'coma, tails and its nucleus up close', id: 'tour:comet' },
+      { label: 'Proxima Cen b', detail: 'nearest exoplanet · land on it', id: 'tour:proxima' },
+      { label: 'Gaia BH1', detail: 'the nearest known black hole', id: `bh:${idx(this.blackHoles.map((h) => ({ name: h.name })), 'Gaia BH1')}` },
+      { label: 'Orion Nebula', detail: 'a star-forming cloud, 1,300 light years', id: `dso:${idx(this.deepSky.objects, 'Orion Nebula')}` },
+      { label: 'Andromeda Galaxy', detail: '2.5 million light years', id: `gx:${this.galaxies.galaxies.findIndex((g) => g.name.startsWith('Andromeda'))}` },
+      { label: 'The Milky Way from outside', detail: 'our galaxy, 100,000 light years across', id: 'mw:0' },
+    ];
+    return items.filter((i) => !/:-1$/.test(i.id));
+  }
+
+  /** Tour destinations that need more than a fly-to (a time jump, a search). */
+  private tourAction(what: string): void {
+    const fly = (o: SpaceObject | null) => { if (o) { this.select(o); this.goTo(o); } };
+    if (what === 'proxima') fly(this.findByName('Proxima Cen b'));
+    else if (what === 'eclipse') {
+      this.clock.jdTdb = utcToTdb(dateToJdUtc(new Date('2026-03-03T11:33:00Z')));
+      this.clock.paused = true;
+      fly(this.findByName('Moon'));
+      this.hud.toast('3 March 2026, 11:33 UTC: total lunar eclipse (time paused)', 4);
+    } else if (what === 'shadow') {
+      // the next time a Galilean moon's shadow falls on Jupiter's disk (15-minute steps, up to 4 days)
+      const jup = this.findByName('Jupiter') as Body;
+      const moons = ['Io', 'Europa', 'Ganymede', 'Callisto'].map((n) => this.findByName(n) as Body);
+      const jd0 = this.clock.jdTdb;
+      let found: { jd: number; moon: string } | null = null;
+      for (let k = 0; k < 4 * 96 && !found; k++) {
+        const jd = jd0 + k / 96;
+        this.system.update(jd);
+        const sun = this.system.sun.upos.sub(jup.upos, new Vector3()).normalize();
+        for (const m of moons) {
+          const v = m.upos.sub(jup.upos, new Vector3());
+          const along = v.dot(sun);
+          if (along > 0 && Math.sqrt(v.lengthSq() - along * along) < jup.radius * 0.8) { found = { jd, moon: m.name }; break; }
+        }
+      }
+      this.system.update(jd0);
+      if (found) {
+        this.clock.jdTdb = found.jd;
+        this.clock.paused = true;
+        this.hud.toast(`${found.moon}'s shadow on Jupiter (time paused)`, 4);
+      }
+      fly(jup);
+    } else if (what === 'comet') {
+      const sun = this.system.sun.upos;
+      let best: Comet | null = null, bm = Infinity;
+      for (const c of this.small.cometObjects) {
+        if (c.row[8] === null || !['P', 'C', 'I'].includes(c.row[1])) continue;
+        const r = c.upos.sub(sun, new Vector3()).length() / AU;
+        const m = c.row[8] + (c.row[9] ?? 10) * Math.log10(Math.max(r, 0.1));
+        if (r < 4 && m < bm) { bm = m; best = c; }
+      }
+      fly(best);
+    }
+  }
+
   /** K: missions and recent discoveries. */
   showMissions(): void {
     const m = this.game.missions;
@@ -960,6 +1029,8 @@ export class App {
       if (cv.pixelRadius <= 1.5 || !onScreen(cv.rel)) continue;
       diskCap = Math.min(diskCap, 1.6 / ((0.6 * sunIrradianceAt(Math.max(cv.craft.upos.sub(this.system.sun.upos, new Vector3()).length(), 1))) / Math.PI));
     }
+    const nuc = this.cometTails.nucleusView;
+    if (nuc && onScreen(nuc.rel)) diskCap = Math.min(diskCap, 1.6 / nuc.radiance);
     for (const ev of this.exo.views) {
       if (ev.pixelRadius <= 1.5 || ev.radiance <= 0 || (!onScreen(ev.rel) && this.bigCoverage(ev.rel, ev.planet.radius) < 0.02)) continue;
       diskCap = Math.min(diskCap, 1.6 / ev.radiance);

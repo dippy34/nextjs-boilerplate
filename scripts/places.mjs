@@ -20,6 +20,15 @@ const frames = async (n) => { const f = await page.evaluate(() => window.app.fra
 await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Saturn&dist=4`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 
+// 0. the tour (T) lists places that all resolve
+let st0 = await page.evaluate(() => {
+  const a = window.app;
+  const items = a.tourItems();
+  const bad = items.filter((i) => !i.id.startsWith('tour:') && !a.resolveSearchId(i.id)).map((i) => i.label);
+  return { n: items.length, bad };
+});
+check('the tour offers places that resolve', st0.n >= 10 && st0.bad.length === 0, JSON.stringify(st0));
+
 // 1. search finds the rings as a destination
 let st = await page.evaluate(() => window.app.searchItems('rings').map((r) => r.label));
 check('search offers Saturn\'s rings', st.includes("Saturn's rings"), JSON.stringify(st.slice(0, 5)));

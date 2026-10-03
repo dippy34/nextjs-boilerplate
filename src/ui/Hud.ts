@@ -37,6 +37,7 @@ const HELP: [string, string][] = [
   ['J', 'Warp drive to the selection'],
   ['X', 'Brake (in the ship)'],
   ['K / N', 'Missions & discoveries / ship sound on-off'],
+  ['T', 'Tour: places worth a visit'],
   ['H', 'Toggle this help'],
 ];
 
@@ -96,8 +97,18 @@ export class Hud {
   openSearch(): void {
     this.search.classList.remove('hidden');
     this.searchInput.value = '';
+    this.searchInput.placeholder = 'Find: planet, moon, star, comet, black hole…';
     this.searchList.innerHTML = '';
     this.searchInput.focus();
+  }
+
+  /** A fixed list of destinations in the search panel (typing still searches everything). */
+  openList(title: string, items: { label: string; detail: string; id: string }[]): void {
+    this.openSearch();
+    this.searchInput.placeholder = title;
+    this.searchList.innerHTML = items
+      .map((r) => `<div class="result" data-id="${escapeHtml(r.id)}"><span>${escapeHtml(r.label)}</span><small>${escapeHtml(r.detail)}</small></div>`)
+      .join('');
   }
 
   closeSearch(): void {
