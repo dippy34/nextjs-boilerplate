@@ -11,6 +11,7 @@ import { MilkyWay } from '../universe/MilkyWay';
 import { Galaxy } from '../universe/Galaxies';
 import { DeepSkyObject } from '../universe/DeepSky';
 import { ExoPlanet } from '../universe/Planets';
+import { RingSpot } from '../universe/RingSpot';
 import { Spacecraft } from '../universe/Spacecraft';
 import { Body, type SpaceObject } from '../universe/Body';
 import { CatalogStar } from '../universe/Stars';
@@ -385,6 +386,7 @@ export class VRSupport {
     if (obj instanceof MilkyWay) return obj.radius * 2.6;
     if (obj instanceof Galaxy) return obj.radius * 2.4;
     if (obj instanceof DeepSkyObject) return obj.radius * (obj.data.kind === 'open' ? 1.6 : 2.6);
+    if (obj instanceof RingSpot) return 60;
     return obj.radius > 0 ? obj.radius * 80 : 3e7;
   }
 

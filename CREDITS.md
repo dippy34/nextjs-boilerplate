@@ -36,7 +36,15 @@ All from NASA/JPL or NASA PDS (U.S. Government works, freely available):
 * **JPL Solar System Dynamics**: planetary satellite mean elements and physical parameters, planetary physical parameters, Keplerian elements for approximate planet positions (E. M. Standish) — <https://ssd.jpl.nasa.gov/>
 * **JPL Horizons API** — state vectors and osculating elements used to calibrate and validate moon orbits, and as test reference data — <https://ssd.jpl.nasa.gov/horizons/>
 * **JPL Small-Body Database Query API** — osculating elements and physical data of asteroids, TNOs and comets — <https://ssd-api.jpl.nasa.gov/doc/sbdb_query.html>
+  Comet comas and tails (`src/render/CometTails.ts`) are a model driven by each comet's total-magnitude
+  parameters M1 and K1 from this database: the coma radius grows with the comet's brightness at its
+  distance from the Sun (about 10^5 km for a bright comet near 1 AU), the ion tail points away from the
+  Sun and the dust tail lags along the orbit. Their integrated light follows the catalogue magnitude.
 * **PDS Ring-Moon Systems Node**, volume VG_2801: Voyager 2 PPS δ Scorpii occultation, Saturn ring normal opacity at 10 km resolution (`PS1P01.TAB`) — <https://pds-rings.seti.org/>
+  Inside the rings (`src/render/RingParticles.ts`) the number of drawn particles per area follows this
+  optical depth; their sizes follow a power law with exponent about −3 between centimetres and metres
+  (Zebker, Marouf & Tyler 1985, *Icarus* 64, 531; drawn from 0.25 to 7 m), in a layer of the order of
+  ten metres thick. Positions, shapes and the (static, co-moving) layout are generated.
 
 ## Planetary maps (`public/data/textures/`)
 

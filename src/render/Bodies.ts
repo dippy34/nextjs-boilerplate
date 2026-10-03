@@ -13,6 +13,8 @@ import type { AtmosphereSpec } from './Atmospheres';
 import type { TileDetail } from './TileDetail';
 import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
 import { StarCorona } from './StarCorona';
+import { RingParticles } from './RingParticles';
+import { ringFrame } from '../universe/RingSpot';
 import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
 import { TerrainSource } from '../universe/Terrain';
 import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';
@@ -112,6 +114,16 @@ ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
+/** Area of overlap of two discs of radii r1, r2 whose centres are d apart (as in the body shader). */
+function discOverlap(r1: number, r2: number, d: number): number {
+  if (d >= r1 + r2) return 0;
+  if (d <= Math.abs(r1 - r2)) return Math.PI * Math.min(r1, r2) ** 2;
+  const a1 = Math.acos(Math.max(-1, Math.min(1, (d * d + r1 * r1 - r2 * r2) / (2 * d * r1))));
+  const a2 = Math.acos(Math.max(-1, Math.min(1, (d * d + r2 * r2 - r1 * r1) / (2 * d * r2))));
+  const k = (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2);
+  return r1 * r1 * a1 + r2 * r2 * a2 - 0.5 * Math.sqrt(Math.max(k, 0));
+}
+
 /** Per-frame screen information about a body (used by labels, picking, exposure). */
 export interface BodyView {
   body: Body;
@@ -156,6 +168,9 @@ export class BodiesLayer {
   readonly maxSprites: number;
   /** exposure for resolved surfaces (point sprites use the shared PSF exposure) */
   readonly surfaceExposure = { value: 1 };
+  /** the ice particles around the explorer inside Saturn's rings */
+  ringParticles: RingParticles | null = null;
+  private ringParticlesBody: Body | null = null;
   /** heights for the landing terrain of solid worlds */
   readonly terrainSource: TerrainSource;
 
@@ -348,6 +363,8 @@ export class BodiesLayer {
         uExposure: this.surfaceExposure,
         uBodyToWorld: { value: new Matrix3() },
         uBodyCenter: { value: new Vector3() },
+        uOcc: { value: [new Vector4(), new Vector4(), new Vector4(), new Vector4()] }, uOccRed: { value: new Vector4() }, uOccN: { value: 0 },
+        uSunRel: { value: new Vector3() }, uSunR: { value: SUN_RADIUS },
         uHasRings: { value: 0 }, uRingTex: { value: null }, uRingRadii: { value: new Vector3() },
         uRadiance: { value: 1 }, uTime: { value: 0 },
         ...(isStar ? starLookUniforms(this.sunLook = starLook('sun', b.teff, 1, 4.83, true)) : {}),
@@ -509,6 +526,11 @@ export class BodiesLayer {
     mesh.renderOrder = 2;
     this.group.add(mesh);
     this.rings.set(b, mesh);
+    if (!this.ringParticles) {
+      this.ringParticles = new RingParticles(`${this.texBase}/${ring.texture}`, ring.innerKm * 1e3, ring.outerKm * 1e3, [0.75, 0.68, 0.58], this.surfaceExposure);
+      this.ringParticlesBody = b;
+      this.group.add(this.ringParticles.mesh);
+    }
   }
 
   /**
@@ -594,21 +616,75 @@ export class BodiesLayer {
           ru.uViewDirBF.value.copy(view.rel).negate().normalize().applyMatrix3(inv);
           ru.uSunIrr.value = u.uSunIrr.value;
         }
+        if (this.ringParticles && b === this.ringParticlesBody) {
+          this.ringParticles.update(view.rel, ringFrame(b.orientation), b.radius, u.uSunDir.value as Vector3, u.uSunIrr.value as number);
+        }
       } else if (mesh) {
         mesh.visible = false;
         const ring = this.rings.get(b);
         if (ring) ring.visible = false;
+        if (this.ringParticles && b === this.ringParticlesBody) this.ringParticles.update(null, b.orientation, b.radius, new Vector3(), 0);
       }
       // Saturn's rings are much larger than the planet: keep them visible when they span pixels
       const ringMesh = this.rings.get(b);
       if (ringMesh && !view.resolved) ringMesh.visible = false;
     }
+    this.updateEclipses(sunRel);
     this.updateGlare(viewQuat);
     this.releaseHi(now);
     this.sprites.geometry.setDrawRange(0, n);
     (this.sprites.geometry.attributes.position as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aIrr as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aColor as BufferAttribute).needsUpdate = true;
+  }
+
+  private occluders: Body[] | null = null;
+  /** fraction of sunlight reaching each body's centre this frame (eclipses), with the reddened light in a planet's shadow */
+  readonly sunlit = new Map<Body, number>();
+  /**
+   * Eclipses: for each resolved body, up to four bodies that can stand between it and the Sun
+   * this frame (moons on their planet, the planet on its moons, moons on each other).
+   */
+  private updateEclipses(sunRel: Vector3): void {
+    this.occluders ??= this.system.bodies.filter((o) => o.kind !== 'star' && o.radius > 50e3);
+    const toSun = new Vector3(), v = new Vector3();
+    for (const view of this.views.values()) {
+      const b = view.body;
+      const mesh = this.meshes.get(b);
+      if (!view.resolved || !mesh || b.kind === 'star') continue;
+      const u = (mesh.material as ShaderMaterial).uniforms;
+      if (!u.uOcc) continue;
+      toSun.copy(sunRel).sub(view.rel);
+      const dS = toSun.length();
+      toSun.divideScalar(dS);
+      const penumbra = SUN_RADIUS / dS;
+      const occ = u.uOcc.value as Vector4[];
+      const red = u.uOccRed.value as Vector4;
+      let n = 0;
+      let vis = 1, glow = 0;
+      for (const o of this.occluders) {
+        if (o === b || !o.valid) continue;
+        const ov = this.views.get(o);
+        if (!ov) continue;
+        v.copy(ov.rel).sub(view.rel);                 // body -> occluder
+        const along = v.dot(toSun);
+        if (along <= 0 || along >= dS) continue;
+        const perp = Math.sqrt(Math.max(0, v.lengthSq() - along * along));
+        if (perp > o.radius + b.radius + along * penumbra * 1.05) continue;
+        occ[n].set(ov.rel.x, ov.rel.y, ov.rel.z, o.radius);
+        const reddens = this.atmosphere(o)?.surfaceTransmittance ? 1 : 0;
+        red.setComponent(n, reddens);
+        // as seen from the body's centre (for the eye's adaptation)
+        const dO = v.length();
+        const f = discOverlap(penumbra, o.radius / dO, Math.atan2(v.clone().cross(toSun).length(), along)) / (Math.PI * penumbra * penumbra);
+        vis *= 1 - f;
+        glow = Math.max(glow, f * reddens);
+        if (++n === 4) break;
+      }
+      this.sunlit.set(b, Math.max(vis, glow * 0.004));
+      u.uOccN.value = n;
+      (u.uSunRel.value as Vector3).copy(sunRel);
+    }
   }
 
   /** Can the body have landing terrain? Solid, round (not lumpy) and without a thick atmosphere. */

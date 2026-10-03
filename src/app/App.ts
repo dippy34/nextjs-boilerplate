@@ -6,6 +6,8 @@ import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
 import { TerrainPatch } from '../render/TerrainPatch';
+import { RingSpot } from '../universe/RingSpot';
+import { CometTails } from '../render/CometTails';
 import { ExoPlanetLayer, type ExoView } from '../render/ExoPlanetLayer';
 import { GalaxyGlow } from '../render/GalaxyLayer';
 import { JetsLayer } from '../render/Jets';
@@ -103,6 +105,8 @@ export class App {
   tiles!: TileDetail;
   /** real 3D ground under the explorer near solid worlds */
   readonly terrain = new TerrainPatch();
+  /** comas and tails of the active comets */
+  cometTails!: CometTails;
   /** systems drawn this frame: those of the stars around the explorer, plus a selected/targeted one */
   private nearSystems: PlanetarySystem[] = [];
   activeSystems: PlanetarySystem[] = [];
@@ -186,6 +190,7 @@ export class App {
     app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
     app.exo = new ExoPlanetLayer(starField.psf, bodies.surfaceExposure);
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
+    app.cometTails = new CometTails();
     const earthBody = system.byId.get(399)!;
     const craft = await loadSpacecraft(DATA, system.sun, earthBody).catch((e) => { console.warn('spacecraft', e); return [] as Spacecraft[]; });
     app.craft = new SpacecraftLayer(craft, bodies.surfaceExposure, starField.psf);
@@ -199,7 +204,7 @@ export class App {
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.cometTails.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
@@ -445,6 +450,7 @@ export class App {
     }
     else if (obj instanceof CatalogStar) d = Math.max(obj.radius * 4.5, 2e7);
     else if (obj instanceof Comet) d = obj.radius > 0 ? obj.radius * 60 : 2e7;
+    else if (obj instanceof RingSpot) d = 60;
     else d = Math.max(obj.radius * 4, 1e6);
     this.rig.flyTo(obj, d);
     this.hud.toast(`Going to ${obj.name}`);
@@ -463,8 +469,15 @@ export class App {
     this.hud.toast('Screenshot saved');
   }
 
+  private ringSpot: RingSpot | null = null;
+
   findByName(name: string): SpaceObject | null {
     const n = name.toLowerCase();
+    if (/^(saturn'?s? rings?|rings of saturn|the rings|b ring)$/.test(n)) {
+      const saturn = this.system.bodies.find((x) => x.name === 'Saturn');
+      if (saturn) this.ringSpot ??= new RingSpot(saturn, this.system.sun.upos.sub(saturn.upos, new Vector3()).normalize());
+      return this.ringSpot;
+    }
     const b = this.system.bodies.find((x) => x.name.toLowerCase() === n);
     if (b) return b;
     const gx = this.galaxies.galaxies.find((g) => g.name.toLowerCase() === n || g.data.simbad.toLowerCase().replace(/\s+/g, '') === n.replace(/\s+/g, '') || (n === 'andromeda' && g.name.startsWith('Andromeda')));
@@ -542,6 +555,10 @@ export class App {
       const sc = Math.min(...[g.name, g.data.simbad, g.data.simbad.replace(/\s+/g, ''), 'galaxy'].map(score).filter((x) => x >= 0));
       if (Number.isFinite(sc)) out.push({ label: g.name, detail: `galaxy · ${((g.data.distPc * 3.2616) / 1e6).toFixed(g.data.distPc < 3e5 ? 2 : 1)} million ly`, id: `gx:${i}`, score: sc + (g.name === 'Milky Way' ? 0 : 0.05) });
     });
+    {
+      const s = Math.min(...["Saturn's rings", 'Saturn rings', 'rings', 'B ring'].map(score).filter((x) => x >= 0));
+      if (Number.isFinite(s)) out.push({ label: "Saturn's rings", detail: 'fly into the B ring, among its ice', id: 'place:rings', score: s + 0.1 });
+    }
     this.craft.craft.forEach((c, i) => {
       const sc = Math.min(...[c.name, 'spacecraft', 'probe'].map(score).filter((x) => x >= 0));
       if (Number.isFinite(sc)) out.push({ label: c.name, detail: 'spacecraft', id: `sc:${i}`, score: sc - 0.1 });
@@ -563,6 +580,7 @@ export class App {
     if (kind === 'gx') return this.galaxies.galaxies[Number(v)] ?? null;
     if (kind === 'dso') return this.deepSky.objects[Number(v)] ?? null;
     if (kind === 'xp') return this.exoPlanet(Number(v), Number(id.split(':')[2]));
+    if (kind === 'place' && v === 'rings') return this.findByName("Saturn's rings");
     return null;
   }
 
@@ -790,6 +808,14 @@ export class App {
    * Fraction of the view a sphere covers, from angles: for bodies so close that their centre may be
    * behind the camera (standing on a surface, skimming it).
    */
+  /** Radiance of the sunlit ring ice around the explorer (0 when not inside Saturn's rings). */
+  private ringRadiance(): number {
+    const rp = this.bodies.ringParticles;
+    const sat = this.system.bodies.find((b) => b.name === 'Saturn');
+    if (!rp?.mesh.visible || !sat) return 0;
+    return (0.6 * sunIrradianceAt(Math.max(sat.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI;
+  }
+
   private bigCoverage(rel: Vector3, radius: number): number {
     const d = rel.length();
     const ar = Math.asin(Math.min(1, radius / Math.max(d, radius)));
@@ -823,7 +849,7 @@ export class App {
       const b = v.body;
       const L = b.kind === 'star'
         ? (AU / SUN_RADIUS) ** 2
-        : (Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI;
+        : ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
       wBest = w;
       lBest = L;
       keyBest = b.kind === 'star' ? 1.1 : 0.45;
@@ -849,6 +875,12 @@ export class App {
       }
       const w = smoothstep(0.0015, 0.08, coverage);
       if (w > wBest && ev.radiance > 0) { wBest = w; lBest = ev.radiance; keyBest = 0.45; }
+    }
+    // inside Saturn's rings the ice around the explorer is a lit surface filling much of the view
+    const ringL = this.ringRadiance();
+    if (ringL > 0) {
+      const w = smoothstep(0.0015, 0.08, 0.12);
+      if (w > wBest) { wBest = w; lBest = ringL; keyBest = 0.45; }
     }
     for (const hv of this.holes.views) {
       if (!hv.diskRadiance) continue;
@@ -885,7 +917,7 @@ export class App {
       if (!v.resolved || v.pixelRadius <= 1.5 || (!onScreen(v.rel) && this.bigCoverage(v.rel, v.body.radius) < 0.02)) continue;
       const b = v.body;
       if (b.kind === 'star') lightCap = Math.min(lightCap, 1.8 / (AU / SUN_RADIUS) ** 2);
-      else diskCap = Math.min(diskCap, 1.6 / ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI));
+      else diskCap = Math.min(diskCap, 1.6 / (((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1)));
     }
     for (const cv of this.craft.views) {
       if (cv.pixelRadius <= 1.5 || !onScreen(cv.rel)) continue;
@@ -895,6 +927,7 @@ export class App {
       if (ev.pixelRadius <= 1.5 || ev.radiance <= 0 || (!onScreen(ev.rel) && this.bigCoverage(ev.rel, ev.planet.radius) < 0.02)) continue;
       diskCap = Math.min(diskCap, 1.6 / ev.radiance);
     }
+    if (ringL > 0) diskCap = Math.min(diskCap, 1.6 / ringL);
     for (const hv of this.holes.views) {
       // a hot inner disk only takes over the eye's adaptation once it covers part of the view
       if (!hv.diskRadiance || hv.innerDiskPx <= 1.5 || !onScreen(hv.rel)) continue;
@@ -1191,12 +1224,22 @@ export class App {
   }
 
   /** Never let the camera reach an event horizon. */
-  /** Never below the landing terrain: an eye height above the ground. */
-  private keepAboveGround(): void {
+  /**
+   * Never below the landing terrain: an eye height above the ground. Within a few metres of it and
+   * not climbing, the explorer walks: eye height is kept over hills and into craters.
+   */
+  private keepAboveGround(dt: number): void {
     const below = this.terrain.below(this.rig.upos);
-    if (!below || below.dist >= below.ground + 1.6) return;
+    if (!below) return;
+    const EYE = 1.6;
+    const h = below.dist - below.ground;
     const out = this.rig.upos.sub(below.centre, new Vector3()).normalize();
-    this.rig.upos.addVec(out, below.ground + 1.6 - below.dist);
+    let target = h;
+    if (h < EYE) target = EYE;
+    else if (h < 4 && !this.rig.autopilot && this.rig.vel.dot(out) < 0.05 && !this.input.keys.has('KeyR')) {
+      target = h + (EYE - h) * (1 - Math.exp(-dt * 6));
+    }
+    if (target !== h) this.rig.upos.addVec(out, target - h);
   }
 
   private keepOutsideHorizons(): void {
@@ -1366,7 +1409,7 @@ export class App {
     this.rig.braking = this.input.keys.has('KeyX');
     this.rig.update(dt, this.input);
     this.keepOutsideHorizons();
-    this.keepAboveGround();
+    this.keepAboveGround(dt);
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
 
     // The dolly carries the explorer's orientation; a headset pose is applied on top of it.
@@ -1416,6 +1459,7 @@ export class App {
     this.sky.updateWith(xStar / xDark, sunDistPc, this.galaxy.ready ? this.galaxy.target.texture : null, this.camGal);
     this.galaxies.update(this.rig.upos, pixelAngle, xStar / xDark, smoothstep(300, 1500, sunDistPc), this.view.quat);
     this.deepSky.update(this.rig.upos, this.camPc, pixelAngle, xStar / xDark);
+    this.cometTails.gain.value = xStar / xDark;
     this.lastMLim = mLim;
     const psf = this.starFields[0].psf;
     psf.uExposure.value = xStar;
@@ -1430,6 +1474,7 @@ export class App {
     this.orbits.focus = this.rig.anchor instanceof Body ? this.rig.anchor : null;
     this.orbits.update(this.rig.upos, pixelAngle, jd);
     this.small.update(this.rig.upos, jd);
+    this.cometTails.update(this.rig.upos, this.system.sun.upos, this.small.cometObjects, this.selection, jd);
 
     this.game.update(dt);
 

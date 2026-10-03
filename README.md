@@ -16,7 +16,9 @@ the Sombrero, Centaurus A, M87 …) · **41 nebulae and star clusters** (the Ori
 Ring, Helix and Crab nebulae, the Pleiades, Omega Centauri, 47 Tucanae …) · the Milky Way from outside ·
 **real 3D ground to land on**: NASA elevation models for the Moon, Mars (Olympus Mons, Valles Marineris)
 and Mercury, generated hills, craters and shadows on other moons, and on rocky planets of other stars
-(their mountains and seas match their colours; temperate worlds have blue skies).
+(their mountains and seas match their colours; temperate worlds have blue skies) · **inside Saturn's
+rings** among their ice (search "rings") · comets near the Sun with comas and tails · **eclipses at their
+real times** (moon shadows crossing Jupiter, the Moon turning copper in Earth's shadow).
 
 **Game mode (V):** fly your own ship — a cockpit with live navigation screens (sit inside it in VR),
 a chase view, inertial flight, a warp drive with streaks and engine sound, fictional traffic and a
@@ -244,9 +246,12 @@ Known limitations (planned for later phases unless noted):
 * Star radii are estimated from V magnitude and temperature (no bolometric correction). Gaia DR3
   places Sirius B 0.033 pc from Sirius A (a known astrometry problem for that binary).
 * Moons without published sizes get a deterministic procedural radius, flagged "estimated".
-* Comets are points (no coma/tail yet); the asteroid-belt brightness boost for distant asteroids is
-  artistic (physical within 0.05 AU).
-* Pluto has no ephemeris outside 1849–2150; no eclipses or body-on-body shadows yet (Phase 6).
+* Comet comas and tails are a model: their size follows each comet's catalogued total-magnitude
+  parameters (M1, K1) and distance from the Sun, the ion tail points straight away from the Sun and
+  the dust tail curves back along the orbit; real tails vary with outbursts. The asteroid-belt
+  brightness boost for distant asteroids is artistic (physical within 0.05 AU).
+* Pluto has no ephemeris outside 1849–2150. Eclipses and moon shadows treat bodies as spheres (up to
+  four shadowing bodies at a time), and the coppery light in Earth's shadow is a simple tint.
 * VR has no bloom pass (a glare sprite around the Sun stands in) and starts at a lower star magnitude
   limit (6.8, adjustable in Settings) to protect frame rate.
 * Atmospheres are single scattering (no multiple scattering) and ignore terrain height. The Milky
@@ -262,7 +267,7 @@ Known limitations (planned for later phases unless noted):
 3. Nebulae and star clusters (OpenNGC), a finer Milky Way seen from outside.
 4. Sharper terrain (streamed elevation tiles), terrain shadows, Earth terrain; more stations and ship types.
 5. Full UI: search panel, bookmarks, settings and quality presets.
-6. Polish: lens flares, eclipses, spinning (Kerr) black holes, performance tuning.
+6. Polish: lens flares, spinning (Kerr) black holes, performance tuning.
 
 ## Data and credits
 

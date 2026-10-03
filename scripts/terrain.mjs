@@ -153,6 +153,47 @@ st = await page.evaluate(() => ({ owner: window.app.terrain.owner?.name ?? null,
 check('t5: terrain on a planet of another star', st.owner === 'Proxima Cen b' && st.hScale > 0.99, JSON.stringify(st));
 await page.screenshot({ path: path.join(outDir, 't5-exoplanet.png') });
 
+// 6. a temperate (or ocean) world of another star: land, sea and a blue sky
+st = await page.evaluate(() => {
+  const a = window.app;
+  const names = ['Rigil Kentaurus', 'Sirius', 'Procyon', 'Altair', 'Vega', 'Tau Ceti', 'Epsilon Eridani', 'Fomalhaut', 'Pollux',
+    'Arcturus', 'Capella', 'Castor', 'Denebola', 'Alderamin', 'Mizar', 'Caph', 'Megrez', 'Alioth', 'Eltanin', 'Mirach', 'Hamal',
+    'Achernar', 'Regulus', 'Spica', 'Aldebaran', 'Deneb', 'Polaris', 'Kochab', 'Schedar', 'Dubhe', 'Merak', 'Phecda', 'Alkaid'];
+  for (const n of names) {
+    const s = a.findByName(n);
+    const sys = s ? a.systems.of(s) : null;
+    const p = sys?.planets.find((q) => q.spec.type === 'terran' || q.spec.type === 'ocean');
+    if (p) return { star: n, planet: p.name, type: p.spec.type };
+  }
+  return null;
+});
+console.log('temperate', JSON.stringify(st));
+if (st) {
+  const pname = st.planet;
+  await page.evaluate((n) => { const a = window.app; const p = a.findByName(n); a.select(p); a.placeNear(p, p.radius * 4, 30, 20); }, pname);
+  await frames(10);
+  await page.evaluate(() => {
+    const a = window.app;
+    const p = a.selection;
+    const V = p.rel.constructor;
+    const star = p.system.host.upos.sub(p.upos).normalize();
+    const side = new V(0, 0, 1).cross(star).normalize();
+    const el = (25 * Math.PI) / 180;
+    const up = star.clone().multiplyScalar(Math.sin(el)).addScaledVector(side, Math.cos(el)).normalize();
+    a.rig.upos.copy(p.upos).addVec(up, p.radius + 2500);
+    const fwd = side.clone().cross(up).normalize();
+    a.rig.lookAt(fwd.multiplyScalar(Math.cos(0.05)).addScaledVector(up, -Math.sin(0.05)).normalize(), up);
+  });
+  await page.waitForFunction(() => window.app.terrain.owner === window.app.selection, null, { timeout: 120000 }).catch(() => undefined);
+  await frames(8);
+  const t6 = await page.evaluate((n) => ({
+    owner: window.app.terrain.owner?.name ?? null,
+    sky: window.app.atmospheres.group.children.some((m) => m.visible && m.name === `${n} atmosphere`),
+  }), pname);
+  check('t6: a temperate planet of another star has ground and a sky', t6.owner === pname && t6.sky, JSON.stringify(t6));
+  await page.screenshot({ path: path.join(outDir, 't6-temperate.png') });
+}
+
 st = await page.evaluate(() => ({ fps: window.app.fps }));
 console.log('fps', JSON.stringify(st));
 

@@ -83,6 +83,12 @@ uniform vec3 uSunColor;
 uniform float uExposure;
 uniform mat3 uBodyToWorld;    // rotation part (unit) body-fixed -> world
 uniform vec3 uBodyCenter;     // camera-relative centre (m)
+// eclipses: up to four bodies that can stand between this one and the Sun
+uniform vec4 uOcc[4];         // camera-relative centre (m), radius (m)
+uniform vec4 uOccRed;         // 1 for an occluder whose atmosphere bends red light into its shadow
+uniform float uOccN;
+uniform vec3 uSunRel;         // camera-relative Sun centre (m)
+uniform float uSunR;          // solar radius (m)
 // Ring shadow (Saturn)
 uniform float uHasRings;
 uniform sampler2D uRingTex;
@@ -162,6 +168,39 @@ float cratersAt(vec3 ci, vec3 r, float density, out float fresh) {
   }
   return h;
 }
+// Area of overlap of two discs of radii r1, r2 whose centres are d apart.
+float discOverlap(float r1, float r2, float d) {
+  if (d >= r1 + r2) return 0.0;
+  if (d <= abs(r1 - r2)) return 3.14159265 * min(r1, r2) * min(r1, r2);
+  float a1 = acos(clamp((d * d + r1 * r1 - r2 * r2) / (2.0 * d * r1), -1.0, 1.0));
+  float a2 = acos(clamp((d * d + r2 * r2 - r1 * r1) / (2.0 * d * r2), -1.0, 1.0));
+  float k = (-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2);
+  return r1 * r1 * a1 + r2 * r2 * a2 - 0.5 * sqrt(max(k, 0.0));
+}
+// Fraction of the Sun's disk seen from p past the occluders (eclipses), and how much of the
+// missing light comes back reddened through an occluder's atmosphere.
+float sunVisible(vec3 p, out float red) {
+  red = 0.0;
+  if (uOccN < 0.5) return 1.0;
+  vec3 toSun = uSunRel - p;
+  float dS = length(toSun);
+  vec3 sd = toSun / dS;
+  float aS = uSunR / dS;
+  float vis = 1.0;
+  for (int i = 0; i < 4; i++) {
+    if (float(i) >= uOccN) break;
+    vec3 toO = uOcc[i].xyz - p;
+    float dO = length(toO);
+    vec3 od = toO / dO;
+    if (dot(od, sd) <= 0.0 || dO >= dS) continue;
+    float aO = uOcc[i].w / dO;
+    float th = atan(length(cross(od, sd)), dot(od, sd));   // precise for small angles
+    float f = discOverlap(aS, aO, th) / (3.14159265 * aS * aS);
+    vis *= 1.0 - f;
+    red = max(red, f * uOccRed[i]);
+  }
+  return vis;
+}
 // Normal of a surface displaced by height h (metres) along n, from screen-space derivatives
 // (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU").
 vec3 bumpNormal(vec3 pos, vec3 n, float h) {
@@ -239,6 +278,8 @@ void main() {
     float fr, frT = 0.0;
     float d = 0.45 * uCraters;
     float w0 = smoothstep(400.0 / 12.0, 400.0 / 30.0, mpp);
+    // headset: at most two scales at a time (the coarsest drops out where the 20 m one is in full)
+    if (uLite > 0.5) w0 *= 1.0 - smoothstep(20.0 / 12.0, 20.0 / 30.0, mpp);
     if (w0 > 0.0) { hBump += w0 * 400.0 * 0.5 * cratersAt(uOI0, uOF0 + vLocal / 400.0, d, fr); frT = max(frT, fr * w0); }
     float w1 = smoothstep(90.0 / 12.0, 90.0 / 30.0, mpp);
     if (w1 > 0.0) { hBump += w1 * 90.0 * 0.5 * cratersAt(uOI1, uOF1 + vLocal / 90.0, d, fr); frT = max(frT, fr * w1); }
@@ -301,6 +342,10 @@ void main() {
   }
   light *= dayside;
   if (uTerrain > 0.5) light *= mix(1.0, vSun, uHScale);   // shadows of the relief
+  // eclipses: shadows of moons and planets (with a coppery glow where sunlight is bent through an atmosphere)
+  float eclRed = 0.0;
+  float ecl = sunVisible(vPosView, eclRed);
+  light *= ecl;
 
   // Shadow cast by rings onto the planet
   if (uHasRings > 0.5 && mu0g > 0.0) {
@@ -329,6 +374,8 @@ void main() {
   }
   vec3 sunL = uSunColor * sunT * (uSunIrr / 3.14159265);
   vec3 radiance = albedo * sunL * light;
+  // in a planet's shadow, sunlight refracted through its atmosphere (the Moon turns copper in an eclipse)
+  if (eclRed > 0.0) radiance += albedo * sunL * eclRed * 0.004 * vec3(1.0, 0.32, 0.1) * max(mu0g, 0.0);
 
   // Sun glint on open water (GGX, roughness of a wind-roughened sea seen from orbit)
   if (water > 0.0 && mu0g > 0.0) {

@@ -42,6 +42,7 @@ const DEFS: Def[] = [
   { id: 'andromeda', title: 'Visit Andromeda', detail: 'Within 3 of its radii', check: (a, near) => near(a.findByName('Andromeda Galaxy'), 3) },
   { id: 'dock', title: 'Dock at a space station', detail: 'Ship mode: fly slowly into a station docking port', check: (a) => !!a.game?.docked },
   { id: 'land', title: 'Land on another world', detail: 'Ship mode: come down slowly onto any solid surface', check: (a) => !!a.game?.landed },
+  { id: 'alien', title: 'Stand on an alien world', detail: 'Ship mode: land on a rocky planet of another star', check: (a) => a.game?.landed instanceof ExoPlanet },
   { id: 'olympus', title: 'Fly over Olympus Mons', detail: 'Below 40 km over the tallest volcano known (Mars, 18.7° N 226° E)', check: (a) => {
     const o = over(a, 'Mars');
     return !!o && o.alt < 40e3 && arc(o.lat, o.lon, 18.65, -133.8) < 5;
