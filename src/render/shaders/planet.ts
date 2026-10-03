@@ -92,6 +92,7 @@ uniform mat3 uBodyToWorld;
 uniform float uLite;        // 1 in VR: fewer noise octaves, no domain warp
 uniform float uTerrain;     // 1 = drawing the landing terrain (render/TerrainPatch.ts)
 uniform float uHScale;      // terrain relief scale (fades in on descent)
+uniform float uCamAlt;      // the explorer's altitude over the sphere (m): below the clouds they are not painted on the ground
 uniform vec3 uHoleDir;      // sphere only: body-fixed centre of the terrain patch
 uniform float uHoleCos;     // ... and the cosine of its angular radius (2 = no hole)
 varying vec3 vTerrN;
@@ -159,6 +160,23 @@ float detail(vec3 n, float fp) {
     float r = 1.0 - abs(pn(n * f + uSeed * 3.7) * 2.0 - 1.0);
     s += a * (r * r - 0.45) * smoothstep(0.35, 0.15, f * fp);
     f *= 2.07; a *= 0.55;
+  }
+  return s;
+}
+
+// landing terrain: hills below the patch's vertex spacing (frequencies above 'fmin'), shaped as the
+// CPU ground's (ExoGround.height: ridged in rough country, rolling elsewhere); metres
+float hills(vec3 n, float fp, float fmin, float rough) {
+  float s = 0.0, f = 300.0;
+  float amp = (0.008 + 0.03 * rough * rough) * 2.0;
+  for (int i = 0; i < 9; i++) {
+    if (f * fp > 0.35) break;
+    if (f > fmin * 0.7) {
+      float v = pn(n * f + uSeed * 5.3 + float(i) * 7.1);
+      float r = 1.0 - abs(2.0 * v - 1.0);
+      s += ((r * r - 0.45) * rough + (v - 0.5) * (1.0 - rough)) * amp * (uRadius / f) * smoothstep(fmin * 0.7, fmin * 1.4, f) * smoothstep(0.35, 0.15, f * fp);
+    }
+    f *= 2.0;
   }
   return s;
 }
@@ -437,6 +455,7 @@ void main() {
   // ground materials up close (render/Materials.ts): flat A, flat B, steep, snow; shares of B and snow
   vec4 msel = vec4(2.0, 5.0, 3.0, 6.0);
   float veg = 0.0, snowG = 0.0;
+  vec3 hillTilt = vec3(0.0);
   if (uType >= 6) {
     float streak;
     albedo = giant(nB, streak);
@@ -455,7 +474,7 @@ void main() {
     float eps = clamp(fp * 1.5, 2e-5, 0.01);
     float hn = (h - uHMid) / uHSpan;      // dry worlds: height by quantile (about -0.5 .. 0.5 for 10 .. 90 %)
     // rough mountains and highlands, smoother plains and lowlands
-    float rough = seas ? 0.25 + 0.75 * smoothstep(sea + 0.01, sea + 0.2, h) : 0.35 + 0.65 * smoothstep(-0.2, 0.45, hn);
+    float rough = seas ? 0.25 + 0.75 * smoothstep(sea + 0.01, sea + 0.2, h) : 0.5 + 0.5 * smoothstep(-0.2, 0.45, hn);
     float dd = detail(nB, fp) * rough;
     float hd = h + dd * 0.008;
     vec2 g = vec2(0.0);
@@ -466,6 +485,12 @@ void main() {
       g = vec2(hx - hd, hy - hd) / eps;
     }
     bool wet = seas && h < sea;
+    if (uTerrain > 0.5 && !lite && !wet) {
+      float fmin = uRadius / (2.5 * max(length(vPosView) * 0.065, 1.0));   // (the patch's vertex spacing there)
+      vec3 m1 = normalize(nB + t1 * eps), m2 = normalize(nB + t2 * eps);
+      float h0 = hills(nB, fp, fmin, rough);
+      hillTilt = (t1 * (hills(m1, fp, fmin, rough) - h0) + t2 * (hills(m2, fp, fmin, rough) - h0)) / (eps * uRadius);
+    }
     // slope of the ground (relief range over the radius); the shading exaggerates it so relief reads
     // from orbit (as it does at low sun on real planets, from slopes far below the pixel)
     vec2 gs = wet ? vec2(0.0) : g * uRelief * 2.5;
@@ -499,6 +524,8 @@ void main() {
     float altM = max(h - sea, 0.0) * uRelief * uRadius;
     float T = surfTemp(lat, seas ? altM : 0.0);
     float var = fbmN(nB * 31.0 + uSeed * 4.1, lite ? 1 : 3) - 0.44;   // patchiness
+    // and at the scale of kilometres (seen from low orbit and the ground), fading in as it resolves
+    float var2 = lite ? 0.0 : (fbmN(nB * 420.0 + uSeed * 2.9, 3) - 0.44) * smoothstep(0.004, 0.0008, fp);
     if (seas) {
       if (wet) {
         // depth: shelves bright and turquoise where warm, greener where cold; sea ice where frozen
@@ -529,7 +556,7 @@ void main() {
       vec3 sp = normalize(nB + (sunB - nB * muB) * 0.0025 / max(muB, 0.15));
       float cs = lite ? cloud : clouds(sp, uTime, fp * 2.0);
       shadow = 1.0 - 0.75 * cs * smoothstep(-0.05, 0.25, muB);
-      cloud = clamp(cloud, 0.0, 1.0);
+      cloud = clamp(cloud, 0.0, 1.0) * smoothstep(4000.0, 9000.0, uCamAlt);
       albedo = mix(albedo, vec3(mix(0.62, 0.92, cloud)) * clamp(1.0 - 1.6 * (cs - cloud), 0.55, 1.15), cloud);
       if (cloud > 0.0) nShade = normalize(mix(nShade, nW, cloud));
       shadow = mix(shadow, 1.0, cloud);
@@ -608,6 +635,7 @@ void main() {
       albedo *= (1.0 + 0.8 * dd) * (1.0 + 0.5 * var);
       msel = vec4(1.0, 2.0, 3.0, 6.0);           // hot rock: pocked regolith and stony ground
     }
+    if (!wet) albedo *= 1.0 + 0.5 * var2 * (1.0 - cloud);
     // polar caps (dry worlds; seas freeze by temperature)
     if (!seas) {
       float cap = smoothstep(uIceLat, uIceLat + 0.06, abs(lat) + 0.08 * (fbmN(nB * 6.0 + uSeed, 3) - 0.5));
@@ -624,7 +652,7 @@ void main() {
   if (uTerrain > 0.5) {
     // landing terrain: the relief's own normal and shadows, inside the geometric day side, with
     // the scanned ground materials' grain
-    vec3 nTB = normalize(vTerrN);
+    vec3 nTB = normalize(normalize(vTerrN) - hillTilt * uHScale);
     if (uMatOn > 0.5 && uType < 6 && uHScale > 0.01) {
       vec3 nG;
       vec3 det = groundDetail(vGround, nB, nTB, length(fwidth(vPosView)), msel, veg, snowG, uLite, nG);

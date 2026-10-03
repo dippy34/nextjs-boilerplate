@@ -153,7 +153,7 @@ export class ExoGround implements Ground {
     // the colour noise's finest octave is about R / 300 across: generated relief below that, as
     // EXO_FRAG's detail(): ridged crests in rough country (mountains, highlands), gentle rolling
     // ground on plains and lowlands
-    const rough = seas ? 0.25 + 0.75 * smooth(this.seaLevel + 0.01, this.seaLevel + 0.2, t) : 0.35 + 0.65 * smooth(-0.2, 0.45, (t - this.hMid) / this.hSpan);
+    const rough = seas ? 0.25 + 0.75 * smooth(this.seaLevel + 0.01, this.seaLevel + 0.2, t) : 0.5 + 0.5 * smooth(-0.2, 0.45, (t - this.hMid) / this.hSpan);
     const amp = (0.008 + 0.03 * rough * rough) * 2 * land;
     let o = 0;
     for (let L = R / 300; L > minL && o < 16; L *= 0.5, o++) {

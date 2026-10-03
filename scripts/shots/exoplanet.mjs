@@ -4,6 +4,8 @@
 //   KS  distances in planet radii from the centre (camera on the day side, across the light);
 //       `g` = land 2.5 km up with the star 20° above the horizon
 //   EL  camera elevation above the planet's orbital plane (degrees; rings)
+//   GALT height over the ground for `g` (m, default 2500)
+//   LITE=1 the headset tier's cheaper shader variant
 //   SUN angle (degrees) between the view direction and the star direction seen from the planet (default 56)
 import { chromium } from '@playwright/test';
 const base = process.argv[2] ?? 'http://127.0.0.1:4174/';
@@ -11,7 +13,9 @@ const out = process.argv[3] ?? '/tmp/claude-0/exo';
 const names = (process.env.PL ?? 'Proxima Cen b,TRAPPIST-1 e,Kepler-22 b,51 Peg b').split(',');
 const ks = (process.env.KS ?? '2.2').split(',');
 const sunAng = Number(process.env.SUN ?? 56);
-const elev = Number(process.env.EL ?? 0);   // camera elevation above the system plane (degrees)
+const elev = Number(process.env.EL ?? 0);
+const galt = Number(process.env.GALT ?? 2500);
+const lite = process.env.LITE === '1';   // the headset tier's shader variant (LITE.uLite)   // `g`: height over the ground (m)   // camera elevation above the system plane (degrees)
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 1280), height: Number(process.env.H ?? 720) } });
 const errors = [];
@@ -48,7 +52,7 @@ for (const n0 of names) {
   }, [n0, STARS]);
   if (!name) { console.log('no planet for', n0); continue; }
   for (const k of ks) {
-    const place = () => page.evaluate(([n, k, sunAng, elev]) => {
+    const place = () => page.evaluate(([n, k, sunAng, elev, galt]) => {
       const a = window.app; const f = window.app.findByName(n); const o = f?.system ? f : window.__exo[n]; if (!o?.system) return 'not found';
       window.__exo[n] = o;
       a.select(o);
@@ -71,7 +75,7 @@ for (const n0 of names) {
           const hh = ground.height(m, 100);
           if (hh > 300) { u = c; gh = hh; break; }
         }
-        a.rig.upos.copy(o.upos).addVec(u, o.radius + gh + 2500);
+        a.rig.upos.copy(o.upos).addVec(u, o.radius + gh + galt);
         const fwd = sd.clone().cross(u).normalize();
         if (fwd.lengthSq() < 0.5) fwd.copy(sd2);
         a.rig.lookAt(fwd.multiplyScalar(Math.cos(0.1)).addScaledVector(u, -Math.sin(0.1)).normalize(), u);
@@ -84,8 +88,9 @@ for (const n0 of names) {
         a.rig.lookAt(v.clone().negate());
       }
       return `${o.spec.type} R=${(o.radius / 6.371e6).toFixed(2)} teq=${Math.round(o.spec.teqK)} rings=${o.spec.rings}`;
-    }, [name, k, sunAng, elev]);
+    }, [name, k, sunAng, elev, galt]);
     let info = await place();
+    if (lite) await page.evaluate(() => { for (const d of window.app.exo.draws.values()) d.mesh.material.uniforms.uLite.value = 1; });
     // (the first visit to a system may rebuild its planets: place the camera again)
     // (the host star's position is refined once its catalogue entry loads)
     await frames(15);

@@ -238,7 +238,7 @@ export class ExoPlanetLayer {
       uSunDir: { value: new Vector3(1, 0, 0) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI },
       uExposure: this.exposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
       uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK, uLite: LITE.uLite, uCSeed: { value: exoCraterSeed(p.name) },
-      uTerrain: { value: 0 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
+      uTerrain: { value: 0 }, uHScale: { value: 0 }, uCamAlt: { value: 1e9 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
       ...MATERIALS, uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) },
     };
     for (const [k, v] of Object.entries(pal)) u[k] = { value: Array.isArray(v) ? new Vector3(...v) : v };
@@ -281,7 +281,7 @@ export class ExoPlanetLayer {
     if (type === 3 || type === 4) {
       const ra = rng(hashKey(p.key + '/air'));
       const g = (G * p.spec.massKg) / (p.radius * p.radius);
-      air = earthLikeAtmosphere(0.4 + 2.2 * ra(), Math.min(400, Math.max(180, p.spec.teqK)), Math.max(2, g));
+      air = earthLikeAtmosphere(0.6 + 1.2 * ra(), Math.min(400, Math.max(180, p.spec.teqK)), Math.max(2, g));
       // the shell draws the limb glow: keep only a little of the surface shader's own haze
       u.uAtmo.value = Number(u.uAtmo.value) * 0.3;
     }
@@ -391,6 +391,7 @@ export class ExoPlanetLayer {
           (u.uSunColor.value as Vector3).set(sc[0] / sl, sc[1] / sl, sc[2] / sl);
           u.uSunIrr.value = E;
           u.uTime.value = time;
+          u.uCamAlt.value = dist - p.radius;
           (u.uBodyToWorld.value as Matrix3).setFromMatrix4(d.mesh.matrix.clone().makeRotationFromQuaternion(q));
         } else if (ns < 64) {
           // reflected light as a point: albedo * E * (R / d)^2 * phase
