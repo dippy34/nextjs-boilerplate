@@ -35,8 +35,15 @@ GALAXIES = [
     ("Needle Galaxy", "NGC 4565"), ("M106", "M 106"), ("IC 342", "IC 342"), ("NGC 300", "NGC 300"), ("NGC 55", "NGC 55"),
     ("M74", "M 74"), ("M77", "M 77"), ("NGC 1300", "NGC 1300"), ("M100", "M 100"), ("M49", "M 49"), ("M60", "M 60"),
     ("Cartwheel Galaxy", "NAME Cartwheel Galaxy"), ("NGC 4631", "NGC 4631"), ("NGC 891", "NGC 891"), ("M66", "M 66"), ("M65", "M 65"),
-    ("Sextans B", "NAME Sextans B"), ("Leo II", "NAME Leo II dSph"),
+    ("Sextans B", "NAME Sextans B"), ("Leo II", "NAME Leo II dSph"), ("NGC 5195", "NGC 5195"),
 ]
+# Total V magnitudes where SIMBAD's is not the whole galaxy's (a nucleus or a partial aperture):
+# RC3 (de Vaucouleurs et al. 1991) total B_T and colour (B-V)_T.
+VMAG_FIX = {"Needle Galaxy": 9.6, "M49": 8.4, "Cartwheel Galaxy": 15.2, "NGC 5195": 9.6}
+# Interacting pairs: the companion at its partner's distance
+SAME_DIST = {"NGC 5195": "Whirlpool Galaxy"}
+# Morphology where SIMBAD gives none usable (RC3)
+MORPH_FIX = {"NGC 5195": "SB0 pec"}
 
 
 def tap(q: str) -> list[dict[str, str]]:
@@ -85,13 +92,16 @@ def main() -> None:
         dist = statistics.median(pcs)
         flux = {f["filter"]: num(f["flux"]) for f in tap(f"SELECT filter, flux FROM flux WHERE oidref = {oid} AND filter IN ('V', 'B')")}
         vmag = flux.get("V") if flux.get("V") is not None else (flux["B"] - 0.8 if flux.get("B") is not None else None)
+        vmag = VMAG_FIX.get(name, vmag)
+        if name in SAME_DIST:
+            dist = next(g["distPc"] for g in out if g["name"] == SAME_DIST[name])
         maj, mnr = num(b["galdim_majaxis"]), num(b["galdim_minaxis"])
         if maj is None:
             print(f"{name}: no size")
             continue
         g = {"name": name, "simbad": b["main_id"], "ra": float(b["ra"]), "dec": float(b["dec"]), "distPc": round(dist, 1),
              "nDist": len(pcs), "majArcmin": maj, "minArcmin": mnr if mnr else maj, "paDeg": num(b["galdim_angle"]) or 0.0,
-             "morph": (b["morph_type"] or "").strip(), "otype": b["otype"], "vmag": vmag}
+             "morph": MORPH_FIX.get(name, (b["morph_type"] or "").strip()), "otype": b["otype"], "vmag": vmag}
         print(f"{name}: {dist / 1e6:.3f} Mpc ({len(pcs)} measurements) {maj}'x{mnr}' PA {g['paDeg']} {g['morph']} V={vmag}")
         out.append(g)
     write_json(OUT / "galaxies.json", {"source": "SIMBAD (CDS) via TAP", "galaxies": out}, compact=False)
