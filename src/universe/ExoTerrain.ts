@@ -57,7 +57,10 @@ export function exoTerrain(n: Vector3, seed: number, lite: boolean): number {
     wy = fbmN(hx + 7.9, hy + 7.9, hz + 7.9, 4) - 0.5;
     wz = fbmN(hx + 4.1, hy + 4.1, hz + 4.1, 4) - 0.5;
   }
-  const cont = fbmN(qx * 0.7 + wx * 2, qy * 0.7 + wy * 2, qz * 0.7 + wz * 2, lite ? 4 : 6);
+  const cx = qx * 0.7 + wx * 2, cy = qy * 0.7 + wy * 2, cz = qz * 0.7 + wz * 2;
+  let cont = fbmN(cx, cy, cz, lite ? 4 : 6);
+  // finer octaves (fractal coasts, islands)
+  if (!lite) cont += 0.045 * (fbmN(cx * 41 + wx * 3 + 5.3, cy * 41 + wy * 3 + 5.3, cz * 41 + wz * 3 + 5.3, 3) - 0.4375);
   const plate = pn(qx * 0.55 + wx * 1.4 + 11, qy * 0.55 + wy * 1.4 + 11, qz * 0.55 + wz * 1.4 + 11);
   const belt = 1 - smooth(0, 0.14, Math.abs(plate - 0.5));
   const mount = ridgedN(qx * 2 + wx, qy * 2 + wy, qz * 2 + wz, lite ? 3 : 5);
@@ -78,6 +81,19 @@ export function exoQuantile(seed: number, quantile: number, samples = 600): numb
   return v[Math.min(samples - 1, Math.max(0, Math.round(quantile * (samples - 1))))];
 }
 
+/**
+ * Crater fields of generated planets, largest first: cell size (m), density and depth (x crater
+ * radius). EXO_FRAG shades the first three from orbit (`craters()`), the landing ground has them all.
+ */
+export const EXO_CRATER_CELLS: [number, number, number][] = [[846400, 0.3, 0.025], [184000, 0.35, 0.06], [40000, 0.4, 0.18]];
+
+/** Crater seed of a generated planet (cells of EXO_FRAG's uCSeed and the landing ground). */
+export function exoCraterSeed(name: string): number {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return h % 100003;
+}
+
 /** Planet types (EXO_FRAG uType) with a solid surface to land on. */
 export const ROCKY_TYPES = new Set([0, 1, 2, 3, 4, 5]);
 
@@ -96,15 +112,14 @@ export class ExoGround implements Ground {
   private readonly relief: number;
   private readonly seedN: number;
 
-  constructor(readonly owner: ExoPlanet, private type: number, private seed: number, private seaLevel: number) {
+  /** `craters`: crater density (EXO_FRAG uCraters; 0 = none) */
+  constructor(readonly owner: ExoPlanet, private type: number, private seed: number, private seaLevel: number, private craters = 0) {
     this.name = owner.name;
     this.radius = owner.radius;
     this.radii = [owner.radius, owner.radius, owner.radius];
     this.relief = Math.min(20e3, owner.radius * 0.002);
     this.amplitude = this.relief * 0.5;
-    let h = 0;
-    for (const c of owner.name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-    this.seedN = h % 100003;
+    this.seedN = exoCraterSeed(owner.name);
   }
 
   ready(): boolean { return true; }
@@ -119,17 +134,21 @@ export class ExoGround implements Ground {
     const R = this.radius;
     const px = n.x * R, py = n.y * R, pz = n.z * R;
     const minL = Math.max(spacing * 2.5, 6);
-    // the colour noise's finest octave is about R / 75 across: generated hills below that
+    // the colour noise's finest octave is about R / 300 across: generated hills below that
     let o = 0;
-    for (let L = R / 75; L > minL && o < 16; L *= 0.5, o++) {
+    for (let L = R / 300; L > minL && o < 16; L *= 0.5, o++) {
       h += (vnoise(px / L, py / L, pz / L, this.seedN + o * 7) - 0.5) * 2 * 0.012 * L * land;
     }
-    // airless rocky worlds keep their craters
-    if (this.type === 1 || this.type === 5) {
+    // crater fields (airless and thin-aired worlds): the large ones are also drawn from orbit
+    if (this.craters > 0) {
       let i = 0;
-      for (let cell = 40e3; cell >= 30; cell /= 4.6, i++) {
+      for (const [cell, dens, depth] of EXO_CRATER_CELLS) {
+        if (!(i === 0 && R < 1.5e6) && cell * 0.4 >= minL) h += craterField(px, py, pz, cell, this.seedN + 100 * i, dens * this.craters, depth);
+        i++;
+      }
+      for (let cell = EXO_CRATER_CELLS[2][0] / 4.6; cell >= 30; cell /= 4.6, i++) {
         if (cell * 0.4 < minL) break;
-        h += craterField(px, py, pz, cell, this.seedN + 100 * i, 0.4, cell > 5000 ? 0.18 : 0.32);
+        h += craterField(px, py, pz, cell, this.seedN + 100 * i, 0.4 * Math.min(1, this.craters * 1.5), cell > 5000 ? 0.18 : 0.32);
       }
     }
     return Number.isFinite(h) ? h : 0;

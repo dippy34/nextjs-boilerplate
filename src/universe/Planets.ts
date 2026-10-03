@@ -77,8 +77,10 @@ export function classify(radiusEarth: number, teq: number, r: () => number): Pla
   if (radiusEarth > 1.75) return 'subneptune';
   if (teq > 900) return 'lava';
   if (teq > 380) return 'hot';
-  if (teq > 270) return r() < 0.45 ? 'ocean' : r() < 0.7 ? 'terran' : 'desert';
-  if (teq > 200) return r() < 0.4 ? 'terran' : r() < 0.7 ? 'desert' : 'ice';
+  // with an Earth-like greenhouse (+33 K) the surface is temperate for Teq ~225-285 K (Earth: 255 K)
+  if (teq > 285) return r() < 0.55 ? 'desert' : 'ocean';
+  if (teq > 225) { const u = r(); return u < 0.4 ? 'ocean' : u < 0.85 ? 'terran' : 'desert'; }
+  if (teq > 190) { const u = r(); return u < 0.3 ? 'terran' : u < 0.6 ? 'desert' : 'ice'; }
   return 'ice';
 }
 
