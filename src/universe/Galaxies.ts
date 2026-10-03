@@ -24,6 +24,45 @@ export function shapeOf(morph: string, otype: string): GalaxyShape {
   return 'elliptical';
 }
 
+/**
+ * Measured disc inclinations (degrees) where the axis ratio misleads (a big bulge, a thick or
+ * warped disc) or the near side matters: negative flips the near side. M31: 77°, its north-west
+ * side nearer (the dust lanes cross the bulge there); NGC 891 and the Needle are edge-on; the
+ * Sombrero is 6° from edge-on with its bulge making it look rounder.
+ */
+const INCLINATION: Record<string, number> = {
+  'Andromeda Galaxy': -77, 'Triangulum Galaxy': 54, 'Whirlpool Galaxy': 22, 'NGC 891': 89.5, 'Needle Galaxy': 86.5,
+  'Sombrero Galaxy': 84, 'Sculptor Galaxy': 78, 'NGC 4631': 85, 'NGC 55': 80, 'Pinwheel Galaxy': 18, 'M106': 68,
+  "Bode's Galaxy": 59, 'Black Eye Galaxy': 60, 'Sunflower Galaxy': 58, 'M65': 76, 'M66': 65, 'NGC 1300': 50,
+  'Large Magellanic Cloud': 34, 'Southern Pinwheel': 24, 'M74': 7, 'M100': 30, 'M94': 35, 'NGC 300': 40, 'IC 342': 31,
+};
+
+/** Inclination (degrees) of a thin disc with relative thickness 0.12 seen with axis ratio b/a. */
+function inclinationFromRatio(ratio: number): number {
+  const cosI = Math.sqrt(Math.max(0, (ratio ** 2 - 0.12 ** 2) / (1 - 0.12 ** 2)));
+  return (Math.acos(Math.min(1, cosI)) * 180) / Math.PI;
+}
+
+/**
+ * A disc's frame (ICRF unit vectors) from its sky position, position angle of the major axis and
+ * inclination (degrees; negative puts the other side of the minor axis nearer to us).
+ */
+export function discFrame(raDeg: number, decDeg: number, paDeg: number, inclDeg: number): { major: Vector3; minor: Vector3; normal: Vector3 } {
+  const L = raDecToVector(raDeg, decDeg);
+  // sky basis at the galaxy: east and north
+  const a = (raDeg * Math.PI) / 180, d = (decDeg * Math.PI) / 180;
+  const E = new Vector3(-Math.sin(a), Math.cos(a), 0);
+  const N = new Vector3(-Math.sin(d) * Math.cos(a), -Math.sin(d) * Math.sin(a), Math.cos(d));
+  const pa = (paDeg * Math.PI) / 180;
+  const major = N.clone().multiplyScalar(Math.cos(pa)).addScaledVector(E, Math.sin(pa)).normalize();
+  const B = N.clone().multiplyScalar(-Math.sin(pa)).addScaledVector(E, Math.cos(pa)).normalize();
+  const i = (inclDeg * Math.PI) / 180;
+  const normal = L.clone().multiplyScalar(Math.cos(i)).addScaledVector(B, Math.sin(i)).normalize();
+  if (normal.dot(L) < 0) normal.negate();
+  const minor = new Vector3().crossVectors(normal, major).normalize();
+  return { major, minor, normal };
+}
+
 /** Another galaxy as a destination, sized and oriented as catalogued. */
 export class Galaxy implements SpaceObject {
   readonly kind = 'galaxy';
@@ -49,18 +88,9 @@ export class Galaxy implements SpaceObject {
     this.radius = Math.tan(majRad / 2) * data.distPc * PC;
     this.ratio = Math.min(1, Math.max(0.08, data.minArcmin / data.majArcmin));
     this.shape = shapeOf(data.morph, data.otype);
-    // sky basis at the galaxy: east and north
-    const a = (data.ra * Math.PI) / 180, d = (data.dec * Math.PI) / 180;
-    const E = new Vector3(-Math.sin(a), Math.cos(a), 0);
-    const N = new Vector3(-Math.sin(d) * Math.cos(a), -Math.sin(d) * Math.sin(a), Math.cos(d));
-    const pa = (data.paDeg * Math.PI) / 180;
-    this.major.copy(N).multiplyScalar(Math.cos(pa)).addScaledVector(E, Math.sin(pa)).normalize();
-    const B = N.clone().multiplyScalar(-Math.sin(pa)).addScaledVector(E, Math.cos(pa)).normalize();
-    // a thin disk seen at inclination i has b/a = cos i (thickness ~0.12 keeps edge-on discs from vanishing)
-    const cosI = Math.sqrt(Math.max(0, (this.ratio ** 2 - 0.12 ** 2) / (1 - 0.12 ** 2)));
-    const sinI = Math.sqrt(1 - cosI * cosI);
-    this.normal.copy(L).multiplyScalar(cosI).addScaledVector(B, sinI).normalize();
-    this.minor.crossVectors(this.normal, this.major).normalize();
+    const incl = INCLINATION[data.name];
+    const fr = discFrame(data.ra, data.dec, data.paDeg, incl ?? inclinationFromRatio(this.ratio));
+    this.major.copy(fr.major); this.minor.copy(fr.minor); this.normal.copy(fr.normal);
     let h = 0;
     for (const c of data.name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
     this.seed = (h % 997) / 997;
