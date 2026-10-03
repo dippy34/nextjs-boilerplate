@@ -17,7 +17,8 @@ for (const [name, body] of sites) {
   await page.evaluate((n) => {
     const a = window.app; const l = a.findByName(n);
     const jd0 = a.clock.jdTdb; let best = jd0, err = Infinity;
-    for (let h = 0; h < (l.world.name === 'Moon' ? 30 * 24 : 26); h += l.world.name === 'Moon' ? 1 : 0.25) {
+    const span = { Moon: 30 * 24, Mercury: 180 * 24 }[l.world.name] ?? 26;
+    for (let h = 0; h < span; h += span > 100 ? span / 720 : 0.25) {
       a.system.update(jd0 + h / 24);
       const el = Math.asin(a.system.sun.upos.sub(l.world.upos).normalize().dot(l.up())) * 57.3;
       if (Math.abs(el - 22) < err) { err = Math.abs(el - 22); best = jd0 + h / 24; }

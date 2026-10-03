@@ -1,5 +1,6 @@
 import { CHAPMAN } from './atmosphere';
 import { MATERIAL_GLSL } from '../Materials';
+import { CLOUD_GLSL } from '../CloudLayer';
 import { FIX_LOGDEPTH, OUTPUT_FRAGMENT, PROJECT_PARS } from './xr';
 /** Shaders for resolved Solar System bodies (Phase 1: textured ellipsoids). */
 
@@ -115,6 +116,7 @@ uniform vec4 uMatSel;          // ground materials (render/Materials.ts): flat A
 uniform float uMatMode;        // 0 airless regolith, 1 Earth (from the map's colour), 2 Mars, 3 ice
 ${MATERIAL_GLSL}
 ${CHAPMAN}
+${CLOUD_GLSL}
 vec3 srgbToLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
 float hash1(float n) { return fract(sin(n) * 43758.5453123); }
@@ -248,42 +250,6 @@ float sunVisible(vec3 p, out float red) {
     red = max(red, f * uOccRed[i]);
   }
   return vis;
-}
-// Earth's clouds: the cloud map (~20 km per texel) broken up below its resolution by warped fractal
-// billows and scattered small cumulus, each octave only while it spans a few pixels (no flicker).
-// nc: body-fixed direction rotated with the clouds' drift; pix: radians per pixel. Returns the
-// cover (0..1); thick: optical thickness proxy (0..1) for shading.
-float cloudField(vec3 nc, vec2 uv, float pix, float lite, out float thick) {
-  float c = texture2D(uClouds, uv).r;
-  thick = c;
-  float oct = lite > 0.5 ? 2.0 : 5.0;
-  // warp so the billows are not lattice-aligned blobs
-  vec3 q = nc * 300.0;
-  vec3 wq = vec3(bn3(q * 0.5 + 3.1), bn3(q * 0.5 + 7.7), bn3(q * 0.5 + 13.3)) - 0.5;
-  q += wq * 1.6;
-  float n = 0.0, a = 0.55, wsum = 0.0, f = 300.0;
-  for (int i = 0; i < 5; i++) {
-    if (float(i) >= oct) break;
-    float w = smoothstep(0.45, 0.15, f * pix);       // drawn while one billow spans > ~3 pixels
-    n += a * w * (bn3(q) - 0.5);
-    wsum += a * w;
-    q = q * 2.7 + 5.3;
-    f *= 2.7;
-    a *= 0.55;
-  }
-  // edges eaten away, thin cloud broken into cells; thick decks stay closed
-  float edge = 1.0 - smoothstep(0.55, 0.95, c);
-  float cov = c + n * 1.25 * (0.3 + 0.7 * edge);
-  // fair-weather cumulus where the map shows thin haze (cells of ~2-4 km)
-  if (lite < 0.5) {
-    float wc = smoothstep(0.35, 0.12, 2400.0 * pix);
-    if (wc > 0.0) {
-      float cu = bn3(nc * 2400.0 + wq * 3.0) * 0.7 + bn3(nc * 6100.0) * 0.3;
-      cov = max(cov, smoothstep(0.62, 0.8, cu) * smoothstep(0.05, 0.3, c) * wc * 0.9);
-    }
-  }
-  thick = clamp(c + n * 0.8, 0.0, 1.0);
-  return smoothstep(0.26, 0.56, cov);
 }
 // Normal of a surface displaced by height h (metres) along n, from screen-space derivatives
 // (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU").

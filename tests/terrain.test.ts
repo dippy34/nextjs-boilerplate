@@ -1,6 +1,7 @@
-import { Matrix4, type Mesh, ShaderMaterial, Vector3 } from 'three';
+import { Matrix4, type Mesh, Quaternion, ShaderMaterial, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { UPos } from '../src/core/upos';
+import { Rocks } from '../src/render/Rocks';
 import { TerrainPatch } from '../src/render/TerrainPatch';
 import type { Body } from '../src/universe/Body';
 import { ExoGround, exoQuantile, exoTerrain } from '../src/universe/ExoTerrain';
@@ -171,6 +172,61 @@ describe('terrain patch', () => {
     console.log(`shadowed: Sun 3 deg up ${(shadowedLow * 100).toFixed(1)} %, overhead ${(shadowedHigh * 100).toFixed(1)} %`);
     expect(shadowedLow).toBeGreaterThan(0.03);
     expect(shadowedHigh).toBeLessThan(0.01);
+  });
+});
+
+describe('rocks', () => {
+  const src = new TerrainSource('http://localhost/none');
+  (src as unknown as { manifest: unknown }).manifest = { maps: {} };
+
+  it('rest on the ground actually drawn, also after a new patch replaces the old', () => {
+    const patch = new TerrainPatch();
+    patch.budgetMs = 1e9;
+    const b = world('Callisto', 2410e3);
+    src.craters.set(b, 0.8);
+    const mat = new ShaderMaterial({ uniforms: { uExposure: { value: 1 }, uSeed: { value: 3 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
+      uSunDir: { value: new Vector3(0, 0, 1) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI }, uAirless: { value: 1 } } });
+    const rocks = new Rocks(patch);
+    rocks.budgetMs = 1e9;
+    const at = (up: Vector3) => {
+      const g = src.ground(b);
+      const c = { ground: g, material: mat, upos: UPos.from(0, 0, 0), rel: new Vector3(), orient: new Matrix4(), lonLeft: -180, sunBF: new Vector3(0, 0, 1), alt: 2 };
+      for (let i = 0; i < 6; i++) {
+        // two metres above the ground drawn below (the patch follows)
+        const R = patch.owner ? patch.groundRadius(up) : b.radius + src.height(b, up, 1);
+        const cam = up.clone().multiplyScalar(R + 2);
+        c.rel.copy(cam).negate();
+        c.alt = cam.length() - b.radius;
+        patch.update(c);
+        rocks.update(UPos.from(cam.x, cam.y, cam.z));
+      }
+      const r = rocks as unknown as { meshes: { count: number; getMatrixAt(i: number, m: Matrix4): void }[]; origin: Vector3 };
+      let n = 0, worst = 0;
+      const m = new Matrix4(), p = new Vector3(), q = new Quaternion(), sc = new Vector3();
+      for (const mesh of r.meshes) {
+        for (let i = 0; i < mesh.count; i++) {
+          mesh.getMatrixAt(i, m);
+          m.decompose(p, q, sc);
+          p.add(r.origin);
+          const gr = patch.groundRadius(p.clone().normalize());
+          // the rock's centre sits a little below the ground (sunk in), never above it or deep under
+          const below = gr - p.length();
+          if (below < -0.01) worst = Infinity;   // floating
+          // sunk by part of its height, more on a slope (its lowest side), never far under
+          else if (sc.y > 0.05) worst = Math.max(worst, below / Math.max(sc.x, sc.z));
+          n++;
+        }
+      }
+      return { n, worst };
+    };
+    const up = new Vector3(0.3, -0.5, 0.8).normalize();
+    const first = at(up);
+    expect(first.n).toBeGreaterThan(50);
+    expect(first.worst).toBeLessThan(1);
+    // 200 m away: a new patch, and the rocks placed on it
+    const next = at(up.clone().add(new Vector3(1, 0.4, 0).multiplyScalar(200 / b.radius)).normalize());
+    expect(next.n).toBeGreaterThan(50);
+    expect(next.worst).toBeLessThan(1);
   });
 });
 

@@ -5,7 +5,7 @@ import {
 } from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { UPos } from '../core/upos';
-import { vnoise } from '../universe/Terrain';
+import { baseRadius, vnoise } from '../universe/Terrain';
 import { MAT, MATERIALS, ROCK_SHADOW_GLSL } from './Materials';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import type { TerrainPatch } from './TerrainPatch';
@@ -224,9 +224,10 @@ const SHAPES = 6;
 /** rocks larger than this (m) use the detailed shapes */
 const BIG = 0.7;
 
-interface RockCell { key: string; serial: number; pos: Float64Array; data: Float32Array; n: number }
-// per rock in RockCell.data: size, turn, stretch, height, shape, tilt x, tilt y, tilt z (up), brightness, sun clearance, map u, map v
-const D = 12;
+interface RockCell { key: string; serial: number; pos: Float64Array; data: Float32Array; n: number; reach: number }
+// per rock in RockCell.data: size, turn, stretch, height, shape, tilt x, tilt y, tilt z (up), brightness, sun clearance, map u, map v,
+// depth of its lowest side below the ground at its centre (m)
+const D = 13;
 
 /**
  * Rocks on the ground around the explorer: deterministic per cell of the body-fixed lattice
@@ -246,6 +247,11 @@ export class Rocks {
   private origin = new Vector3();
   private body: object | null = null;
   private dirty = true;
+  /** every wanted cell is built for the explorer's last position (lastCam, body-fixed) and the ground's serial */
+  private settled = false;
+  private lastCam = new Vector3();
+  private fillCam = new Vector3();
+  private lastSerial = -1;
   private cap: number;
   private vr: boolean;
   budgetMs = 4;
@@ -323,7 +329,7 @@ export class Rocks {
     const g = c.ground;
     const density = this.density(c);
     if (density <= 0) { hide(); return; }
-    if (g.owner !== this.body) { this.cells.clear(); this.body = g.owner; this.dirty = true; }
+    if (g.owner !== this.body) { this.cells.clear(); this.body = g.owner; this.dirty = true; this.settled = false; }
     const R = below.ground;
     const camBF = below.dir.clone().multiplyScalar(below.dist);
     // rebase when the explorer has moved far from the instances' origin
@@ -333,7 +339,13 @@ export class Rocks {
     const t0 = performance.now();
     const want = new Set<string>();
     const hAbove = below.dist - below.ground;
-    for (const tier of TIERS) {
+    // the cells around stay the same while the explorer hovers: nothing to do until it moves, the
+    // ground changes or cells are still waiting to be built
+    const still = this.settled && serial === this.lastSerial && camBF.distanceTo(this.lastCam) < 0.5;
+    this.lastSerial = serial;
+    if (!still) this.lastCam.copy(camBF);
+    let pending = false;
+    for (const tier of (still ? [] : TIERS)) {
       const s = tier.cell;
       // tiers that would be under a pixel are left out from high up
       const reach = Math.min(this.vr ? tier.reachVr : tier.reach, (this.vr ? tier.reachVr : tier.reach) * (tier.max * 400) / Math.max(hAbove, 1));
@@ -354,13 +366,18 @@ export class Rocks {
         want.add(e.k);
         const old = this.cells.get(e.k);
         if (old && old.serial === serial) continue;
-        if (performance.now() - t0 > this.budgetMs) continue;
+        if (performance.now() - t0 > this.budgetMs) { pending = true; continue; }
         this.cells.set(e.k, this.makeCell(e.k, e.x, e.y, e.z, tier, density, c.lonLeft, serial));
         this.dirty = true;
       }
     }
-    for (const k of [...this.cells.keys()]) if (!want.has(k)) { this.cells.delete(k); this.dirty = true; }
-    if (this.dirty) this.fill();
+    if (!still) {
+      for (const k of [...this.cells.keys()]) if (!want.has(k)) { this.cells.delete(k); this.dirty = true; }
+      this.settled = !pending;
+    }
+    // (sizes near the reach's edge follow the explorer)
+    if (camBF.distanceTo(this.fillCam) > 3) this.dirty = true;
+    if (this.dirty) { this.fill(); this.fillCam.copy(camBF); }
     // place the group: body-fixed origin -> camera-relative world
     const q = new Quaternion().setFromRotationMatrix(c.orient);
     const rel = c.upos.sub(cam, new Vector3());
@@ -507,6 +524,11 @@ export class Rocks {
     }
   }
 
+  /** how far out a tier's rocks are drawn (m) */
+  private reachOf(tier: Tier): number {
+    return Math.max(tier.cell, this.vr ? tier.reachVr : tier.reach);
+  }
+
   private makeCell(key: string, x: number, y: number, z: number, tier: Tier, density: number, lonLeftDeg: number, serial: number): RockCell {
     const s = tier.cell, seed = tier.seed;
     // patchy: strewn fields (around fresh craters, below outcrops) and nearly bare ground
@@ -521,12 +543,15 @@ export class Rocks {
     const t = this.terrain;
     const dir = new Vector3(), up = new Vector3(), e1 = new Vector3(), e2 = new Vector3(), tmp = new Vector3();
     const lon0 = (lonLeftDeg * Math.PI) / 180;
+    const seaWorld = t.current?.material.uniforms.uMatMode?.value === 1;
     let m = 0;
     for (let i = 0; i < n; i++) {
       const hs = (j: number) => hash(x, y, z, seed + 13 * i + j);
       dir.set((x + hs(1)) * s, (y + hs(2)) * s, (z + hs(3)) * s).normalize();
       const gr = t.groundRadius(dir);
       if (!(gr > 0)) continue;
+      // none on a sea (flat at the reference surface on a world with oceans)
+      if (seaWorld && gr - baseRadius(t.current!.ground, dir) < 0.02) continue;
       // truncated power law: most small, a few large
       const lo = Math.pow(tier.min, -tier.slope), hi = Math.pow(tier.max, -tier.slope);
       const size = Math.pow(lo + (hi - lo) * hs(4), -1 / tier.slope);
@@ -543,6 +568,9 @@ export class Rocks {
         if (h.every((p) => p.every((v) => v > 0))) {
           base = Math.min(gr, h[0][0], h[0][1], h[1][0], h[1][1]);
           const dx = (h[0][0] - h[0][1]) / (2 * 0.6 * size), dy = (h[1][0] - h[1][1]) / (2 * 0.6 * size);
+          // rocks do not stay on cliffs (they gather below them)
+          const sl = Math.hypot(dx, dy);
+          if (sl > 1.0 || (sl > 0.6 && hs(11) < (sl - 0.6) / 0.4)) continue;
           up.addScaledVector(e1, -dx).addScaledVector(e2, -dy).normalize();
         }
       }
@@ -561,9 +589,10 @@ export class Rocks {
       let uu = (lon - lon0) / (2 * Math.PI);
       uu -= Math.floor(uu);
       data[o + 10] = uu; data[o + 11] = 0.5 + lat / Math.PI;
+      data[o + 12] = gr - base;
       m++;
     }
-    return { key, serial, pos, data, n: m };
+    return { key, serial, pos, data, n: m, reach: this.reachOf(tier) };
   }
 
   /** Rebuild the instance matrices relative to the current origin. */
@@ -576,16 +605,22 @@ export class Rocks {
     for (const c of this.cells.values()) {
       for (let i = 0; i < c.n; i++) {
         const o = i * D;
-        const size = c.data[o];
-        const k = c.data[o + 4] + (size > BIG ? SHAPES : 0);
+        // rocks near the edge of their tier's reach grow in (no popping as cells come and go)
+        p.set(c.pos[i * 3], c.pos[i * 3 + 1], c.pos[i * 3 + 2]);
+        const fd = p.distanceTo(this.lastCam) / c.reach;
+        const grow = fd < 0.8 ? 1 : Math.max(0, 1 - (fd - 0.8) / 0.2);
+        if (grow <= 0.02) continue;
+        const size = c.data[o] * grow;
+        const k = c.data[o + 4] + (c.data[o] > BIG ? SHAPES : 0);
         const mesh = this.meshes[k];
         if (counts[k] >= mesh.instanceMatrix.count) continue;
-        p.set(c.pos[i * 3], c.pos[i * 3 + 1], c.pos[i * 3 + 2]);
         up.set(c.data[o + 5], c.data[o + 6], c.data[o + 7]);
         q.setFromUnitVectors(Y, up).multiply(q2.setFromAxisAngle(Y, c.data[o + 1]));
         sc.set(size * c.data[o + 2], size * c.data[o + 3], size);
         // sunk into the ground: a third of its (half-)height, more for small stones
         const sink = (size < 0.15 ? 0.45 : 0.3) * sc.y * 0.7;
+        // (a rock growing in rests nearer the ground at its centre, its footprint being smaller)
+        p.multiplyScalar(1 + (c.data[o + 12] * (1 - grow)) / p.length());
         p.sub(this.origin).addScaledVector(up, -sink);
         mtx.compose(p, q, sc);
         const j = counts[k]++;
