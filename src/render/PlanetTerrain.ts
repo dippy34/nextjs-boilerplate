@@ -165,8 +165,8 @@ export class PlanetTerrain {
   inFlight = 8;
   inFlightVr = 4;
   /** most tiles drawn at once: bounds the draw count (and so the per-frame cost) at any altitude */
-  drawCap = 120;
-  drawCapVr = 70;
+  drawCap = 96;
+  drawCapVr = 56;
   /** most tiles kept (desktop, headset) */
   maxTiles = 420;
   maxTilesVr = 200;
@@ -174,7 +174,7 @@ export class PlanetTerrain {
   budgetMs = 4;
   budgetVrMs = 2;
   /** finest vertex spacing (m) */
-  minSpacing = 1.5;
+  minSpacing = 2.0;
   /** statistics of the last frame */
   stats = { drawn: 0, tiles: 0, pending: 0, built: 0, level: 0 };
 
