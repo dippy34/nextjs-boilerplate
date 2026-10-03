@@ -191,6 +191,8 @@ export class TerrainPatch {
         name: 'terrain',
         vertexShader: TERRAIN_VERT,
         fragmentShader: bodyMat.fragmentShader,
+        // (the terrain-only code is compiled into the terrain's program only: the world's sphere stays light)
+        defines: { ...bodyMat.defines, TERRAIN: 1 },
         uniforms: {
           ...bodyMat.uniforms, uTerrain: { value: 1 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
           uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) }, uMatO: { value: new Vector3() },

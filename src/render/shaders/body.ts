@@ -325,6 +325,7 @@ void main() {
   float hBump = hProc * uRadiusM * (uProc > 0.5 ? 1.0 : 0.6);
   // analytic slope (body-fixed, dimensionless) of the small craters on the landing terrain
   vec3 slopeT = vec3(0.0);
+#ifdef TERRAIN
   if (uTerrain > 0.5 && uCraters > 0.05) {
     // landing terrain: small craters below the mesh's resolution, each scale faded in once its
     // craters span several pixels
@@ -346,7 +347,9 @@ void main() {
     if (w3 > 0.0) { c = cratersAtG(uOI3, uOF3 + vLocal / 4.5, d, fr); slopeT += w3 * dep * c.yzw; frT = max(frT, fr * w3); }
     freshAll = max(freshAll, frT * 0.6 * uHScale);
   }
+#endif
   float groundVar = 0.0;
+#ifdef TERRAIN
   if (uTerrain > 0.5 && uCraters < 0.05) {
     // ground without craters (Earth): uneven, rocky detail below the mesh and map resolution, on
     // land only, each scale faded in once its cells span many pixels
@@ -360,11 +363,14 @@ void main() {
     if (w2 > 0.0) { n = bnAt(uOI2, uOF2 + vLocal / 20.0) - 0.5; hBump += w2 * land * 20.0 * 0.1 * n; groundVar += w2 * n * 0.5; }
     groundVar *= land * uHScale;
   }
+#endif
   if (hBump != 0.0) nP = bumpNormal(vPosView, nP, hBump * limbFade);
+#ifdef TERRAIN
   if (uTerrain > 0.5 && uCraters > 0.05) {
     vec3 sW = uBodyToWorld * slopeT * (uHScale * limbFade);
     nP = normalize(nP - (sW - nP * dot(sW, nP)));
   }
+#endif
   float mu0 = dot(nP, uSunDir);
   float mu = max(dot(nP, V), 0.0);
 
@@ -405,6 +411,7 @@ void main() {
   // close-up ground: scanned materials (regolith, rock, sand, soil, snow, forest floor) as detail
   // around the world's own colour, and their grain in the lighting
   float grainShadow = 1.0;
+#ifdef TERRAIN
   if (uTerrain > 0.5 && uMatOn > 0.5 && uHScale > 0.01) {
     float mix2 = 0.0, snowW = 0.0;
     float lumA = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
@@ -465,10 +472,12 @@ void main() {
     mu = max(dot(nP, V), 0.0);
     grainShadow = mix(1.0, grainShadow, uHScale);
   }
+#endif
   float cloud = 0.0;
   float cloudShadow = 1.0;
   vec3 nCloud = nW;
   float pixAng = length(fwidth(nB));
+#ifdef CLOUDS
   if (uHasClouds > 0.5 && uCloudVis > 0.001) {
     float ang = uCloudShift * 6.2831853;
     mat2 rz = mat2(cos(ang), sin(ang), -sin(ang), cos(ang));
@@ -494,6 +503,7 @@ void main() {
       cloudShadow = 1.0 - 0.6 * cs * uCloudVis * (1.0 - cloud);
     }
   }
+#endif
   // Terrain shading only on the day side (no light leaking past the geometric terminator)
   float dayside = smoothstep(-0.04, 0.06, mu0g);
   float light;
@@ -508,7 +518,9 @@ void main() {
   if (uTerrain > 0.5) light *= mix(1.0, clamp(0.5 + vSun, 0.0, 1.0), uHScale);   // shadows of the relief
   // shadows of the rocks, and the darker ground around their bases (render/Rocks.ts)
   float rockAO = 0.0;
+#ifdef TERRAIN
   if (uTerrain > 0.5) light *= rockShadow(vPosView, 0.03 + 0.04 * (1.0 - max(mu0g, 0.0)), uLite, rockAO);
+#endif
   // eclipses: shadows of moons and planets (with a coppery glow where sunlight is bent through an atmosphere)
   float eclRed = 0.0;
   float ecl = sunVisible(vPosView, eclRed);
