@@ -175,7 +175,7 @@ void emission(vec3 p, float lod, out vec3 e, out float dust) {
     float tip = uP.x * 1.1 + 0.3 * np.g;
     float len = 0.08 + 0.14 * np.b;
     float x = (rp - tip) / len;                         // 0 at the tip, 1 at the base
-    float width = 0.9 - 0.05 * clamp(x, 0.0, 1.0);
+    float width = 0.9 - 0.05 * clamp(x, 0.0, 1.0) - 0.06 * clamp(uP.y - 1.0, 0.0, 1.0);   // strong pillars are broad
     float inCol = thr(np.r, width, width + 0.025, lod + log2(uQ.y / max(rp, 0.1))) * site;
     float along = smoothstep(0.0, 0.05, x) * (1.0 - smoothstep(0.7, 1.1, x));
     dust += inCol * along * uP.y * 90.0 * (0.6 + 0.8 * n1.g);
@@ -270,7 +270,8 @@ void remnant(vec3 p, float lod, out vec3 e) {
     float web = smoothstep(0.72, 0.95, ridge(n1.b)) * (0.15 + 1.1 * smoothstep(0.4, 0.75, n0.g))
       + (hi ? 0.6 * smoothstep(0.78, 0.97, ridge(n2.g)) : 0.0);
     web *= smoothstep(0.15, 0.6, rq);
-    vec3 fil = mix(vec3(1.0, 0.28, 0.14), vec3(1.0, 0.7, 0.35), smoothstep(0.35, 0.75, n0.r));
+    // red (hydrogen, sulphur) and yellow-green (neutral oxygen) filaments
+    vec3 fil = mix(vec3(1.0, 0.3, 0.16), vec3(0.78, 0.92, 0.38), smoothstep(0.4, 0.7, n0.r));
     vec3 sync = vec3(0.48, 0.64, 1.0) * smoothstep(0.85, 0.05, rq) * (0.5 + 0.6 * n1.a);
     e = fil * web * body * 5.0 + sync * 0.75;
   } else if (uShape < 1.5) {
@@ -366,7 +367,7 @@ interface NebLook {
  */
 const LOOKS: Record<string, NebLook> = {
   'Orion Nebula': { shape: 2, axes: [1, 1, 0.7], p: [0.15, 0, 0.8, 0.3], q: [1.2, 3, 0, 0.4], bright: 1.6 },
-  'Eagle Nebula': { shape: 0, axes: [1, 1.1, 0.85], p: [0.3, 1.0, 0.3, 0.3], q: [1.0, 2.2, 0, 0] },
+  'Eagle Nebula': { shape: 0, axes: [1, 1.1, 0.85], p: [0.3, 2.0, 0.3, 0.3], q: [1.0, 1.1, 0, 0] },
   'Lagoon Nebula': { shape: 0, axes: [1, 0.6, 0.7], p: [0.2, 0.3, 1.1, 0.2], q: [1.0, 3, 0, 0.2] },
   'Carina Nebula': { shape: 0, axes: [1, 0.85, 0.8], p: [0.25, 0.8, 1.1, 0.35], q: [1.1, 2.6, 0, 0.1], bright: 2.2 },
   'Rosette Nebula': { shape: 1, axes: [1, 1, 1], p: [0.35, 0.35, 0.3, 0.45], q: [0.9, 5, 0, 0] },
@@ -489,9 +490,15 @@ export class DeepSkyLayer {
   /** `camPc`: camera position (pc); `adapt`: dark adaptation (1 = dark-adapted). */
   update(cam: UPos, camPc: Vector3, pixelAngle: number, adapt: number): void {
     this.views = [];
-    this.gain.value = 0.55 * Math.pow(Math.max(adapt, 0), 0.55);
     this.pixAng.value = pixelAngle;
     const rel = new Vector3();
+    // inside a bright nebula the eye adapts to the glowing gas all around (no wash-out to white)
+    let inside = 0;
+    for (const o of this.volumes.keys()) {
+      const k = o.upos.sub(cam, rel).length() / o.radius;
+      if (k < 1.3) inside = Math.max(inside, (1.3 - Math.max(k, 0.3)) / 1.0 * (o.data.kind === 'emission' ? 1 : 0.5));
+    }
+    this.gain.value = 0.55 * Math.pow(Math.max(adapt, 0), 0.55) / (1 + 1.5 * inside);
     for (const o of this.objects) {
       o.upos.sub(cam, rel);
       const dist = rel.length();
