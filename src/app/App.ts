@@ -45,6 +45,9 @@ import { Input } from './Input';
 import { Systems } from './Systems';
 import { VRSupport } from './VR';
 
+/** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
+const STAR_KEY = 0.62;
+const STAR_CAP = 0.8;
 const DATA = `${import.meta.env.BASE_URL}data`;
 /** catalogue stars closer than this (pc) are drawn individually by the near-star layer */
 const NEAR_STAR_RADIUS = 0.02;
@@ -1010,7 +1013,7 @@ export class App {
         : ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
       wBest = w;
       lBest = L;
-      keyBest = b.kind === 'star' ? 1.1 : 0.45;
+      keyBest = b.kind === 'star' ? STAR_KEY : 0.45;
     }
     for (const cv of this.craft.views) {
       if (cv.pixelRadius < 2) continue;
@@ -1066,7 +1069,7 @@ export class App {
       if (w > wBest && this.project(rel)) {
         wBest = w;
         lBest = (magToIrradiance(s.absMag + 5 * Math.log10(d / PC) - 5) * d * d) / (Math.PI * s.radius * s.radius);
-        keyBest = 1.1;
+        keyBest = STAR_KEY;
       }
     }
     const lx = Math.log(xDark);
@@ -1112,8 +1115,10 @@ export class App {
       const pr = Math.asin(Math.min(1, s.radius / d)) / this.view.pixelAngle;
       if (pr <= 1.5) continue;
       const E = magToIrradiance(s.absMag + 5 * Math.log10(d / PC) - 5);
-      // a star's disk is shown at ~1.4 (bright, but its colour and surface still show)
-      lightCap = Math.min(lightCap, 1.4 / ((E * d * d) / (Math.PI * s.radius * s.radius)));
+      // a small star disk is shown bright (~1.4); a big one below the display's white, so its colour,
+      // limb and surface show instead of a white blob
+      const cap = 1.4 + (STAR_CAP - 1.4) * smoothstep(12, 90, pr / this.view.pixelRatio);
+      lightCap = Math.min(lightCap, cap / ((E * d * d) / (Math.PI * s.radius * s.radius)));
     }
     // under a daytime sky the eye adapts to the sky: the stars fade out
     const sky = this.skyRadiance();

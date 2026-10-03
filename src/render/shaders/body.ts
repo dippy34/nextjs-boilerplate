@@ -513,6 +513,10 @@ void main() {
   // giant convection cells / supergranulation (large on supergiants), visible from farther
   float bigVis = smoothstep(1.5, 5.0, cellPx * 6.0);
   gran *= 1.0 + 0.9 * uGranAmp * bigVis * (fbm3(q * max(1.6, uGranFreq * 0.12)) - 0.5);
+  // a faint large-scale mottling on every star, so a disk seen from afar is not a flat blob
+  // (white-light pictures of the Sun show little of it; this is artistic, kept subtle)
+  float mottVis = smoothstep(2.0, 8.0, cellPx * uGranFreq / 9.0);
+  gran *= 1.0 + 0.11 * mottVis * (fbm3(q * 9.0 + 41.0) - 0.5) * (uGranAmp > 0.02 ? 1.0 : 0.3);
   // spots in the active latitudes: umbra and penumbra
   float band = exp(-pow((abs(lat) - uSpotLat) / 0.22, 2.0));
   float sf = fbm3(q * 7.0 + 31.0) * band;
@@ -527,8 +531,9 @@ void main() {
   float ld = (1.0 - uLimbA * x - uLimbB * x * x) / (1.0 - uLimbA / 3.0 - uLimbB / 6.0);
   float gd = 1.0 - uGravDark * (1.0 - lat * lat);
   vec3 col = uColor * ld * gd * gran * (1.0 - spot) * (1.0 + fac);
-  // cooler (redder) spots, lanes and equator; hotter cell centres a little whiter
-  float cool = clamp(spot * 1.4 + uGravDark * (1.0 - lat * lat) + (1.0 - gran) * 1.5, 0.0, 1.0);
+  // cooler (redder) spots, lanes and equator; hotter cell centres a little whiter; and a redder
+  // limb (the light there comes from higher, cooler layers: limb darkening is stronger in blue)
+  float cool = clamp(spot * 1.4 + uGravDark * (1.0 - lat * lat) + (1.0 - gran) * 1.5 + 0.7 * x * x, 0.0, 1.0);
   col *= mix(vec3(1.0), vec3(1.0, 0.78, 0.6), cool);
   // shown a little more saturated than the blackbody (bright disks otherwise wash out to white)
   col = max(mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, 1.35), 0.0);
