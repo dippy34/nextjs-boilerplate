@@ -516,7 +516,7 @@ void main() {
   // a faint large-scale mottling on every star, so a disk seen from afar is not a flat blob
   // (white-light pictures of the Sun show little of it; this is artistic, kept subtle)
   float mottVis = smoothstep(2.0, 8.0, cellPx * uGranFreq / 9.0);
-  gran *= 1.0 + 0.11 * mottVis * (fbm3(q * 9.0 + 41.0) - 0.5) * (uGranAmp > 0.02 ? 1.0 : 0.3);
+  gran *= 1.0 + 0.18 * mottVis * (fbm3(q * 9.0 + 41.0) - 0.5) * (uGranAmp > 0.02 ? 1.0 : 0.3);
   // spots in the active latitudes: umbra and penumbra
   float band = exp(-pow((abs(lat) - uSpotLat) / 0.22, 2.0));
   float sf = fbm3(q * 7.0 + 31.0) * band;
@@ -536,7 +536,7 @@ void main() {
   float cool = clamp(spot * 1.4 + uGravDark * (1.0 - lat * lat) + (1.0 - gran) * 1.5 + 0.7 * x * x, 0.0, 1.0);
   col *= mix(vec3(1.0), vec3(1.0, 0.78, 0.6), cool);
   // shown a little more saturated than the blackbody (bright disks otherwise wash out to white)
-  col = max(mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, 1.35), 0.0);
+  col = max(mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, 1.6), 0.0);
   // flares on active red dwarfs: a bright patch that flashes up and fades
   if (uFlares > 0.0) {
     float epoch = floor(uTime / 23.0);
@@ -574,18 +574,22 @@ uniform float uCorona;
 uniform float uProm;
 uniform float uSeed;
 uniform float uTime;
+uniform vec2 uAxis2;      // the star's spin axis projected on the quad (unit), and
+uniform float uMinor;     // the disk's half-width along it (a flattened star's disk is an ellipse)
 varying vec2 vXY;
 float h2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float n2(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y); }
 void main() {
-  float r = length(vXY) * uQuad;          // in star radii
-  if (r < 0.985) discard;
+  vec2 p = vXY * uQuad;                   // in star radii
+  // distance from the centre in units of the disk's (elliptical) edge: the glow starts at the limb
+  float r = length(vec2(dot(p, vec2(-uAxis2.y, uAxis2.x)), dot(p, uAxis2) / uMinor));
+  if (r < 1.0) discard;                   // (drawn in front of the star: leave its disk alone)
   float a = atan(vXY.y, vXY.x);
   // streamers: angular structure that widens outwards (periodic in angle)
   float st = n2(vec2(cos(a) * 3.0 + uSeed, sin(a) * 3.0 + uTime * 0.01)) * 0.7 + n2(vec2(cos(a) * 9.0, sin(a) * 9.0 + uSeed)) * 0.3;
   float glow = uCorona * (0.55 * exp(-(r - 1.0) * 7.0) + (0.05 + 0.12 * st) / (r * r));
-  glow *= 1.0 - smoothstep(0.7, 1.0, length(vXY));
+  glow *= (1.0 - smoothstep(0.7, 1.0, length(vXY))) * smoothstep(1.0, 1.025, r);
   // prominences: bright loops just above the limb
   float pn = n2(vec2(cos(a) * 14.0 + uSeed, sin(a) * 14.0 + r * 9.0 - uTime * 0.02));
   float prom = uProm * pow(pn, 7.0) * 6.0 * smoothstep(1.16, 1.0, r);
