@@ -36,6 +36,8 @@ interface HeightMap {
   pixelM: number;
   /** sea level (m) of a world with oceans: lower ground is drawn as flat water */
   sea?: number;
+  /** filtered levels (0 = the map itself), built on first use */
+  levels?: Level[];
 }
 interface TerrainManifest {
   maps: Record<string, { file: string; width: number; height: number; lonLeft: number; offset: number; scale: number; credit: string; sea?: number }>;
@@ -47,7 +49,7 @@ interface PatchInfo {
   /** bounds (degrees, planetocentric, east longitude; lon0 may be outside -180..180) */
   lat0: number; lat1: number; lon0: number; lon1: number;
 }
-interface Patch extends PatchInfo { data: Uint16Array; pixelM: number }
+interface Patch extends PatchInfo { data: Uint16Array; pixelM: number; levels: Level[] }
 
 /** Decode a 16-bit-in-RGB height PNG (R * 256 + G). */
 async function loadHeights(url: string): Promise<{ w: number; h: number; data: Uint16Array }> {
@@ -67,6 +69,58 @@ async function loadHeights(url: string): Promise<{ w: number; h: number; data: U
 
 const catmull = (t: number): [number, number, number, number] => [
   ((-t + 2) * t - 1) * t * 0.5, ((3 * t - 5) * t * t + 2) * 0.5, ((-3 * t + 4) * t + 1) * t * 0.5, (t - 1) * t * t * 0.5];
+
+/** One level of a height grid: height (m) = data * scale + offset. */
+interface Level { w: number; h: number; data: Uint16Array | Float32Array; scale: number; offset: number }
+
+/**
+ * Box-filtered half-size levels of a height grid (2x2 averages, down to ~16 samples), so that a
+ * coarse mesh far from the explorer samples heights averaged over its own spacing instead of
+ * point samples of a much sharper grid (which alias into false cliffs and pits).
+ */
+function buildLevels(base: Level): Level[] {
+  const out: Level[] = [base];
+  let cw = base.w, ch = base.h;
+  let src = Float32Array.from(base.data, (v) => v * base.scale + base.offset);
+  while (cw >= 32 && ch >= 32) {
+    const nw = cw >> 1, nh = ch >> 1;
+    const dst = new Float32Array(nw * nh);
+    for (let y = 0; y < nh; y++) {
+      const r0 = 2 * y * cw, r1 = (2 * y + 1) * cw;
+      for (let x = 0; x < nw; x++) dst[y * nw + x] = 0.25 * (src[r0 + 2 * x] + src[r0 + 2 * x + 1] + src[r1 + 2 * x] + src[r1 + 2 * x + 1]);
+    }
+    out.push({ w: nw, h: nh, data: dst, scale: 1, offset: 0 });
+    src = dst; cw = nw; ch = nh;
+  }
+  return out;
+}
+
+/** Bicubic (Catmull-Rom) sample of a level at fractional grid coordinates (u, v in 0..1 across it). */
+function sampleLevel(l: Level, u: number, v: number, wrapX: boolean): number {
+  const fx = u * l.w - 0.5, fy = v * l.h - 0.5;
+  const x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const wx = catmull(fx - x0), wy = catmull(fy - y0);
+  let h = 0;
+  for (let j = 0; j < 4; j++) {
+    const y = Math.max(0, Math.min(l.h - 1, y0 - 1 + j));
+    let row = 0;
+    for (let i = 0; i < 4; i++) {
+      let x = x0 - 1 + i;
+      x = wrapX ? ((x % l.w) + l.w) % l.w : Math.max(0, Math.min(l.w - 1, x));
+      row += wx[i] * l.data[y * l.w + x];
+    }
+    h += wy[j] * row;
+  }
+  return h * l.scale + l.offset;
+}
+
+/** Sample of a level pyramid for features of `spacing` metres (base pixels `pixelM` metres): blends the two levels around it. */
+function samplePyramid(levels: Level[], pixelM: number, spacing: number, u: number, v: number, wrapX: boolean): number {
+  const lv = Math.min(levels.length - 1, Math.max(0, Math.log2(Math.max(spacing, 1e-6) / pixelM)));
+  const l0 = Math.floor(lv), t = lv - l0;
+  const a = sampleLevel(levels[l0], u, v, wrapX);
+  return t > 1e-3 && l0 + 1 < levels.length ? a + (sampleLevel(levels[l0 + 1], u, v, wrapX) - a) * t : a;
+}
 
 // ---------------------------------------------------------------- deterministic noise
 function hash3(x: number, y: number, z: number, s: number): number {
@@ -189,32 +243,22 @@ export class TerrainSource {
       loadHeights(`${this.base}/terrain/${p.file}`).then(({ data }) => {
         const pixelM = (((p.lat1 - p.lat0) / p.height) * Math.PI * b.radius) / 180;
         const arr = this.patches.get(k) ?? [];
-        arr.push({ ...p, data, pixelM });
+        arr.push({ ...p, data, pixelM, levels: buildLevels({ w: p.width, h: p.height, data, scale: p.scale, offset: p.offset }) });
         this.patches.set(k, arr);
         this.versions.set(k, (this.versions.get(k) ?? 0) + 1);
       }).catch((err) => console.warn('terrain patch failed', p.name, err));
     }
   }
 
-  /** bicubic sample of a patch at (lat, lon) degrees, with its blend weight (0 outside, 1 well inside) */
-  private patchSample(p: Patch, lat: number, lon: number): { h: number; w: number } | null {
+  /** bicubic sample of a patch at (lat, lon) degrees for features of `spacing` m, with its blend weight (0 outside, 1 well inside) */
+  private patchSample(p: Patch, lat: number, lon: number, spacing: number): { h: number; w: number } | null {
     const v = (p.lat1 - lat) / (p.lat1 - p.lat0);
     const u = ((((lon - p.lon0) % 360) + 360) % 360) / (p.lon1 - p.lon0);
     if (u <= 0 || u >= 1 || v <= 0 || v >= 1) return null;
     const e = Math.min(u, 1 - u, v, 1 - v);
     const t = Math.min(1, e / 0.12);
     const w = t * t * (3 - 2 * t);
-    const fx = u * p.width - 0.5, fy = v * p.height - 0.5;
-    const x0 = Math.floor(fx), y0 = Math.floor(fy);
-    const wx = catmull(fx - x0), wy = catmull(fy - y0);
-    let h = 0;
-    for (let j = 0; j < 4; j++) {
-      const y = Math.max(0, Math.min(p.height - 1, y0 - 1 + j));
-      let row = 0;
-      for (let i = 0; i < 4; i++) row += wx[i] * p.data[y * p.width + Math.max(0, Math.min(p.width - 1, x0 - 1 + i))];
-      h += wy[j] * row;
-    }
-    return { h: h * p.scale + p.offset, w };
+    return { h: samplePyramid(p.levels, p.pixelM, spacing, u, v, false), w };
   }
 
   private request(k: string, radius: number): void {
@@ -233,32 +277,14 @@ export class TerrainSource {
     this.pending.set(k, p);
   }
 
-  /** elevation model sample (m) at map pixel coordinates, wrapping in longitude, clamped in latitude */
-  private texel(m: HeightMap, x: number, y: number): number {
-    x = ((x % m.width) + m.width) % m.width;
-    y = Math.max(0, Math.min(m.height - 1, y));
-    return m.data[y * m.width + x] * m.scale + m.offset;
-  }
-
-  /** bicubic (Catmull-Rom) sample of the elevation model at body-fixed unit direction n */
-  private dem(m: HeightMap, n: Vector3): number {
+  /** bicubic (Catmull-Rom) sample of the elevation model at body-fixed unit direction n, for features of `spacing` m */
+  private dem(m: HeightMap, n: Vector3, spacing: number): number {
     const lon = Math.atan2(n.y, n.x);
     const lat = Math.asin(Math.max(-1, Math.min(1, n.z)));
     let u = (lon - (m.lonLeft * Math.PI) / 180) / (2 * Math.PI);
     u -= Math.floor(u);
-    const fx = u * m.width - 0.5, fy = (0.5 - lat / Math.PI) * m.height - 0.5;
-    const x0 = Math.floor(fx), y0 = Math.floor(fy);
-    const tx = fx - x0, ty = fy - y0;
-    const w = (t: number): [number, number, number, number] => [
-      ((-t + 2) * t - 1) * t * 0.5, ((3 * t - 5) * t * t + 2) * 0.5, ((-3 * t + 4) * t + 1) * t * 0.5, (t - 1) * t * t * 0.5];
-    const wx = w(tx), wy = w(ty);
-    let h = 0;
-    for (let j = 0; j < 4; j++) {
-      let row = 0;
-      for (let i = 0; i < 4; i++) row += wx[i] * this.texel(m, x0 - 1 + i, y0 - 1 + j);
-      h += wy[j] * row;
-    }
-    return h;
+    m.levels ??= buildLevels({ w: m.width, h: m.height, data: m.data, scale: m.scale, offset: m.offset });
+    return samplePyramid(m.levels, m.pixelM, spacing, u, 0.5 - lat / Math.PI, true);
   }
 
   /** relief amplitude (m) of a body without an elevation model */
@@ -283,14 +309,14 @@ export class TerrainSource {
     // between its resolution and the global map's fades out there
     let wP = 0, topP = Infinity;
     if (m) {
-      h = this.dem(m, n);
+      h = this.dem(m, n, spacing);
       top = m.pixelM * 3;
       const pl = this.patches.get(k!);
       if (pl) {
         const lat = (Math.asin(Math.max(-1, Math.min(1, n.z))) * 180) / Math.PI;
         const lon = (Math.atan2(n.y, n.x) * 180) / Math.PI;
         for (const p of pl) {
-          const smp = this.patchSample(p, lat, lon);
+          const smp = this.patchSample(p, lat, lon, spacing);
           if (smp && smp.w > wP) { h += (smp.h - h) * smp.w; wP = smp.w; topP = p.pixelM * 3; }
         }
       }

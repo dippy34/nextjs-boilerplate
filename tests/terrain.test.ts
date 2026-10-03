@@ -82,6 +82,26 @@ describe('landing terrain', () => {
     expect(Math.max(...land) - Math.min(...land)).toBeGreaterThan(50);   // generated relief on land
   });
 
+  it('a coarse mesh samples the elevation model averaged over its spacing (no aliasing)', () => {
+    const b = world('Moonlet', 1737.4e3);
+    const w = 2048, hgt = 1024;
+    // a checkerboard of +-1000 m at the map's own resolution: pure detail, zero mean
+    const data = new Uint16Array(w * hgt).map((_, i) => (((i % w) + Math.floor(i / w)) % 2 ? 2000 : 0));
+    const s2 = new TerrainSource('http://localhost/none') as unknown as { manifest: unknown; maps: Map<string, unknown>; craters: Map<Body, number> };
+    s2.manifest = { maps: { moonlet: { file: 'x.png', width: w, height: hgt, lonLeft: -180, offset: -1000, scale: 1, credit: '' } } };
+    s2.maps.set('moonlet', { width: w, height: hgt, lonLeft: -180, data, offset: -1000, scale: 1, pixelM: (2 * Math.PI * b.radius) / w });
+    s2.craters.set(b, 0);
+    const t = s2 as unknown as TerrainSource;
+    let fineMax = 0, coarseMax = 0;
+    for (let i = 0; i < 300; i++) {
+      const n = dir(i * 13);
+      fineMax = Math.max(fineMax, Math.abs(t.height(b, n, 50)));
+      coarseMax = Math.max(coarseMax, Math.abs(t.height(b, n, 40e3)));
+    }
+    expect(fineMax).toBeGreaterThan(300);      // close up the detail is there
+    expect(coarseMax).toBeLessThan(150);       // far away it averages out instead of aliasing
+  });
+
   it('coarse spacing leaves out the fine layers', () => {
     const b = world('Rhea', 763e3);
     let diff = 0;
