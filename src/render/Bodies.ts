@@ -620,8 +620,10 @@ export class BodiesLayer {
           const t = Math.min(1, Math.max(0, (view.dist - b.radius - 50e3) / 100e3));
           u.uCloudVis.value = t * t * (3 - 2 * t);
           // ... and the cloud layer at cloud height takes over on the way down, clearing again below
-          // ~20 km so that mountains and canyons up close are not hidden under a blurry deck
-          const low = Math.min(1, Math.max(0, (view.dist - b.radius - 10e3) / 15e3));
+          // 12-30 km so that mountains and canyons up close are not hidden under a blurry deck
+          const camBF = view.rel.clone().negate().applyMatrix3(rot3.clone().transpose());
+          const altE = camBF.length() - TerrainSource.baseRadius(b, camBF.normalize());   // above the ellipsoid
+          const low = Math.min(1, Math.max(0, (altE - 12e3) / 18e3));
           this.clouds?.update(view.rel, b.orientation, b.radii[0], b.radii[2], u.uSunDir.value as Vector3, u.uSunIrr.value as number,
             u.uSunColor.value as Vector3, (1 - (u.uCloudVis.value as number)) * low * low * (3 - 2 * low), u.uCloudShift.value as number);
         }

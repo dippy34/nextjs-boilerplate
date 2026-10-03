@@ -61,7 +61,8 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     is the Sun's clearance over the relief in penumbra widths (ray-marched per vertex, signed),
     and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`. Earth: the map's `"sea": 0` makes
     lower ground flat water and limits generated hills to land (more on high ground); the painted
-    clouds fade out on descent (`uCloudVis`, set in `Bodies`). Draw order: atmosphere shell (19.8),
+    clouds fade out on descent (`uCloudVis`, set in `Bodies`) while `render/CloudLayer.ts` (a
+    sphere 7 km up, same map + generated billows) fades in, clearing again below 12-30 km. Draw order: atmosphere shell (19.8),
     terrain (19.9, transparent pass but opaque), terrain haze (19.95: `ATMO_HAZE_FRAG` on the
     terrain geometry, marching to the real ground), then cockpit/HUD (20+). Earth and Mars get a
     skylight term in BODY_FRAG (`uAtmo`); ground without craters (Earth) gets `bnAt` rock/soil
