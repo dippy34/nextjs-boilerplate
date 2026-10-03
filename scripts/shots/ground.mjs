@@ -11,7 +11,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 240000 }); };
 for (const [name, body] of sites) {
-  await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=${body}&dist=3`, { waitUntil: 'load' });
+  await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=${body}&dist=3`, { waitUntil: 'load', timeout: 300000 });
   await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 180000 });
   await page.evaluate(() => { window.app.terrain.budgetMs = 80; });
   await page.evaluate((n) => {
@@ -26,19 +26,21 @@ for (const [name, body] of sites) {
   }, name);
   await frames(3);
   for (const hgt of views) {
-    await page.evaluate(([n, hgt]) => {
+    await page.evaluate(([n, hgt, tiltEnv, azEnv]) => {
       const a = window.app; const l = a.findByName(n); a.select(l);
       const up = l.up();
       const sun = a.system.sun.upos.sub(l.world.upos).normalize();
       // look across the sunlight (side-lit ground), tilted down a little
       const flat = sun.clone().sub(up.clone().multiplyScalar(sun.dot(up))).normalize();
       const side = flat.clone().cross(up).normalize();
-      const look = side.clone().multiplyScalar(Math.cos(0.25)).addScaledVector(up, -Math.sin(hgt > 10 ? 0.45 : 0.18)).normalize();
+      const tilt = Number(tiltEnv ?? (hgt > 10 ? 0.45 : 0.18)); const az = Number(azEnv ?? 0);
+      const hor = side.clone().multiplyScalar(Math.cos(az)).addScaledVector(flat, Math.sin(az));
+      const look = hor.multiplyScalar(Math.cos(tilt)).addScaledVector(up, -Math.sin(tilt)).normalize();
       // ground under the landmark: its world position plus height
       a.rig.upos.copy(l.world.upos).addVec(up, l.world.radius + 30000);
       a.rig.lookAt(look, up);
       window.__site = { n, hgt };
-    }, [name, hgt]);
+    }, [name, hgt, process.env.TILT ?? null, process.env.AZ ?? null]);
     // let the terrain build, then drop to the wanted height above the ground there
     await page.waitForFunction((b) => window.app.terrain.owner?.name === b, body, { timeout: 120000 }).catch(() => undefined);
     for (let i = 0; i < 4; i++) {
@@ -51,6 +53,8 @@ for (const [name, body] of sites) {
       }, hgt);
     }
     await frames(Number(process.env.SETTLE ?? 20));
+    // optional tweak before the shot (debugging): EVAL is evaluated in the page
+    if (process.env.EVAL) { const r = await page.evaluate(process.env.EVAL); if (r !== undefined) console.log('eval', JSON.stringify(r)); await frames(3); }
     const st = await page.evaluate(() => ({ alt: window.app.rig.altitude, owner: window.app.terrain.owner?.name, mat: (window.app.terrain.group.children.find((m) => m.material?.uniforms?.uMatOn)?.material.uniforms.uMatOn.value) ?? null, fps: Math.round(window.app.fps) }));
     await page.screenshot({ path: `${out}-${body}-${hgt}.png`, timeout: 240000 });
     console.log('shot', name, hgt, JSON.stringify(st));

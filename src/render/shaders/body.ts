@@ -407,7 +407,7 @@ void main() {
     if (uMatMode < 0.5) {
       mix2 = smoothstep(0.5, 0.7, patchN) * 0.8 + freshAll * 0.5;
       // lunar and Mercurian regolith: a faint warm (reddish) tint of mature soil
-      albedo *= mix(vec3(1.0), vec3(1.05, 1.0, 0.92), uHScale);
+      albedo *= mix(vec3(1.0), vec3(1.02, 1.0, 0.96), uHScale);
     } else if (uMatMode < 1.5) {
       // Earth: plants where the map is green, bare soil where it is brown, snow where it is white
       mix2 = smoothstep(0.0, 0.03, albedo.g - 0.85 * albedo.r) * (1.0 - water);
@@ -509,19 +509,26 @@ void main() {
 
   // Sunlight reaching the ground through the atmosphere
   vec3 sunT = vec3(1.0);
+  vec3 tauR = vec3(0.0), tauM = vec3(0.0);
   if (uAtmo > 0.5) {
     float cR = sunColumn(uRp, mu0g, uHR, uRp);
     float cM = sunColumn(uRp, mu0g, uHM, uRp);
-    sunT = cR > 1.0e11 ? vec3(0.0) : exp(-(uBetaR * cR + uBetaMe * cM));
+    tauR = uBetaR * min(cR, 1.0e9);
+    tauM = uBetaMe * min(cM, 1.0e9);
+    sunT = cR > 1.0e11 ? vec3(0.0) : exp(-(tauR + tauM));
   }
   vec3 sunL = uSunColor * sunT * (uSunIrr / 3.14159265);
   vec3 radiance = albedo * sunL * light;
-  // skylight: the sunlit sky lights the ground too and fills shadows (about the light scattered out
-  // of the beam, half of it downwards), less on slopes facing away from the sky
+  // skylight: the light scattered out of the beam on its way down that still reaches the ground
+  // (Rayleigh: about half; dust and haze scatter forwards, most of it; Martian dust absorbs blue),
+  // less on slopes facing away from the sky, and a little twilight glow after sunset
   if (uAtmo > 0.5) {
-    vec3 tau = uBetaR * uHR + uBetaMe * uHM;
-    float day = smoothstep(-0.1, 0.25, mu0g) * (0.3 + 0.7 * max(mu0g, 0.0)) * ecl;
-    radiance += albedo * uSunColor * (uSunIrr / 3.14159265) * (1.0 - exp(-tau)) * 0.5 * day * (0.5 + 0.5 * dot(nP, nW));
+    vec3 wM = tauM / max(tauR + tauM, vec3(1e-6));
+    vec3 omega = abs(uMatMode - 2.0) < 0.5 ? vec3(0.95, 0.85, 0.62) : vec3(1.0);
+    vec3 down = mix(vec3(0.5), 0.8 * omega, wM);
+    float m0 = max(mu0g, 0.0) + 0.03 * smoothstep(-0.12, 0.0, mu0g);
+    vec3 sky = (1.0 - sunT) * down * m0 * smoothstep(-0.12, 0.02, mu0g) * ecl;
+    radiance += albedo * uSunColor * (uSunIrr / 3.14159265) * sky * (0.55 + 0.45 * dot(nP, nW)) * (1.0 - 0.6 * rockAO);
   }
   radiance *= 1.0 - 0.4 * rockAO;
   // in a planet's shadow, sunlight refracted through its atmosphere (the Moon turns copper in an eclipse)
