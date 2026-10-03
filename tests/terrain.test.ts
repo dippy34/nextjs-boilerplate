@@ -129,7 +129,8 @@ describe('landing terrain', () => {
 
 describe('terrain patch', () => {
   const src = new TerrainSource('http://localhost/none');
-  (src as unknown as { manifest: unknown }).manifest = { maps: {} };   // no elevation models: generated relief only
+  (src as unknown as { manifest: unknown; elevationBodies: Set<string> }).manifest = { maps: {} };   // no elevation models: generated relief only
+  (src as unknown as { elevationBodies: Set<string> }).elevationBodies = new Set();
 
   const run = (sunBF: Vector3) => {
     const patch = new TerrainPatch();
@@ -139,25 +140,31 @@ describe('terrain patch', () => {
     const camBF = up.clone().multiplyScalar(b.radius + 800);
     const mat = new ShaderMaterial({ uniforms: { uExposure: { value: 1 }, uSeed: { value: 3 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 } } });
     const c = { ground: src.ground(b), material: mat, upos: UPos.from(0, 0, 0), rel: camBF.clone().negate(), orient: new Matrix4(), lonLeft: -180, sunBF, alt: 800 };
-    for (let i = 0; i < 3 && !patch.owner; i++) patch.update(c);
-    const g = (patch.group.children.find((m) => m.visible) as Mesh).geometry;
-    return { patch, b, up, mat, g };
+    // tiles refine one level per frame (built on the main thread here: no workers in tests)
+    for (let i = 0; i < 40; i++) patch.update(c);
+    const meshes = patch.group.children.filter((m) => m.visible) as Mesh[];
+    return { patch, b, up, mat, meshes };
   };
 
-  it('builds a finite patch under the explorer and cuts the sphere around it', () => {
-    const { patch, b, up, mat, g } = run(new Vector3(0, 0, 1));
+  it('covers the world with terrain under the explorer and cuts the whole sphere', () => {
+    const { patch, b, up, mat, meshes } = run(new Vector3(0, 0, 1));
     expect(patch.owner).toBe(b);
-    expect(mat.uniforms.uHoleCos.value).toBeGreaterThan(0.9);
-    expect(mat.uniforms.uHoleCos.value).toBeLessThan(1);
-    expect((mat.uniforms.uHoleDir.value as Vector3).angleTo(up)).toBeLessThan(1e-9);
-    for (const name of ['position', 'aH', 'aTN', 'aSun']) {
-      const a = g.attributes[name].array as Float32Array;
-      expect(a.every((v) => Number.isFinite(v))).toBe(true);
+    expect(mat.uniforms.uHoleCos.value).toBe(-2);
+    expect(meshes.length).toBeGreaterThan(6);
+    for (const m of meshes) {
+      for (const name of ['position', 'aMorph', 'aTN', 'aSun']) {
+        const a = m.geometry.attributes[name].array as Float32Array;
+        expect(a.every((v) => Number.isFinite(v))).toBe(true);
+      }
     }
+    // refined under the explorer: cells of metres to tens of metres at 800 m up
+    expect(patch.stats.level).toBeGreaterThan(9);
     // the ground below the explorer is near the reference surface, within the relief
     const below = patch.below(UPos.from(up.x * (b.radius + 800), up.y * (b.radius + 800), up.z * (b.radius + 800)))!;
     expect(Math.abs(below.ground - b.radius)).toBeLessThan(12e3);
     expect(below.dist).toBeCloseTo(b.radius + 800, 3);
+    // and exactly the height function there, at the drawn tile's resolution
+    expect(Math.abs(below.ground - (b.radius + src.height(b, up, 2)))).toBeLessThan(15);
   });
 
   it('casts shadows with a low Sun, none with the Sun overhead', () => {
@@ -165,8 +172,12 @@ describe('terrain patch', () => {
     const side = new Vector3(0, 0, 1).cross(up).normalize();
     const low = up.clone().multiplyScalar(Math.sin(0.05)).addScaledVector(side, Math.cos(0.05)).normalize();   // 3 degrees up
     const lit = (sun: Vector3) => {
-      const a = run(sun).g.attributes.aSun.array as Float32Array;
-      return a.filter((v) => v < 0).length / a.length;   // less than half the Sun's disk
+      let n = 0, dark = 0;
+      for (const m of run(sun).meshes) {
+        const a = m.geometry.attributes.aSun.array as Float32Array;
+        for (const v of a) { n++; if (v < 0) dark++; }   // less than half the Sun's disk
+      }
+      return dark / n;
     };
     const shadowedLow = lit(low);
     const shadowedHigh = lit(up);
@@ -179,6 +190,7 @@ describe('terrain patch', () => {
 describe('rocks', () => {
   const src = new TerrainSource('http://localhost/none');
   (src as unknown as { manifest: unknown }).manifest = { maps: {} };
+  (src as unknown as { elevationBodies: Set<string> }).elevationBodies = new Set();
 
   it('rest on the ground actually drawn, also after a new patch replaces the old', () => {
     const patch = new TerrainPatch();
@@ -192,8 +204,8 @@ describe('rocks', () => {
     const at = (up: Vector3) => {
       const g = src.ground(b);
       const c = { ground: g, material: mat, upos: UPos.from(0, 0, 0), rel: new Vector3(), orient: new Matrix4(), lonLeft: -180, sunBF: new Vector3(0, 0, 1), alt: 2 };
-      for (let i = 0; i < 6; i++) {
-        // two metres above the ground drawn below (the patch follows)
+      for (let i = 0; i < 40; i++) {
+        // two metres above the ground drawn below (the terrain refines under the explorer)
         const R = patch.owner ? patch.groundRadius(up) : b.radius + src.height(b, up, 1);
         const cam = up.clone().multiplyScalar(R + 2);
         c.rel.copy(cam).negate();
@@ -224,7 +236,7 @@ describe('rocks', () => {
     const first = at(up);
     expect(first.n).toBeGreaterThan(50);
     expect(first.worst).toBeLessThan(1);
-    // 200 m away: a new patch, and the rocks placed on it
+    // 200 m away: new tiles under the explorer, and the rocks placed on them
     const next = at(up.clone().add(new Vector3(1, 0.4, 0).multiplyScalar(200 / b.radius)).normalize());
     expect(next.n).toBeGreaterThan(50);
     expect(next.worst).toBeLessThan(1);

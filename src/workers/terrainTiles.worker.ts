@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { ElevationStore } from '../universe/Elevation';
 import { heightFromSpec, type HeightSpec } from '../universe/TerrainHeights';
-import { buildTile, ellipsoidRadius, faceDir, type HeightFn, tileRect, type TileRequest } from '../universe/TerrainTiles';
+import { buildTile, faceDir, type HeightFn, tileRect, type TileRequest } from '../universe/TerrainTiles';
 import { Vector3 } from 'three';
 
 /**
@@ -12,24 +12,24 @@ import { Vector3 } from 'three';
  * Replies { type: 'elev', id, version } when sharper global elevation tiles stream in, so the main
  * thread rebuilds the affected tiles with them.
  */
-interface Fn { fn: HeightFn; bodyKey: string | null; refR: number; radii: number[]; sphere: boolean; elevVer: number }
+interface Fn { fn: HeightFn; bodyKey: string | null; elev: boolean; elevVer: number }
 const fns = new Map<number, Fn>();
 const store = new ElevationStore();
 let elevConfigured = false;
 
-/** Sharper elevation reconciled to the tile source's reference (m above the ellipsoid base), or null. */
-function makeElevSample(bodyKey: string, radii: number[]): (n: Vector3, spacing: number) => { h: number; mpp: number } | null {
-  const man = () => store.manifest(bodyKey);
+/**
+ * Sharper elevation (m above the reference surface), or null where no loaded tile covers the
+ * direction. The pyramids measure heights from the same reference as the coarse global maps they
+ * refine (the areoid for Mars, the geoid for Earth, the mean sphere for the Moon, ...), and the
+ * tile source adds both to the body's ellipsoid in the same way: no reconciliation needed, so the
+ * coarse map (fallback while tiles load) and the pyramid line up.
+ */
+function makeElevSample(bodyKey: string): (n: Vector3, spacing: number) => { h: number; mpp: number } | null {
   const d = { x: 0, y: 0, z: 0 };
   return (n, spacing) => {
-    const m = man();
-    if (!m) return null;
-    const refR = (m as { referenceRadius?: number }).referenceRadius ?? radii[0];
     d.x = n.x; d.y = n.y; d.z = n.z;
     const v = store.sample(bodyKey, d, spacing);
-    if (v === null) return null;
-    // place the ground at refR + v (absolute), expressed above this body's ellipsoid base
-    return { h: v - (ellipsoidRadius(radii, n.x, n.y, n.z) - refR), mpp: store.lastMetresPerSample || spacing };
+    return v === null ? null : { h: v, mpp: store.lastMetresPerSample || spacing };
   };
 }
 
@@ -39,21 +39,15 @@ self.onmessage = (ev: MessageEvent) => {
     const spec = m.spec!;
     let elevSample: ((n: Vector3, spacing: number) => { h: number; mpp: number } | null) | undefined;
     let bodyKey: string | null = null;
-    let refR = 0;
-    let sphere = false;
-    const radii = spec.kind === 'body' ? spec.radii : [spec.radius, spec.radius, spec.radius];
+    let elev = false;
     if (spec.kind === 'body' && spec.elevation) {
       bodyKey = spec.elevation.bodyKey;
       if (!elevConfigured) { store.configure({ base: spec.elevation.base }); elevConfigured = true; }
       void store.load(bodyKey);
-      // activate only on near-spherical bodies, where "metres above the reference radius" lines up
-      // exactly with the ellipsoid base (no geoid/areoid or oblateness mismatch); others keep the
-      // coarse global map until that reconciliation is in place.
-      const rmin = Math.min(...radii), rmax = Math.max(...radii);
-      sphere = rmax - rmin < rmax * 1e-3;
-      if (sphere) elevSample = makeElevSample(bodyKey, radii);
+      elev = true;
+      elevSample = makeElevSample(bodyKey);
     }
-    fns.set(m.id, { fn: heightFromSpec(spec, elevSample), bodyKey, refR, radii, sphere, elevVer: 0 });
+    fns.set(m.id, { fn: heightFromSpec(spec, elevSample), bodyKey, elev, elevVer: 0 });
     return;
   }
   if (m.type === 'drop') { fns.delete(m.id); return; }
@@ -62,7 +56,7 @@ self.onmessage = (ev: MessageEvent) => {
     if (!f) { (self as unknown as Worker).postMessage({ job: m.job, data: null }); return; }
     const req = m.req!;
     // make sure the elevation tiles for this tile's area are being fetched (for this and later builds)
-    if (f.sphere && f.bodyKey) {
+    if (f.elev && f.bodyKey) {
       const [s0, t0, w] = tileRect(req.level, req.x, req.y);
       const c = faceDir(req.face, s0 + w / 2, t0 + w / 2);
       const spacing = Math.max(req.minSpacing ?? 0, (req.radius * Math.PI) / 2 / 2 ** req.level / 64);
