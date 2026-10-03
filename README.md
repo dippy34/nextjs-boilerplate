@@ -248,7 +248,8 @@ Known limitations (planned for later phases unless noted):
   other round moons, dwarf planets and rocky planets of other stars. Venus, Titan and small
   irregular bodies keep smooth surfaces with relief shading. Earth's clouds are painted on the
   surface, so they fade out between 150 and 50 km up (no cloud layer to fly through yet), and its ground
-  colours come from the 8k Blue Marble map (blurry at eye level).
+  colours come from the Blue Marble map (blurry at eye level; generated rock-and-soil detail is
+  added close up).
 * Venus uses procedural banding tinted with the Mariner 10 disk colour; the Viking Mars mosaic is
   somewhat over-saturated; OPAL maps miss the latitudes Hubble could not see (filled zonally).
 * The Milky Way model is smooth and idealised (arm positions, a clumpy noise for dust and star
@@ -278,7 +279,8 @@ Known limitations (planned for later phases unless noted):
 * VR has no bloom pass (a glare sprite around the Sun stands in) and starts at a lower star magnitude
   limit (6.8, adjustable in Settings) to protect frame rate.
 * Atmospheres are single scattering (no multiple scattering); over the landing terrain the haze is
-  marched to the real ground, elsewhere to the reference sphere. The Milky
+  marched to the real ground, elsewhere to the reference sphere. Skylight on Earth and Mars (what
+  fills shadows) is a one-line estimate from the vertical optical depth, not computed per direction. The Milky
   Way map is Earth-centred and fades out beyond ~1 kpc.
 * Black holes are non-spinning (Schwarzschild).
 * Performance has been verified only under software rendering (≈20–30 fps at 720p; ~3–5 ms JS per

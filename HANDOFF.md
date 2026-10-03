@@ -63,7 +63,10 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     lower ground flat water and limits generated hills to land (more on high ground); the painted
     clouds fade out on descent (`uCloudVis`, set in `Bodies`). Draw order: atmosphere shell (19.8),
     terrain (19.9, transparent pass but opaque), terrain haze (19.95: `ATMO_HAZE_FRAG` on the
-    terrain geometry, marching to the real ground), then cockpit/HUD (20+).
+    terrain geometry, marching to the real ground), then cockpit/HUD (20+). Earth and Mars get a
+    skylight term in BODY_FRAG (`uAtmo`); ground without craters (Earth) gets `bnAt` rock/soil
+    detail on the split lattices. Landmarks may set `elev` (viewpoint elevation, degrees): Earth's
+    mountains are seen from a few degrees above, across the sunlight.
   - Cockpit HUD (`src/game/HudMarkers.ts`): target bracket, flight-path marker, boresight.
   - Generated planets: `src/universe/ExoTerrain.ts` (CPU copy of EXO_FRAG `terrain()` so ground matches
     colours), Earth-like atmosphere shells for temperate/ocean types (`Atmospheres.updateExo`).
