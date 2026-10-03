@@ -261,7 +261,8 @@ Known limitations (planned for later phases unless noted):
   (billboards from afar, a ray-marched volume up close; their shapes are not the real ones);
   globular-cluster stars are generated.
 * Terrain shadows are ray-marched per mesh vertex, with the edge placed per pixel (features
-  smaller than the mesh spacing cast none). The global elevation models are coarse (5–20 km per
+  smaller than the mesh spacing cast none). Far from the explorer the mesh is coarse (vertices
+  5-10 km apart at 100+ km), so distant crater walls and ridges look blocky. The global elevation models are coarse (5–20 km per
   sample; 0.24–0.9 km in the patches around the landmarks) with generated relief below that, which
   is plausible, not mapped. Generated planets' atmospheres are Earth-like for every temperate world.
 * Generated planets are labelled as such; their counts and sizes follow occurrence statistics, not
