@@ -147,7 +147,7 @@ export class Hud {
   }
 
   update(s: HudState): void {
-    this.top.innerHTML = `<b>SPACE EXPLORER</b> <span class="dim">Phase 1</span> &nbsp; ${s.fps.toFixed(0)} fps · ${s.stars}${s.loading ? ` · <span class="warn">${s.loading}</span>` : ''} &nbsp; <span class="dim">H: help · T: tour</span>`;
+    this.top.innerHTML = `<b>SPACE EXPLORER</b> &nbsp; ${s.fps.toFixed(0)} fps · ${s.stars}${s.loading ? ` · <span class="warn">${s.loading}</span>` : ''} &nbsp; <span class="dim">H: help · T: tour</span>`;
     this.time.innerHTML = `<div class="date">${s.date}</div><div class="rate">${s.paused ? '<span class="warn">PAUSED</span>' : s.rate}</div><div class="dim small">${s.ephemeris}</div>`;
     if (s.selection) {
       this.info.innerHTML = `<div class="name">${escapeHtml(s.selection.name)}</div>

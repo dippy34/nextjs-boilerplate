@@ -180,9 +180,10 @@ matching functions.
 
 ## Status
 
-### Phase 1 — engine core ✅ (this commit)
+### What works (each verified before it went live)
 
-Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`, `npm run verify:vr`):
+Checked with `npm test` and the headless-browser suites (`scripts/verify.mjs`, `vr.mjs`, `game.mjs`,
+`terrain.mjs`, `places.mjs`; see HANDOFF.md):
 
 * Seamless scale from metres above a planet to kiloparsecs, floating origin, reversed-Z depth.
 * 2,751,164 real stars streamed from two separately-licensed octrees (AT-HYG+HYG; Gaia DR3 100 pc
@@ -227,6 +228,16 @@ Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`, 
   search for) and none duplicates a catalogued one. Fly to the galactic centre and Sgr A\* sits
   in a blazing star cluster; search "Milky Way" to leave the galaxy and see the barred spiral from
   outside.
+* Beyond the Solar System: 6,333 confirmed exoplanets placed around their catalogued stars, a generated
+  system around almost every other star, 47 nearby galaxies, 41 nebulae and clusters, and real
+  spacecraft on their trajectories.
+* Landing: real 3D ground from NASA elevation models (sharper patches around landmarks), generated
+  hills, craters and shadows elsewhere, walking at eye height, rocky planets of other stars with
+  matching terrain and Earth-like skies.
+* Saturn's rings from the inside, comets with comas, tails and nuclei, eclipses and moon shadows at
+  their real times.
+* Game mode: cockpit and chase views, inertial flight, warp, traffic, docking at stations, landing,
+  missions and a discovery log.
 
 Known limitations (planned for later phases unless noted):
 
