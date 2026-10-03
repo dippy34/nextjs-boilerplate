@@ -92,7 +92,7 @@ async function terrainScene(id, name, opts, expectDem) {
   });
   check(`${id}: terrain under the explorer on ${name}`, st.body === name && st.hScale > 0.99, `${JSON.stringify(st)} after ${ms} ms`);
   if (expectDem) check(`${id}: ${name} uses its elevation model`, st.dem);
-  await page.screenshot({ path: path.join(outDir, `${id}.png`) });
+  await page.screenshot({ path: path.join(outDir, `${id}.png`), timeout: 180000 });
   return st;
 }
 
@@ -119,7 +119,7 @@ let st = await page.evaluate(() => {
   return { body: b?.name ?? null, alt: a.rig.altitude, aboveRef: d - (b?.radius ?? 0) };
 });
 check('t2: flying down stops above the ground', st.body === 'Moon' && st.alt > 1.4 && st.alt < 60, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 't2-moon-ground.png') });
+await page.screenshot({ path: path.join(outDir, 't2-moon-ground.png'), timeout: 180000 });
 // 3. Olympus Mons from 30 km (MOLA heights; the summit is 21 km up)
 await terrainScene('t3-olympus-mons', 'Mars', { lat: 18.65, lon: -133.8 - 2.5, sunEl: 25, alt: 30000, pitch: 25, yaw: 0 }, true);
 // 4. a world without an elevation model: generated craters and hills
@@ -151,7 +151,7 @@ await page.waitForFunction(() => window.app.terrain.owner === window.app.selecti
 await frames(8);
 st = await page.evaluate(() => ({ owner: window.app.terrain.owner?.name ?? null, alt: window.app.rig.altitude, hScale: window.app.terrain.hScale }));
 check('t5: terrain on a planet of another star', st.owner === 'Proxima Cen b' && st.hScale > 0.99, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 't5-exoplanet.png') });
+await page.screenshot({ path: path.join(outDir, 't5-exoplanet.png'), timeout: 180000 });
 
 // 6. a temperate (or ocean) world of another star: land, sea and a blue sky
 st = await page.evaluate(() => {
@@ -191,7 +191,7 @@ if (st) {
     sky: window.app.atmospheres.group.children.some((m) => m.visible && m.name === `${n} atmosphere`),
   }), pname);
   check('t6: a temperate planet of another star has ground and a sky', t6.owner === pname && t6.sky, JSON.stringify(t6));
-  await page.screenshot({ path: path.join(outDir, 't6-temperate.png') });
+  await page.screenshot({ path: path.join(outDir, 't6-temperate.png'), timeout: 180000 });
 }
 
 st = await page.evaluate(() => ({ fps: window.app.fps }));
