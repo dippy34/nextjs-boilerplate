@@ -12,11 +12,16 @@ confirmed exoplanets** in 4,743 systems and a generated planetary system around 
 star · 23 black holes with lensing, accretion disks and jets · **real spacecraft** at their real
 positions (ISS, Hubble, JWST, Voyager 1 & 2, New Horizons, Parker Solar Probe, Europa Clipper, Juice,
 Lucy, Psyche) · **47 nearby galaxies** (Andromeda, Triangulum, the Magellanic Clouds, the Whirlpool,
-the Sombrero, Centaurus A, M87 …) · the Milky Way from outside.
+the Sombrero, Centaurus A, M87 …) · **41 nebulae and star clusters** (the Orion, Carina, Eagle,
+Ring, Helix and Crab nebulae, the Pleiades, Omega Centauri, 47 Tucanae …) · the Milky Way from outside ·
+**real 3D ground to land on**: NASA elevation models for the Moon, Mars (Olympus Mons, Valles Marineris)
+and Mercury, generated hills, craters and shadows on other moons, and on rocky planets of other stars
+(their mountains and seas match their colours; temperate worlds have blue skies).
 
 **Game mode (V):** fly your own ship — a cockpit with live navigation screens (sit inside it in VR),
-a chase view, inertial flight, a warp drive with streaks and engine sound, fictional traffic orbiting
-the planet you are near, missions and a discovery log.
+a chase view, inertial flight, a warp drive with streaks and engine sound, fictional traffic and a
+rotating space station orbiting the world you are near (fly up to its docking port and the docking
+computer takes over), landing on solid worlds, missions and a discovery log.
 
 ### ▶ Live: **https://dippy34.github.io/nextjs-boilerplate/**
 
@@ -210,12 +215,18 @@ Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`, 
 
 Known limitations (planned for later phases unless noted):
 
-* Planets are textured ellipsoids with relief shading — LOD terrain geometry and landing are Phase 2.
+* Close to a solid world the ground becomes real 3D terrain: elevation models for the Moon, Mars and
+  Mercury (about 5–10 km per sample) with generated relief below that, generated relief on other
+  round moons, dwarf planets and rocky planets of other stars. Earth, Venus, Titan and small
+  irregular bodies keep smooth surfaces with relief shading.
 * Venus uses procedural banding tinted with the Mariner 10 disk colour; the Viking Mars mosaic is
   somewhat over-saturated; OPAL maps miss the latitudes Hubble could not see (filled zonally).
 * The Milky Way model is smooth and idealised (arm positions, a clumpy noise for dust and star
-  clouds); no nebulae or star clusters yet. Other galaxies are procedural discs/spheroids with their
-  catalogued size, type and orientation (no individual stars inside them).
+  clouds). Other galaxies are procedural discs/spheroids with their catalogued size, type and
+  orientation (no individual stars inside them); nebulae are procedural billboards at their
+  catalogued size (flat up close); globular-cluster stars are generated.
+* Terrain casts no shadows (slopes facing away from the Sun go dark, but hills do not shade the
+  ground behind them), and generated relief is plausible, not mapped.
 * Generated planets are labelled as such; their counts and sizes follow occurrence statistics, not
   observations. Orbit orientations and phases of most real exoplanets are unmeasured and chosen
   deterministically.
@@ -230,9 +241,8 @@ Known limitations (planned for later phases unless noted):
 * Pluto has no ephemeris outside 1849–2150; no eclipses or body-on-body shadows yet (Phase 6).
 * VR has no bloom pass (a glare sprite around the Sun stands in) and starts at a lower star magnitude
   limit (6.8, adjustable in Settings) to protect frame rate.
-* Atmospheres are single scattering (no multiple scattering), seen from space; there is no terrain
-  geometry or landing yet (relief is shading only). The Milky Way map is Earth-centred and fades out
-  beyond ~1 kpc.
+* Atmospheres are single scattering (no multiple scattering) and ignore terrain height. The Milky
+  Way map is Earth-centred and fades out beyond ~1 kpc.
 * Black holes are non-spinning (Schwarzschild).
 * Performance has been verified only under software rendering (≈20–30 fps at 720p; ~3–5 ms JS per
   frame). GPU profiling and quality presets come in Phase 6.
@@ -242,7 +252,7 @@ Known limitations (planned for later phases unless noted):
 2. Planet rendering: cube-sphere quadtree terrain from real DEMs, Bruneton atmospheric scattering,
    oceans, clouds, space-to-surface descent and surface walking.
 3. Nebulae and star clusters (OpenNGC), a finer Milky Way seen from outside.
-4. Landing on planets; docking at stations.
+4. Sharper terrain (streamed elevation tiles), terrain shadows, Earth terrain; more stations and ship types.
 5. Full UI: search panel, bookmarks, settings and quality presets.
 6. Polish: lens flares, eclipses, spinning (Kerr) black holes, performance tuning.
 

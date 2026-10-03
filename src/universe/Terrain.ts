@@ -1,0 +1,247 @@
+import { Vector3 } from 'three';
+import type { Body } from './Body';
+
+/** A world that can have landing terrain (render/TerrainPatch.ts). */
+export interface Ground {
+  /** the Body or ExoPlanet */
+  readonly owner: object;
+  readonly name: string;
+  /** mean radius (m) */
+  readonly radius: number;
+  /** ellipsoid semi-axes (m): the reference surface heights are measured from */
+  readonly radii: readonly number[];
+  /** typical relief (m), for sizing the patch */
+  readonly amplitude: number;
+  /** true when the heights are final (elevation model loaded) */
+  ready(): boolean;
+  /** height (m) above the reference surface at body-fixed unit direction n; `spacing`: finest feature size worth computing (m) */
+  height(n: Vector3, spacing: number): number;
+}
+
+/** reference-surface radius (m) along body-fixed unit direction n (the ellipsoid) */
+export function baseRadius(g: { radii: readonly number[] }, n: Vector3): number {
+  const [a, b, c] = g.radii;
+  return 1 / Math.sqrt((n.x / a) ** 2 + (n.y / b) ** 2 + (n.z / c) ** 2);
+}
+
+/** A global elevation model (public/data/terrain, pipeline/build_terrain.py). */
+interface HeightMap {
+  width: number; height: number; lonLeft: number;
+  data: Uint16Array; offset: number; scale: number;
+  /** metres per pixel at the equator */
+  pixelM: number;
+}
+interface TerrainManifest {
+  maps: Record<string, { file: string; width: number; height: number; lonLeft: number; offset: number; scale: number; credit: string }>;
+}
+
+// ---------------------------------------------------------------- deterministic noise
+function hash3(x: number, y: number, z: number, s: number): number {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(z | 0, 1440662683) ^ Math.imul(s | 0, 1274126177);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+export function vnoise(x: number, y: number, z: number, s: number): number {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const xf = x - xi, yf = y - yi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
+  const a = hash3(xi, yi, zi, s), b = hash3(xi + 1, yi, zi, s), c = hash3(xi, yi + 1, zi, s), d = hash3(xi + 1, yi + 1, zi, s);
+  const e = hash3(xi, yi, zi + 1, s), f = hash3(xi + 1, yi, zi + 1, s), g = hash3(xi, yi + 1, zi + 1, s), h = hash3(xi + 1, yi + 1, zi + 1, s);
+  const ab = a + (b - a) * u, cd = c + (d - c) * u, ef = e + (f - e) * u, gh = g + (h - g) * u;
+  const l0 = ab + (cd - ab) * v, l1 = ef + (gh - ef) * v;
+  return l0 + (l1 - l0) * w;
+}
+
+/**
+ * Crater field with cells of `cell` metres on a sphere of radius R: bowls with raised rims, depth
+ * `depth` x crater radius. `p` is the point on the sphere in metres.
+ */
+export function craterField(px: number, py: number, pz: number, cell: number, s: number, density: number, depth: number): number {
+  const x = px / cell, y = py / cell, z = pz / cell;
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  let h = 0;
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+    const cx = xi + dx, cy = yi + dy, cz = zi + dz;
+    if (hash3(cx, cy, cz, s + 11) > density) continue;
+    const ox = cx + 0.2 + 0.6 * hash3(cx, cy, cz, s + 1);
+    const oy = cy + 0.2 + 0.6 * hash3(cx, cy, cz, s + 2);
+    const oz = cz + 0.2 + 0.6 * hash3(cx, cy, cz, s + 3);
+    // many small craters, few large ones
+    const t = hash3(cx, cy, cz, s + 5);
+    const rc = 0.1 + 0.32 * t * t;
+    const d = Math.sqrt((x - ox) ** 2 + (y - oy) ** 2 + (z - oz) ** 2) / rc;
+    if (d > 1.7) continue;
+    // bowl (parabolic floor), rim crest at d = 1 and an ejecta apron outside
+    const bowl = d < 1 ? d * d - 1 : 0;
+    const rim = 0.32 * Math.exp(-(((d - 1) / 0.28) ** 2));
+    h += (bowl + rim) * depth * rc * cell;
+  }
+  return h;
+}
+
+function seedOf(name: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
+  return (h >>> 0) % 100003;
+}
+
+/**
+ * Heights of solid worlds for the landing terrain: real global elevation models where we have
+ * them (Moon, Mars, Mercury; bicubic between samples), and generated relief below their resolution
+ * and everywhere else (fractal hills, crater fields from kilometres down to tens of metres).
+ * Deterministic: the same place always has the same ground.
+ */
+export class TerrainSource {
+  private manifest: TerrainManifest | null = null;
+  private maps = new Map<string, HeightMap>();
+  private pending = new Map<string, Promise<HeightMap | null>>();
+  private order: string[] = [];
+  /** crater density (0..1) per body, from its surface look */
+  craters = new Map<Body, number>();
+  private grounds = new Map<Body, Ground>();
+
+  constructor(private base: string) {
+    fetch(`${base}/terrain/terrain.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { this.manifest = j; }).catch(() => undefined);
+  }
+
+  /** The landing-terrain view of a Solar System body. */
+  ground(b: Body): Ground {
+    let g = this.grounds.get(b);
+    if (!g) {
+      g = { owner: b, name: b.name, radius: b.radius, radii: b.radii, amplitude: TerrainSource.amplitude(b),
+        ready: () => this.ready(b), height: (n, spacing) => this.height(b, n, spacing) };
+      this.grounds.set(b, g);
+    }
+    return g;
+  }
+
+  keyOf(b: Body): string | null {
+    const k = b.name.toLowerCase();
+    return this.manifest?.maps[k] ? k : null;
+  }
+
+  /** True when the body's heights are final (no elevation model, or it has loaded). */
+  ready(b: Body): boolean {
+    if (!this.manifest) return false;
+    const k = this.keyOf(b);
+    if (!k) return true;
+    if (this.maps.has(k)) return true;
+    this.request(k, b.radius);
+    return false;
+  }
+
+  credit(b: Body): string | null {
+    const k = this.keyOf(b);
+    return k ? this.manifest!.maps[k].credit : null;
+  }
+
+  private request(k: string, radius: number): void {
+    if (this.pending.has(k)) return;
+    const m = this.manifest!.maps[k];
+    const p = fetch(`${this.base}/terrain/${m.file}`)
+      .then((r) => r.blob())
+      .then((blob) => createImageBitmap(blob, { colorSpaceConversion: 'none', premultiplyAlpha: 'none' }))
+      .then((bmp) => {
+        const w = bmp.width, h = bmp.height;
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d', { willReadFrequently: true })!;
+        ctx.drawImage(bmp, 0, 0);
+        bmp.close();
+        const px = ctx.getImageData(0, 0, w, h).data;
+        const data = new Uint16Array(w * h);
+        for (let i = 0; i < data.length; i++) data[i] = px[i * 4] * 256 + px[i * 4 + 1];
+        const hm: HeightMap = { width: w, height: h, lonLeft: m.lonLeft, data, offset: m.offset, scale: m.scale, pixelM: (2 * Math.PI * radius) / w };
+        this.maps.set(k, hm);
+        // keep at most two elevation models in memory
+        this.order = this.order.filter((o) => o !== k).concat(k);
+        while (this.order.length > 2) { const old = this.order.shift()!; this.maps.delete(old); this.pending.delete(old); }
+        return hm;
+      })
+      .catch((err) => { console.warn('terrain map failed', k, err); return null; });
+    this.pending.set(k, p);
+  }
+
+  /** elevation model sample (m) at map pixel coordinates, wrapping in longitude, clamped in latitude */
+  private texel(m: HeightMap, x: number, y: number): number {
+    x = ((x % m.width) + m.width) % m.width;
+    y = Math.max(0, Math.min(m.height - 1, y));
+    return m.data[y * m.width + x] * m.scale + m.offset;
+  }
+
+  /** bicubic (Catmull-Rom) sample of the elevation model at body-fixed unit direction n */
+  private dem(m: HeightMap, n: Vector3): number {
+    const lon = Math.atan2(n.y, n.x);
+    const lat = Math.asin(Math.max(-1, Math.min(1, n.z)));
+    let u = (lon - (m.lonLeft * Math.PI) / 180) / (2 * Math.PI);
+    u -= Math.floor(u);
+    const fx = u * m.width - 0.5, fy = (0.5 - lat / Math.PI) * m.height - 0.5;
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const tx = fx - x0, ty = fy - y0;
+    const w = (t: number): [number, number, number, number] => [
+      ((-t + 2) * t - 1) * t * 0.5, ((3 * t - 5) * t * t + 2) * 0.5, ((-3 * t + 4) * t + 1) * t * 0.5, (t - 1) * t * t * 0.5];
+    const wx = w(tx), wy = w(ty);
+    let h = 0;
+    for (let j = 0; j < 4; j++) {
+      let row = 0;
+      for (let i = 0; i < 4; i++) row += wx[i] * this.texel(m, x0 - 1 + i, y0 - 1 + j);
+      h += wy[j] * row;
+    }
+    return h;
+  }
+
+  /** relief amplitude (m) of a body without an elevation model */
+  static amplitude(b: Body): number {
+    return Math.min(4500, b.radius * 0.0024);
+  }
+
+  /**
+   * Height (m) above the reference surface at body-fixed unit direction `n`. `spacing` is the
+   * size (m) of the smallest feature worth computing (the local vertex spacing): finer layers are
+   * left to the shader's bump detail.
+   */
+  height(b: Body, n: Vector3, spacing: number): number {
+    const R = b.radius;
+    const s = seedOf(b.name);
+    const k = this.keyOf(b);
+    const m = k ? this.maps.get(k) : undefined;
+    let h = 0;
+    // generated relief starts below this wavelength (m): the whole range without an elevation model
+    let top: number;
+    if (m) {
+      h = this.dem(m, n);
+      top = m.pixelM * 3;
+    } else {
+      top = R / 3;
+    }
+    const minL = Math.max(spacing * 2.5, 6);
+    const px = n.x * R, py = n.y * R, pz = n.z * R;
+    // fractal hills: amplitude proportional to wavelength (slopes of a few percent)
+    const slope = m ? 0.012 : Math.min(0.03, TerrainSource.amplitude(b) / (R / 3));
+    let o = 0;
+    for (let L = top; L > minL && o < 16; L *= 0.5, o++) {
+      h += (vnoise(px / L, py / L, pz / L, s + o * 7) - 0.5) * 2 * slope * L;
+    }
+    // crater fields: cells of 40 km down to 30 m, each a fifth the size of the one before
+    const dens = this.craters.get(b) ?? 0.8;
+    if (dens > 0.05) {
+      // patchy coverage, as on real surfaces
+      const patch = vnoise(px / 60e3, py / 60e3, pz / 60e3, s + 99);
+      let i = 0;
+      for (let cell = 40e3; cell >= 30; cell /= 4.6, i++) {
+        if (cell * 0.4 < minL) break;          // too small to resolve here
+        if (cell > top * 1.2) continue;        // the elevation model already has craters this size
+        const d = dens * (0.35 + 0.35 * patch) * (cell < 1000 ? 1.15 : 1);
+        // complex (large) craters are shallower relative to their size
+        const depth = cell > 5000 ? 0.18 : 0.32;
+        h += craterField(px, py, pz, cell, s + 100 * i, d, depth);
+      }
+    }
+    return Number.isFinite(h) ? h : 0;
+  }
+
+  /** reference-surface radius (m) of the body along direction n (its ellipsoid) */
+  static baseRadius(b: { radii: readonly number[] }, n: Vector3): number {
+    return baseRadius(b, n);
+  }
+}

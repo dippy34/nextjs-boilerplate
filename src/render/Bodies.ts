@@ -13,6 +13,8 @@ import type { AtmosphereSpec } from './Atmospheres';
 import type { TileDetail } from './TileDetail';
 import { BODY_FRAG, BODY_VERT, GLARE_FRAG, GLARE_VERT, RING_FRAG, RING_VERT, STAR_FRAG } from './shaders/body';
 import { StarCorona } from './StarCorona';
+import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
+import { TerrainSource } from '../universe/Terrain';
 import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
@@ -154,6 +156,8 @@ export class BodiesLayer {
   readonly maxSprites: number;
   /** exposure for resolved surfaces (point sprites use the shared PSF exposure) */
   readonly surfaceExposure = { value: 1 };
+  /** heights for the landing terrain of solid worlds */
+  readonly terrainSource: TerrainSource;
 
   constructor(
     private system: SolarSystem,
@@ -163,6 +167,7 @@ export class BodiesLayer {
     private rings_: Record<string, { innerKm: number; outerKm: number; texture: string }>,
   ) {
     this.group.name = 'bodies';
+    this.terrainSource = new TerrainSource(texBase.replace(/\/textures$/, ''));
     const sc = blackbodyRGB(system.sun.teff);
     const L = luminance(sc);
     this.sunColor = [sc[0] / L, sc[1] / L, sc[2] / L];
@@ -336,6 +341,7 @@ export class BodiesLayer {
         uProc: { value: 0 }, uIcy: { value: 0 }, uTint: { value: new Vector3(1, 1, 1) }, uCraters: { value: 0 },
         uLumpy: { value: 0 }, uRadiusM: { value: b.radius }, uMapW: { value: 0 },
         uDetail: { value: null }, uDetailRect: { value: new Vector4(0, 0, 1, 1) }, uDetailOn: { value: 0 }, uLite: LITE.uLite,
+        uTerrain: { value: 0 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
         uSunDir: { value: new Vector3(1, 0, 0) },
         uSunIrr: { value: Math.PI },
         uSunColor: { value: new Vector3(...this.sunColor) },
@@ -603,6 +609,31 @@ export class BodiesLayer {
     (this.sprites.geometry.attributes.position as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aIrr as BufferAttribute).needsUpdate = true;
     (this.sprites.geometry.attributes.aColor as BufferAttribute).needsUpdate = true;
+  }
+
+  /** Can the body have landing terrain? Solid, round (not lumpy) and without a thick atmosphere. */
+  private terrainOk(b: Body): boolean {
+    if (b.kind === 'star' || b.isGasGiant || ['Earth', 'Venus', 'Titan'].includes(b.name) || b.radius < 150e3) return false;
+    const m = this.meshes.get(b);
+    return !!m && ((m.material as ShaderMaterial).uniforms.uLumpy.value as number) === 0;
+  }
+
+  /** The nearest solid world that could have landing terrain, if one is close. */
+  terrainCandidate(): TerrainCandidate | null {
+    let best: BodyView | null = null;
+    let bestAlt = Infinity;
+    for (const v of this.views.values()) {
+      if (!v.resolved) continue;
+      const alt = v.dist - v.body.radius;
+      if (alt < bestAlt && alt < TerrainPatch.threshold(v.body) * 1.2 && this.terrainOk(v.body)) { bestAlt = alt; best = v; }
+    }
+    if (!best) return null;
+    const b = best.body;
+    const material = this.meshes.get(b)!.material as ShaderMaterial;
+    this.terrainSource.craters.set(b, material.uniforms.uCraters.value as number);
+    const key = this.textureKey(b);
+    const sunBF = (material.uniforms.uSunDir.value as Vector3).clone().applyMatrix3(new Matrix3().setFromMatrix4(b.orientation).transpose());
+    return { ground: this.terrainSource.ground(b), material, upos: b.upos, rel: best.rel.clone(), orient: b.orientation, lonLeft: key ? this.manifest.maps[key]?.lonLeft ?? -180 : -180, sunBF, alt: bestAlt };
   }
 
   private detailBody: Body | null = null;

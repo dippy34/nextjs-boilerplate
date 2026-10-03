@@ -40,6 +40,11 @@ export class CameraRig {
     return this.goto !== null;
   }
 
+  /** current velocity (m/s, world axes; free flight only) */
+  get vel(): Vector3 {
+    return this.velocity;
+  }
+
   /** Kill the current velocity (docking, landing). */
   stop(): void {
     this.velocity.set(0, 0, 0);

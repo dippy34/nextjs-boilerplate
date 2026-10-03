@@ -89,11 +89,39 @@ export function atmosphereFor(b: Body, data: AtmosphereData): AtmosphereSpec | n
   }
 }
 
-interface Shell { body: Body; spec: AtmosphereSpec; mesh: Mesh; mat: ShaderMaterial }
+interface Shell { body: object; spec: AtmosphereSpec; mesh: Mesh; mat: ShaderMaterial }
+
+/** A world of another star with an atmosphere, as placed this frame (render/ExoPlanetLayer.ts). */
+export interface ExoAtmosphere {
+  key: object;
+  name: string;
+  radius: number;
+  spec: AtmosphereSpec;
+  /** centre relative to the camera (m) */
+  rel: Vector3;
+  /** body-fixed -> world rotation */
+  orient: Matrix4;
+  /** world direction and irradiance of the star, and its luminance-normalised colour */
+  sunDir: Vector3;
+  sunIrr: number;
+  sunColor: Vector3;
+}
+
+/**
+ * An Earth-like atmosphere for a generated temperate or ocean planet: N2 Rayleigh scattering at
+ * `pressureBar`, the scale height from its temperature and gravity (molecular weight 29), and a
+ * light Earth-like haze.
+ */
+export function earthLikeAtmosphere(pressureBar: number, tempK: number, gravity: number): AtmosphereSpec {
+  const H = (K_B * tempK) / (29 * AMU * gravity);
+  const n = ((pressureBar * 1e5) / (K_B * tempK)) / N_EARTH;
+  return { betaR: scale(BETA_R_EARTH, n), HR: H, betaMs: scale([3.996e-6, 3.996e-6, 3.996e-6], pressureBar), betaMe: scale([4.44e-6, 4.44e-6, 4.44e-6], pressureBar),
+    HM: 1200 * (H / 8500), g: [0.8, 0.8, 0.8], top: 12 * H, groundMix: 1, surfaceTransmittance: true };
+}
 
 export class AtmospheresLayer {
   readonly group = new Group();
-  private shells = new Map<Body, Shell>();
+  private shells = new Map<object, Shell>();
   private geo = new SphereGeometry(1, 96, 48);
   /** ray-march steps (fewer in VR) */
   steps = 16;
@@ -107,15 +135,19 @@ export class AtmospheresLayer {
   }
 
   private shell(b: Body): Shell | null {
-    let s = this.shells.get(b);
+    const s = this.shells.get(b);
     if (s) return s;
     const spec = atmosphereFor(b, this.data);
-    if (!spec) return null;
+    return spec ? this.makeShell(b, b.name, b.radii[0], spec) : null;
+  }
+
+  private makeShell(key: object, name: string, radius: number, spec: AtmosphereSpec): Shell {
+    let s: Shell;
     const mat = new ShaderMaterial({
       vertexShader: ATMO_VERT, fragmentShader: ATMO_FRAG,
       uniforms: {
         uO: { value: new Vector3() }, uToBody: { value: new Matrix3() }, uSun: { value: new Vector3() },
-        uRp: { value: b.radii[0] }, uRt: { value: b.radii[0] + spec.top },
+        uRp: { value: radius }, uRt: { value: radius + spec.top },
         uBetaR: { value: new Vector3(...spec.betaR) }, uHR: { value: spec.HR },
         uBetaMs: { value: new Vector3(...spec.betaMs) }, uBetaMe: { value: new Vector3(...spec.betaMe) }, uHM: { value: spec.HM },
         uG: { value: new Vector3(...spec.g) }, uSunIrr: { value: Math.PI }, uSunColor: { value: new Vector3(...this.sunColor) },
@@ -129,11 +161,45 @@ export class AtmospheresLayer {
     mesh.matrixAutoUpdate = false;
     mesh.frustumCulled = false;
     mesh.renderOrder = 20; // after the planets, rings and point sources it dims
-    mesh.name = `${b.name} atmosphere`;
+    mesh.name = `${name} atmosphere`;
     this.group.add(mesh);
-    s = { body: b, spec, mesh, mat };
-    this.shells.set(b, s);
+    s = { body: key, spec, mesh, mat };
+    this.shells.set(key, s);
     return s;
+  }
+
+  /** Atmospheres of planets of other stars (call after update(), which hides every shell first). */
+  updateExo(list: ExoAtmosphere[]): void {
+    for (const e of list) {
+      const s = this.shells.get(e.key) ?? this.makeShell(e.key, e.name, e.radius, e.spec);
+      const u = s.mat.uniforms;
+      u.uSteps.value = this.steps;
+      const toBody = new Matrix3().setFromMatrix4(e.orient).transpose();
+      u.uToBody.value.copy(toBody);
+      (u.uO.value as Vector3).copy(e.rel).negate().applyMatrix3(toBody);
+      (u.uSun.value as Vector3).copy(e.sunDir).applyMatrix3(toBody).normalize();
+      u.uSunIrr.value = e.sunIrr;
+      (u.uSunColor.value as Vector3).copy(e.sunColor);
+      const Rt = e.radius + s.spec.top;
+      const inside = (u.uO.value as Vector3).length() < Rt * 1.002;
+      if (s.mat.side !== (inside ? BackSide : FrontSide)) {
+        s.mat.side = inside ? BackSide : FrontSide;
+        s.mat.depthTest = !inside;
+        s.mat.needsUpdate = true;
+      }
+      s.mesh.matrix.copy(e.orient).scale(new Vector3(Rt, Rt, Rt)).setPosition(e.rel);
+      s.mesh.matrixWorldNeedsUpdate = true;
+      s.mesh.visible = true;
+    }
+    // planets left behind: drop their shells
+    const keep = new Set(list.map((e) => e.key));
+    for (const [k, s] of this.shells) {
+      if (s.mesh.name.endsWith('atmosphere') && !this.system.bodies.includes(k as Body) && !keep.has(k)) {
+        this.group.remove(s.mesh);
+        s.mat.dispose();
+        this.shells.delete(k);
+      }
+    }
   }
 
   /** Create every atmosphere shell now (for shader warm-up and so none is built mid-flight). */

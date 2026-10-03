@@ -54,6 +54,9 @@ await page.evaluate(() => { const a = window.app; a.select(a.findByName('Moon'))
 await frames(20);
 st = await page.evaluate(() => ({ ...window.app.game.cockpit.readout }));
 check('cockpit shows the target', st.target === 'Moon' && st.warp === 'ready' && st.distance.length > 0, `${st.target} ${st.distance} ${st.warp}`);
+st = await page.evaluate(() => { const h = window.app.game.hud; return { hud: h.group.visible, target: h.group.children[0].visible }; });
+check('canopy HUD brackets the target', st.hud && st.target, JSON.stringify(st));
+await page.screenshot({ path: path.join(outDir, 'g1b-hud.png') });
 await page.keyboard.press('KeyJ');
 await frames(4);
 st = await page.evaluate(() => ({ ap: window.app.rig.autopilot, warp: window.app.game.cockpit.readout.warp, fx: window.app.game.warpFx.lines.visible }));

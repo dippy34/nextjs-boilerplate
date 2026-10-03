@@ -9,6 +9,9 @@ ${PROJECT_PARS}
 uniform float uLumpy;     // irregular shape of small bodies (relative radius variation)
 uniform float uSeed;
 varying vec3 vNormalBF;   // body-fixed unit normal
+varying vec3 vTerrN;      // body-fixed normal of the landing terrain (render/TerrainPatch.ts)
+varying float vSun;       // terrain only: unshadowed fraction of the Sun
+varying vec3 vLocal;      // terrain only: body-fixed position relative to the patch origin (m)
 varying vec3 vPosView;    // camera-relative world position (m)
 varying vec2 vUv;
 float vh3(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
@@ -19,6 +22,9 @@ float vn3(vec3 p) {
 }
 void main() {
   vNormalBF = normalize(position);
+  vTerrN = vNormalBF;
+  vSun = 1.0;
+  vLocal = vec3(0.0);
   vUv = uv;
   vec3 pos = position;
   if (uLumpy > 0.0) {
@@ -63,6 +69,14 @@ uniform sampler2D uDetail;     // tiles of the map around the view (render/TileD
 uniform vec4 uDetailRect;      // map-UV window of uDetail: u0, v0, du, dv (u wraps)
 uniform float uDetailOn;
 uniform float uLite;           // 1 in VR: fewer crater layers
+uniform float uTerrain;        // 1 = drawing the landing terrain (render/TerrainPatch.ts)
+uniform float uHScale;         // terrain relief scale (fades in on descent)
+uniform vec3 uHoleDir;         // sphere only: body-fixed centre of the terrain patch
+uniform float uHoleCos;        // ... and the cosine of its angular radius (2 = no hole)
+// terrain only: fine crater lattices (cells of 400, 90, 20, 4.5 m) at the patch origin, split into
+// integer and fractional cells so float32 keeps metre precision far from the body's centre
+uniform vec3 uOI0; uniform vec3 uOF0; uniform vec3 uOI1; uniform vec3 uOF1;
+uniform vec3 uOI2; uniform vec3 uOF2; uniform vec3 uOI3; uniform vec3 uOF3;
 uniform vec3 uSunDir;         // world-space unit vector body -> Sun
 uniform float uSunIrr;        // solar irradiance at the body (PI at 1 AU)
 uniform vec3 uSunColor;
@@ -81,6 +95,9 @@ uniform float uHR;
 uniform vec3 uBetaMe;
 uniform float uHM;
 varying vec3 vNormalBF;
+varying vec3 vTerrN;
+varying float vSun;
+varying vec3 vLocal;
 varying vec3 vPosView;
 varying vec2 vUv;
 ${CHAPMAN}
@@ -123,6 +140,28 @@ float craters(vec3 p, float freq, float seed, float density, out float fresh) {
   }
   return h;
 }
+// The same craters on a lattice given as integer cell ci plus a small offset r (cell units);
+// returns height in cell units.
+float cratersAt(vec3 ci, vec3 r, float density, out float fresh) {
+  vec3 i = ci + floor(r), f = fract(r);
+  vec3 b = step(0.5, f) - 1.0;
+  float h = 0.0;
+  fresh = 0.0;
+  for (int x = 0; x <= 1; x++) for (int y = 0; y <= 1; y++) for (int z = 0; z <= 1; z++) {
+    vec3 g = b + vec3(float(x), float(y), float(z));
+    vec3 c = i + g;
+    if (bh3(c + 11.0) > density) continue;
+    vec3 o = bh33(mod(c, 4096.0)) * 0.6 + 0.2;
+    float rc = 0.14 + 0.22 * bh3(c + 5.0);
+    float d = length(g + o - f) / rc;
+    if (d > 1.35) continue;
+    float bowl = d < 1.0 ? (d * d - 1.0) * 0.55 : 0.0;
+    float rim = 0.22 * exp(-pow((d - 1.0) / 0.22, 2.0));
+    h += (bowl + rim) * rc;
+    fresh = max(fresh, bh3(c + 23.0) * (1.0 - smoothstep(0.7, 1.5, d)));
+  }
+  return h;
+}
 // Normal of a surface displaced by height h (metres) along n, from screen-space derivatives
 // (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU").
 vec3 bumpNormal(vec3 pos, vec3 n, float h) {
@@ -136,6 +175,8 @@ vec3 bumpNormal(vec3 pos, vec3 n, float h) {
 
 void main() {
   vec3 nB = normalize(vNormalBF);
+  // the terrain patch replaces the sphere around the explorer
+  if (uTerrain < 0.5 && dot(nB, uHoleDir) > uHoleCos) discard;
   vec3 nW = normalize(uBodyToWorld * nB);
   vec3 V = normalize(-vPosView);
   float mu0g = dot(nW, uSunDir);   // geometric (smooth sphere)
@@ -152,6 +193,8 @@ void main() {
     nP = normalize(uBodyToWorld * pB);
     if (uWater > 0.5) water = smoothstep(0.35, 0.65, rel.b);
   }
+  // landing terrain: the normal of the real relief, blended in as the relief grows
+  if (uTerrain > 0.5) nP = normalize(mix(nP, uBodyToWorld * normalize(vTerrN), uHScale));
   // irregular small bodies: the true (displaced) surface normal
   if (uLumpy > 0.0) {
     vec3 ng = normalize(cross(dFdx(vPosView), dFdy(vPosView)));
@@ -181,8 +224,26 @@ void main() {
     }
   }
   // relief fades towards the limb, where it would only alias into a ragged silhouette
-  float limbFade = smoothstep(0.05, 0.4, dot(nP, V));
-  if (hProc != 0.0) nP = bumpNormal(vPosView, nP, hProc * uRadiusM * (uProc > 0.5 ? 1.0 : 0.6) * limbFade);
+  // (the terrain is seen at grazing angles all the time: only the very edge-on parts fade)
+  float limbFade = uTerrain > 0.5 ? smoothstep(0.0, 0.12, dot(nP, V)) : smoothstep(0.05, 0.4, dot(nP, V));
+  float hBump = hProc * uRadiusM * (uProc > 0.5 ? 1.0 : 0.6);
+  if (uTerrain > 0.5 && uCraters > 0.05) {
+    // landing terrain: small craters below the mesh's resolution, each scale faded in once its
+    // craters span several pixels
+    float mpp = length(fwidth(vPosView));
+    float fr, frT = 0.0;
+    float d = 0.45 * uCraters;
+    float w0 = smoothstep(400.0 / 12.0, 400.0 / 30.0, mpp);
+    if (w0 > 0.0) { hBump += w0 * 400.0 * 0.5 * cratersAt(uOI0, uOF0 + vLocal / 400.0, d, fr); frT = max(frT, fr * w0); }
+    float w1 = smoothstep(90.0 / 12.0, 90.0 / 30.0, mpp);
+    if (w1 > 0.0) { hBump += w1 * 90.0 * 0.5 * cratersAt(uOI1, uOF1 + vLocal / 90.0, d, fr); frT = max(frT, fr * w1); }
+    float w2 = smoothstep(20.0 / 12.0, 20.0 / 30.0, mpp);
+    if (w2 > 0.0) { hBump += w2 * 20.0 * 0.5 * cratersAt(uOI2, uOF2 + vLocal / 20.0, d, fr); frT = max(frT, fr * w2); }
+    float w3 = uLite > 0.5 ? 0.0 : smoothstep(4.5 / 12.0, 4.5 / 30.0, mpp);
+    if (w3 > 0.0) { hBump += w3 * 4.5 * 0.5 * cratersAt(uOI3, uOF3 + vLocal / 4.5, d, fr); frT = max(frT, fr * w3); }
+    freshAll = max(freshAll, frT * 0.6 * uHScale);
+  }
+  if (hBump != 0.0) nP = bumpNormal(vPosView, nP, hBump * limbFade);
   float mu0 = dot(nP, uSunDir);
   float mu = max(dot(nP, V), 0.0);
 
@@ -211,6 +272,8 @@ void main() {
       if (uIcy > 0.5) albedo *= 0.92 + 0.16 * smoothstep(0.48, 0.5, abs(bn3(nB * 6.0 + uSeed) - 0.5) + 0.48); // cracks
     }
   }
+  // fresh, bright ejecta around the terrain's small craters
+  if (uTerrain > 0.5 && uProc < 0.5) albedo *= 1.0 + freshAll * 0.35;
   if (uBands > 0.5) {
     float lat = asin(clamp(vNormalBF.z, -1.0, 1.0));
     float b = noise1(lat * 18.0 + uSeed) * 0.6 + noise1(lat * 45.0 + uSeed * 1.7) * 0.4;
@@ -232,6 +295,7 @@ void main() {
     light = max(mix(mu0, mu0g, cloud), 0.0);                // Lambert (clouds hide the relief)
   }
   light *= dayside;
+  if (uTerrain > 0.5) light *= mix(1.0, vSun, uHScale);   // shadows of the relief
 
   // Shadow cast by rings onto the planet
   if (uHasRings > 0.5 && mu0g > 0.0) {

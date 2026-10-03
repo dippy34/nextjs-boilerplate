@@ -122,6 +122,11 @@ carry restrictions on commercial use — check the caption of each PIA image bef
   `src/render/Atmospheres.ts`**, not downloaded data.
 * Sun-path optical depth: Chapman grazing-incidence function in the closed form popularised by
   C. Schüler (GPU Pro 3, 2012).
+* Temperate and ocean planets of other stars (generated ones, and catalogued ones, whose surfaces
+  are unknown and drawn with a generated look) get an Earth-like atmosphere: the same N2 Rayleigh
+  coefficients scaled to an assumed surface pressure (0.4–2.6 bar, varied per planet), a scale height
+  from the planet's equilibrium temperature and gravity (mean molecular weight 29), and Earth-like
+  haze. Plausible numbers, not measurements.
 
 ## Stars up close (`src/render/StarLook.ts`)
 
@@ -207,6 +212,22 @@ France.* Each galaxy is drawn procedurally (`src/render/GalaxiesLayer.ts`): a di
 bar, dust and star-forming knots chosen from its type, plus a bulge; ellipticals and dwarfs as a
 soft spheroid. The inclination follows from the catalogued axis ratio. No galaxy images are used.
 
+## Nebulae and star clusters (`public/data/deepsky.json`, `pipeline/build_deepsky.py`)
+
+| Dataset | Use | Licence | Files |
+|---|---|---|---|
+| **SIMBAD** (CDS, Strasbourg), via TAP | Positions, sizes, types and distances (median of `mesDistance` measurements, or parallax) of 41 nebulae and star clusters | Free with acknowledgement (above) | `public/data/deepsky.json` |
+| **Sharpless (1959)** catalogue of H II regions, *ApJS* 4, 257 — VizieR VII/20 | Diameters of the Lagoon, Eagle, Omega, Rosette, North America, California and Heart nebulae (SIMBAD lists none) | Free with acknowledgement (VizieR) | merged into `deepsky.json` |
+| **Rodgers, Campbell & Whiteoak (1960)** H-alpha emission regions, *MNRAS* 121, 103 — VizieR VII/216 | Size of the Carina Nebula (RCW 53) | Free with acknowledgement (VizieR) | merged |
+
+Two published values fill gaps: the distance of the Cygnus Loop (735 pc; Fesen et al. 2018, *MNRAS*
+481, 1786) and the tidal radius of the Hyades (10 pc; Perryman et al. 1998, *A&A* 331, 81). Some
+nebulae take the distance of their ionising cluster (Lagoon: NGC 6530), of their host galaxy
+(Tarantula: the LMC) or of their ionising star (California: ξ Per), all from SIMBAD. Nebulae are drawn
+procedurally (`src/render/DeepSkyLayer.ts`); globular-cluster stars are generated (Plummer-like
+density, an old population's luminosity mix); open clusters are shown with their real catalogue stars.
+*This research has made use of the VizieR catalogue access tool, CDS, Strasbourg, France.*
+
 ## Close-up map tiles (`public/data/tiles/`, `pipeline/build_tiles.py`)
 
 Tile pyramids (512-pixel JPEG tiles, up to 16384 x 8192) cut from the same full-resolution sources
@@ -214,6 +235,24 @@ as the base maps listed above, plus the NASA SVS CGI Moon Kit LROC WAC colour mo
 (`lroc_color_poles_16k.tif`, <https://svs.gsfc.nasa.gov/4720>, public domain). Each pyramid is
 aligned to its base map by correlation; bodies whose source is no sharper than the 4k base map
 (Titan, Iapetus, Phobos) or that failed the alignment check (Pluto, Charon) have none.
+
+## Landing terrain (`public/data/terrain/`, `pipeline/build_terrain.py`, `src/universe/Terrain.ts`)
+
+Real 3D ground is built under the explorer near solid worlds. Large-scale heights are real
+elevation models, resampled to 2048 x 1024 (about 5-10 km per sample) and stored as 16-bit
+heights in PNG files; all are public domain (U.S. Government work):
+
+- **Moon**: LRO LOLA gridded elevation, LDEM 16 ppd, NASA SVS CGI Moon Kit
+  (`ldem_16_uint.tif`, <https://svs.gsfc.nasa.gov/4720>).
+- **Mars**: MGS MOLA global DEM 463 m (NASA/JPL/GSFC), via USGS Astrogeology
+  (`Mars_MGS_MOLA_DEM_mosaic_global_463m.tif`).
+- **Mercury**: MESSENGER USGS global DEM 665 m v2 (NASA/JHUAPL/CIW), via USGS Astrogeology
+  (`Mercury_Messenger_USGS_DEM_Global_665m_v2.tif`).
+
+Relief finer than these models, and all relief on other solid moons and dwarf planets, is
+generated: fractal hills and crater fields (bowls with raised rims; depth-to-diameter 0.16 for small
+craters and 0.09 for large ones, somewhat shallower than fresh lunar craters, about 0.2 for simple
+craters in Pike 1977, as most craters are worn). It is plausible, not mapped.
 
 ## The Milky Way model and procedural stars (`src/universe/Galaxy.ts`, `ProceduralStars.ts`)
 

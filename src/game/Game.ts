@@ -10,7 +10,12 @@ import { Missions } from './Missions';
 import { LIGHT, ShipModel } from './ShipModel';
 import { Traffic, TrafficShip } from './Traffic';
 import { WarpFx } from './WarpFx';
+import { HudMarkers } from './HudMarkers';
 import { Station } from './Station';
+import { ExoPlanet, type PlanetType } from '../universe/Planets';
+
+/** generated planet types with a surface to land on */
+const SOLID_TYPES = new Set<PlanetType>(['lava', 'hot', 'desert', 'terran', 'ocean', 'ice']);
 
 export type ViewMode = 'off' | 'cockpit' | 'chase';
 
@@ -33,6 +38,7 @@ export class Game {
   readonly cockpit = new Cockpit();
   readonly ship = new ShipModel();
   readonly warpFx = new WarpFx();
+  readonly hud = new HudMarkers();
   readonly traffic = new Traffic();
   readonly audio = new ShipAudio();
   readonly missions: Missions;
@@ -44,13 +50,13 @@ export class Game {
   /** station we are docked at */
   docked: Station | null = null;
   /** world we have touched down on */
-  landed: Body | null = null;
+  landed: Body | ExoPlanet | null = null;
   /** seconds before the docking computer may engage again (after undocking) */
   private dockCooldown = 0;
 
   constructor(private app: App) {
     // children of the camera dolly: they move with the explorer; in VR the head moves inside
-    app.renderer.rig.add(this.cockpit.group, this.ship.group, this.warpFx.lines);
+    app.renderer.rig.add(this.cockpit.group, this.ship.group, this.warpFx.lines, this.hud.group);
     this.ship.group.position.set(0, -3.4, -22);
     this.ship.group.visible = false;
     app.renderer.scene.add(this.traffic.group);
@@ -75,6 +81,7 @@ export class Game {
     if (m !== 'cockpit' && this.mode === 'cockpit') this.app.rig.fov = this.fovBefore;
     this.mode = m;
     this.cockpit.group.visible = m === 'cockpit';
+    this.hud.group.visible = m === 'cockpit';
     this.ship.group.visible = m === 'chase';
     this.app.rig.inertia = m === 'off' ? 0 : 1.2;
     if (m === 'off') {
@@ -137,6 +144,24 @@ export class Game {
       this.fillReadout();
     }
     this.cockpit.update(dt);
+    if (this.mode === 'cockpit') this.updateHud();
+  }
+
+  /** Canopy markers: target bracket, flight-path marker. */
+  private updateHud(): void {
+    const app = this.app, rig = app.rig;
+    const inv = rig.quat.clone().invert();
+    const sel = app.selection;
+    let tdir: Vector3 | null = null, text = '';
+    if (sel && !this.docked) {
+      const rel = sel.upos.sub(rig.upos, new Vector3());
+      const d = rel.length();
+      tdir = rel.normalize().applyQuaternion(inv);
+      text = `${sel.name}|${formatDistance(Math.max(0, d - sel.radius))}`;
+    }
+    const v = rig.vel;
+    const vdir = v.lengthSq() > 1e-6 && rig.speed > 0.5 ? v.clone().normalize().applyQuaternion(inv) : null;
+    this.hud.update(tdir, text, vdir);
   }
 
   /** Where a docked ship sits: 14 m in front of the port, on the hub axis. */
@@ -215,7 +240,8 @@ export class Game {
       if (a !== this.landed || rig.altitude > 40) { this.landed = null; app.hud.toast('Lift-off'); }
       return;
     }
-    if (!(a instanceof Body) || a.kind === 'star' || a.isGasGiant || this.docked) return;
+    const solid = (a instanceof Body && a.kind !== 'star' && !a.isGasGiant) || (a instanceof ExoPlanet && SOLID_TYPES.has(a.spec.type));
+    if (!solid || this.docked) return;
     // (flight speed already scales with altitude, so coming down to 10 m is a gentle touchdown)
     if (rig.altitude < 10 && !rig.autopilot) {
       this.landed = a;

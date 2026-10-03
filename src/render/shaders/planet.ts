@@ -32,6 +32,12 @@ uniform float uExposure;
 uniform float uTime;
 uniform mat3 uBodyToWorld;
 uniform float uLite;        // 1 in VR: fewer noise octaves, no domain warp
+uniform float uTerrain;     // 1 = drawing the landing terrain (render/TerrainPatch.ts)
+uniform float uHScale;      // terrain relief scale (fades in on descent)
+uniform vec3 uHoleDir;      // sphere only: body-fixed centre of the terrain patch
+uniform float uHoleCos;     // ... and the cosine of its angular radius (2 = no hole)
+varying vec3 vTerrN;
+varying float vSun;
 varying vec3 vNormalBF;
 varying vec3 vPosView;
 varying vec2 vUv;
@@ -52,6 +58,7 @@ float terrain(vec3 n) {
 
 void main() {
   vec3 nB = normalize(vNormalBF);
+  if (uTerrain < 0.5 && dot(nB, uHoleDir) > uHoleCos) discard;
   vec3 nW = normalize(uBodyToWorld * nB);
   vec3 V = normalize(-vPosView);
   float mu0 = dot(nW, uSunDir);
@@ -109,6 +116,11 @@ void main() {
     albedo = mix(albedo, vec3(0.95), cloud);
   }
   float light = max(mu0, 0.0);
+  if (uTerrain > 0.5) {
+    // landing terrain: the relief's own normal and shadows, inside the geometric day side
+    vec3 nT = normalize(mix(nW, uBodyToWorld * normalize(vTerrN), uHScale));
+    light = max(dot(nT, uSunDir), 0.0) * smoothstep(-0.04, 0.06, mu0) * mix(1.0, vSun, uHScale);
+  }
   vec3 sunL = uSunColor * (uSunIrr / 3.14159265);
   vec3 radiance = albedo * sunL * light;
   // sea glint

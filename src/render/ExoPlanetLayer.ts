@@ -1,5 +1,5 @@
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, DynamicDrawUsage, Group, Line, LineBasicMaterial, Matrix3,
+  AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, DynamicDrawUsage, Group, Line, LineBasicMaterial, Matrix3, Matrix4,
   Mesh, Points, Quaternion, RingGeometry, ShaderMaterial, SphereGeometry, Vector3,
 } from 'three';
 import { blackbodyRGB, luminance, magToIrradiance } from '../astro/photometry';
@@ -12,6 +12,9 @@ import { EXO_FRAG } from './shaders/planet';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import { ExoPlanet as ExoPlanetClass, PlanetarySystem as SystemClass } from '../universe/Planets';
 import { CatalogStar } from '../universe/Stars';
+import { ExoGround, ROCKY_TYPES } from '../universe/ExoTerrain';
+import { earthLikeAtmosphere, type AtmosphereSpec, type ExoAtmosphere } from './Atmospheres';
+import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
 
 const TYPE_ID: Record<PlanetType, number> = { lava: 0, hot: 1, desert: 2, terran: 3, ocean: 4, ice: 5, subneptune: 6, icegiant: 7, giant: 8, hotgiant: 9 };
 type V3 = [number, number, number];
@@ -92,7 +95,9 @@ ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
-interface PlanetDraw { mesh: Mesh; ring: Mesh | null; orbit: Line }
+interface PlanetDraw { mesh: Mesh; ring: Mesh | null; orbit: Line; orient: Matrix4; ground: ExoGround | null; air: AtmosphereSpec | null }
+
+const G = 6.674e-11;
 
 export interface ExoView { planet: ExoPlanet; rel: Vector3; dist: number; pixelRadius: number; radiance: number }
 
@@ -134,6 +139,7 @@ export class ExoPlanetLayer {
       uSunDir: { value: new Vector3(1, 0, 0) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI },
       uExposure: this.exposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
       uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK, uLite: LITE.uLite,
+      uTerrain: { value: 0 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
     };
     for (const [k, v] of Object.entries(pal)) u[k] = { value: Array.isArray(v) ? new Vector3(...v) : v };
     const mesh = new Mesh(this.sphere, new ShaderMaterial({ name: 'exoplanet', vertexShader: BODY_VERT, fragmentShader: EXO_FRAG, uniforms: u }));
@@ -163,7 +169,18 @@ export class ExoPlanetLayer {
     orbit.frustumCulled = false;
     orbit.renderOrder = 5;
     this.group.add(orbit);
-    d = { mesh, ring, orbit };
+    const type = TYPE_ID[p.spec.type];
+    const ground = ROCKY_TYPES.has(type) ? new ExoGround(p, type, p.spec.seed % 97, Number(pal.uSeaLevel ?? 0)) : null;
+    // temperate and ocean worlds get an Earth-like atmosphere (pressure varies from planet to planet)
+    let air: AtmosphereSpec | null = null;
+    if (type === 3 || type === 4) {
+      const ra = rng(hashKey(p.key + '/air'));
+      const g = (G * p.spec.massKg) / (p.radius * p.radius);
+      air = earthLikeAtmosphere(0.4 + 2.2 * ra(), Math.min(400, Math.max(180, p.spec.teqK)), Math.max(2, g));
+      // the shell draws the limb glow: keep only a little of the surface shader's own haze
+      u.uAtmo.value = Number(u.uAtmo.value) * 0.3;
+    }
+    d = { mesh, ring, orbit, orient: new Matrix4(), ground, air };
     this.draws.set(p, d);
     return d;
   }
@@ -182,6 +199,36 @@ export class ExoPlanetLayer {
       for (const o of [this.dummy.mesh, this.dummy.ring, this.dummy.orbit]) if (o) o.visible = false;
     }
     return [this.dummy.mesh, ...(this.dummy.ring ? [this.dummy.ring] : [])];
+  }
+
+  /** Atmospheres of the resolved planets that have one, placed for this frame. */
+  atmospheres(): ExoAtmosphere[] {
+    const out: ExoAtmosphere[] = [];
+    for (const v of this.views) {
+      const d = this.draws.get(v.planet);
+      if (!d?.air || !d.mesh.visible || v.pixelRadius < 2.5) continue;
+      const u = (d.mesh.material as ShaderMaterial).uniforms;
+      out.push({ key: v.planet, name: v.planet.name, radius: v.planet.radius, spec: d.air, rel: v.rel, orient: d.orient,
+        sunDir: u.uSunDir.value as Vector3, sunIrr: u.uSunIrr.value as number, sunColor: u.uSunColor.value as Vector3 });
+    }
+    return out;
+  }
+
+  /** The nearest generated rocky planet that could have landing terrain, if one is close. */
+  terrainCandidate(): TerrainCandidate | null {
+    let best: ExoView | null = null;
+    for (const v of this.views) {
+      const d = this.draws.get(v.planet);
+      if (!d?.ground || !d.mesh.visible) continue;
+      const alt = v.dist - v.planet.radius;
+      if (alt < TerrainPatch.threshold(v.planet) * 1.2 && (!best || alt < best.dist - best.planet.radius)) best = v;
+    }
+    if (!best) return null;
+    const d = this.draws.get(best.planet)!;
+    const material = d.mesh.material as ShaderMaterial;
+    d.ground!.lite = LITE.uLite.value > 0.5;
+    const sunBF = (material.uniforms.uSunDir.value as Vector3).clone().applyMatrix3(new Matrix3().setFromMatrix4(d.orient).transpose());
+    return { ground: d.ground!, material, upos: best.planet.upos, rel: best.rel.clone(), orient: d.orient, lonLeft: -180, sunBF, alt: best.dist - best.planet.radius };
   }
 
   /** Release drawables of planets no longer in `systems`. */
@@ -230,6 +277,7 @@ export class ExoPlanetLayer {
           const basis = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), sys.n);
           q.multiply(basis);
           d.mesh.matrix.compose(rel, q, new Vector3(p.radius, p.radius, p.radius));
+          d.orient.makeRotationFromQuaternion(q);
           d.mesh.matrixWorldNeedsUpdate = true;
           const u = (d.mesh.material as ShaderMaterial).uniforms;
           (u.uSunDir.value as Vector3).copy(toStar).divideScalar(ds);

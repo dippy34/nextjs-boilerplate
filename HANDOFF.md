@@ -37,19 +37,46 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   deterministic, no catalogue duplicates), generated in `src/workers/stars.worker.ts`, drawn by
   `src/render/ProceduralStarLayer.ts`. "Milky Way" destination: `src/universe/MilkyWay.ts`.
 
+* Overnight session (2026-10-03), all live:
+  - Unique looks: per-star surfaces (`src/render/StarLook.ts`, `StarCorona.ts`), per-hole disks and
+    jets (`Jets.ts`), procedural surfaces/lumpy shapes for map-less bodies, 4K moon maps.
+  - GPU crash fix: point sprites of very distant stars overflowed the clipper (`POINT_CLIP` in
+    `shaders/xr.ts` rescales point clip coordinates; meshes at Mpc use a per-object `uClipScale`).
+  - Exoplanets: `src/app/Systems.ts` (archive <-> catalogue matching, claims), `src/universe/Planets.ts`
+    (generator + Kepler systems), `src/render/ExoPlanetLayer.ts`, `shaders/planet.ts`.
+  - Close-up tiles: `pipeline/build_tiles.py` -> `public/data/tiles/` (16k pyramids, 15 bodies),
+    runtime `src/render/TileDetail.ts` (detail atlas around the view, bound by `BodiesLayer.updateDetail`).
+  - Spacecraft (`pipeline/build_spacecraft.py`, `src/universe/Spacecraft.ts`, `src/render/SpacecraftLayer.ts`),
+    galaxies (`build_galaxies.py`, `src/universe/Galaxies.ts`, `src/render/GalaxiesLayer.ts`), nebulae and
+    clusters (`build_deepsky.py`, `src/universe/DeepSky.ts`, `src/render/DeepSkyLayer.ts`).
+  - Game mode (`src/game/`): `Game.ts` (modes, warp, docking, landing, light), `Cockpit.ts`, `ShipModel.ts`
+    (display-referred `litMaterial`), `WarpFx.ts`, `Traffic.ts` + `Station.ts`, `Missions.ts`, `Audio.ts`
+    (Web Audio synthesis). CameraRig got `inertia`, `braking`, `thrust`, `stop()`, `gotoRemaining`.
+  - VR quality tier: `LITE.uLite` (1 while presenting) trims the heavy procedural shaders.
+  - Landing terrain: `pipeline/build_terrain.py` -> `public/data/terrain/` (Moon/Mars/Mercury heights
+    as 16-bit-in-RGB PNG), `src/universe/Terrain.ts` (heights: elevation model + generated hills and
+    craters), `src/render/TerrainPatch.ts` (polar grid under the explorer, built a few rings per
+    frame, drawn with the body's material; the sphere gets a hole via `uHoleDir`/`uHoleCos`).
+    `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`.
+  - Cockpit HUD (`src/game/HudMarkers.ts`): target bracket, flight-path marker, boresight.
+
 ## Next
 
-1. Planetary systems everywhere: NASA Exoplanet Archive (pscomppars) for real systems, plus a
-   deterministic generator per star (procedural and catalogue stars); GPU-generated planet surfaces,
-   atmospheres, rings; menu/travel integration; procedural stars become visitable systems.
-2. Nebulae and star clusters (OpenNGC), other galaxies; a sharper galaxy impostor from outside.
-3. Quest performance pass on a real headset (black hole steps, glow size, star counts).
+1. Quest performance pass on a real headset (cockpit, planet/galaxy/nebula shaders, tile atlas size,
+   black hole steps).
+2. Terrain: stream sharper elevation tiles (the full LOLA/MOLA resolution), shadows, Earth;
+   volumetric nebulae up close, OpenNGC for more deep-sky objects, a sharper galaxy impostor from outside.
+3. Unity port planning (the data pipeline outputs are engine-agnostic JSON/JPEG).
 
 ## Checks before every deploy
 
 `npm run typecheck`, `npm test`, then with `npx vite preview --port 4173` running:
 `node scripts/interact.mjs http://127.0.0.1:4173/ out`, `node scripts/verify.mjs ...`,
-`node scripts/vr.mjs http://127.0.0.1:4173/ out` (IWER Quest 3 emulator; 26 checks). On a machine
+`node scripts/vr.mjs http://127.0.0.1:4173/ out` (IWER Quest 3 emulator; 26 checks),
+`node scripts/game.mjs http://127.0.0.1:4173/ out` (game mode; 16 checks),
+`node scripts/terrain.mjs http://127.0.0.1:4173/ out` (landing terrain). Run them one at a time
+(parallel runs starve the software renderer and screenshots time out). `SKIP_BUILD=1 bash
+scripts/deploy-pages.sh` publishes the exact build that was verified. On a machine
 with a real GPU these run far faster than in the cloud container (software rendering, ~1 fps).
 
 ## Licences to keep in mind

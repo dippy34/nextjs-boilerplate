@@ -6,12 +6,28 @@ import { Galaxy } from '../universe/Galaxies';
 import { ExoPlanet } from '../universe/Planets';
 import { Spacecraft } from '../universe/Spacecraft';
 import { CatalogStar } from '../universe/Stars';
+import { cameraBodyFixed } from '../render/TerrainPatch';
 
 export interface Mission { id: string; title: string; detail: string; done: boolean }
 
 interface Def { id: string; title: string; detail: string; check: (app: App, near: (o: SpaceObject | undefined | null, k: number) => boolean) => boolean }
 
 const KEY = 'space-explorer-game';
+
+/** Where the explorer is over a body: latitude and longitude (degrees, planetocentric) and altitude (m). */
+function over(app: App, name: string): { lat: number; lon: number; alt: number } | null {
+  const b = app.findByName(name);
+  if (!(b instanceof Body)) return null;
+  const bf = cameraBodyFixed(b.upos.sub(app.rig.upos, new Vector3()), b.orientation);
+  const r = bf.length();
+  return { lat: (Math.asin(bf.z / r) * 180) / Math.PI, lon: (Math.atan2(bf.y, bf.x) * 180) / Math.PI, alt: r - b.radius };
+}
+/** great-circle distance (degrees) between two latitude/longitude points */
+function arc(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const r = Math.PI / 180;
+  const c = Math.sin(lat1 * r) * Math.sin(lat2 * r) + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lon1 - lon2) * r);
+  return Math.acos(Math.max(-1, Math.min(1, c))) / r;
+}
 
 const DEFS: Def[] = [
   { id: 'moon', title: 'Fly to the Moon', detail: 'Get within 4 Moon radii', check: (a, near) => near(a.findByName('Moon'), 4) },
@@ -26,6 +42,14 @@ const DEFS: Def[] = [
   { id: 'andromeda', title: 'Visit Andromeda', detail: 'Within 3 of its radii', check: (a, near) => near(a.findByName('Andromeda Galaxy'), 3) },
   { id: 'dock', title: 'Dock at a space station', detail: 'Ship mode: fly slowly into a station docking port', check: (a) => !!a.game?.docked },
   { id: 'land', title: 'Land on another world', detail: 'Ship mode: come down slowly onto any solid surface', check: (a) => !!a.game?.landed },
+  { id: 'olympus', title: 'Fly over Olympus Mons', detail: 'Below 40 km over the tallest volcano known (Mars, 18.7° N 226° E)', check: (a) => {
+    const o = over(a, 'Mars');
+    return !!o && o.alt < 40e3 && arc(o.lat, o.lon, 18.65, -133.8) < 5;
+  } },
+  { id: 'southpole', title: "Land at the Moon's south pole", detail: 'Ship mode: touch down south of 80° S, where Artemis astronauts are headed', check: (a) => {
+    const o = over(a, 'Moon');
+    return !!o && a.game?.landed?.name === 'Moon' && o.lat < -80;
+  } },
   { id: 'stars', title: 'Visit five stars', detail: 'Come close to five different stars', check: () => false },
   { id: 'log', title: 'Explorer', detail: 'Log 25 discoveries', check: () => false },
 ];

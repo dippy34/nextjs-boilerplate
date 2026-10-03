@@ -1,10 +1,11 @@
-import { Quaternion, Vector3 } from 'three';
+import { Quaternion, type ShaderMaterial, Vector3 } from 'three';
 import { blackbodyRGB, irradianceToMag, luminance, magToIrradiance, sunIrradianceAt } from '../astro/photometry';
 import { formatUtc, SimClock, utcToTdb, dateToJdUtc } from '../core/time';
 import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/units';
 import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
+import { TerrainPatch } from '../render/TerrainPatch';
 import { ExoPlanetLayer, type ExoView } from '../render/ExoPlanetLayer';
 import { GalaxyGlow } from '../render/GalaxyLayer';
 import { JetsLayer } from '../render/Jets';
@@ -100,6 +101,8 @@ export class App {
   craft!: SpacecraftLayer;
   /** close-up map tiles for the body being approached */
   tiles!: TileDetail;
+  /** real 3D ground under the explorer near solid worlds */
+  readonly terrain = new TerrainPatch();
   /** systems drawn this frame: those of the stars around the explorer, plus a selected/targeted one */
   private nearSystems: PlanetarySystem[] = [];
   activeSystems: PlanetarySystem[] = [];
@@ -196,7 +199,7 @@ export class App {
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.jets.group, app.procStars.group, app.exo.group, app.terrain.group, app.craft.group, app.galaxies.group, app.deepSky.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
@@ -396,7 +399,10 @@ export class App {
    * is compiled while presenting.
    */
   private warmUp(): void {
-    const objs = [...this.bodies.warmupObjects(), ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...this.exo.warmupObjects(), ...this.craft.warmupObjects(), ...this.game.warmupObjects()];
+    const bodyObjs = this.bodies.warmupObjects(), exoObjs = this.exo.warmupObjects();
+    // the landing terrain's shader for both kinds of surface material
+    const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
+    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
@@ -639,14 +645,18 @@ export class App {
   private computeAltitude(): number {
     let alt = Infinity;
     const rel = new Vector3();
+    // above the landing terrain, the height of the ground below
+    const tb = this.terrain.owner;
+    const below = this.terrain.below(this.rig.upos);
+    if (below) alt = below.dist - below.ground;
     for (const b of this.system.bodies) {
-      if (!b.valid) continue;
+      if (!b.valid || b === tb) continue;
       const d = b.upos.sub(this.rig.upos, rel).length() - b.radius;
       if (d < alt) alt = d;
     }
     if (this.selection instanceof Comet) alt = Math.min(alt, this.selection.upos.sub(this.rig.upos, rel).length() - this.selection.radius);
     alt = Math.min(alt, this.nearestStarDist);
-    for (const ev of this.exo.views) alt = Math.min(alt, ev.dist - ev.planet.radius);
+    for (const ev of this.exo.views) if (ev.planet !== tb) alt = Math.min(alt, ev.dist - ev.planet.radius);
     for (const cv of this.craft.views) alt = Math.min(alt, cv.dist - cv.craft.radius);
     for (const st of this.game.traffic.stations) alt = Math.min(alt, st.upos.sub(this.rig.upos, rel).length() - st.radius * 0.5);
     for (const h of this.blackHoles) {
@@ -1157,11 +1167,11 @@ export class App {
       const t = o.rel.dot(rel) / dist;
       if (t <= 0 || t > dist) continue;
       const d2 = o.rel.lengthSq() - t * t;
-      if (d2 < o.body.radius * o.body.radius * 0.995) return true;
+      if (d2 < o.radius * o.radius * 0.995) return true;
     }
     return false;
   }
-  private occluders: { body: Body; rel: Vector3; dist: number }[] = [];
+  private occluders: { body: object; rel: Vector3; dist: number; radius: number }[] = [];
 
   /** Black holes worth a label/pick: near ones, ones being drawn, and the selection. */
   private labelledHoles(): { bh: BlackHole; rel: Vector3; shadowPx: number }[] {
@@ -1176,6 +1186,14 @@ export class App {
   }
 
   /** Never let the camera reach an event horizon. */
+  /** Never below the landing terrain: an eye height above the ground. */
+  private keepAboveGround(): void {
+    const below = this.terrain.below(this.rig.upos);
+    if (!below || below.dist >= below.ground + 1.6) return;
+    const out = this.rig.upos.sub(below.centre, new Vector3()).normalize();
+    this.rig.upos.addVec(out, below.ground + 1.6 - below.dist);
+  }
+
   private keepOutsideHorizons(): void {
     const rel = new Vector3();
     for (const h of this.blackHoles) {
@@ -1190,7 +1208,17 @@ export class App {
     const out: LabelCandidate[] = [];
     this.occluders = [];
     for (const v of this.bodies.views.values()) {
-      if (v.resolved && v.pixelRadius > 2) this.occluders.push({ body: v.body, rel: v.rel, dist: v.dist });
+      if (v.resolved && v.pixelRadius > 2) this.occluders.push({ body: v.body, rel: v.rel, dist: v.dist, radius: v.body.radius });
+    }
+    // on the landing terrain: the horizon is that of the ground below (a sphere through it, a little
+    // lower so labels just above the horizon stay), and planets of other stars occlude too
+    const below = this.terrain.below(this.rig.upos);
+    if (below) {
+      const owner = this.terrain.owner;
+      const oc = this.occluders.find((o) => o.body === owner);
+      const r = Math.min(below.ground, below.dist) - Math.max(2, (below.dist - below.ground) * 0.02);
+      if (oc) oc.radius = r;
+      else this.occluders.push({ body: owner!, rel: below.centre.sub(this.rig.upos, new Vector3()), dist: below.dist, radius: r });
     }
     const mLim = this.lastMLim;
     const sel = this.selection;
@@ -1269,25 +1297,25 @@ export class App {
       const isSel = dv.obj === sel;
       if (!isSel && (dv.pixelRadius < 3 || dv.dist < dv.obj.radius * 0.8)) continue;
       const p = this.project(dv.rel);
-      if (p) out.push({ rel: dv.rel.clone(), key: dv.obj.key, text: dv.obj.name, x: p.x, y: p.y, radius: Math.min(dv.pixelRadius / dpr, 60), priority: isSel ? 1e4 : 520 + Math.min(dv.pixelRadius, 40), cls: isSel ? 'selected' : 'nebula' });
+      if (p && !this.occluded(dv.rel, null)) out.push({ rel: dv.rel.clone(), key: dv.obj.key, text: dv.obj.name, x: p.x, y: p.y, radius: Math.min(dv.pixelRadius / dpr, 60), priority: isSel ? 1e4 : 520 + Math.min(dv.pixelRadius, 40), cls: isSel ? 'selected' : 'nebula' });
     }
     for (const gv of this.galaxies.views) {
       const isSel = gv.galaxy === sel;
       if (!isSel && gv.pixelRadius < 2.5) continue;
       const p = this.project(gv.rel);
-      if (p) out.push({ rel: gv.rel.clone(), key: gv.galaxy.key, text: gv.galaxy.name, x: p.x, y: p.y, radius: Math.min(gv.pixelRadius / dpr, 60), priority: isSel ? 1e4 : 640 + Math.min(gv.pixelRadius, 50), cls: isSel ? 'selected' : 'galaxy' });
+      if (p && !this.occluded(gv.rel, null)) out.push({ rel: gv.rel.clone(), key: gv.galaxy.key, text: gv.galaxy.name, x: p.x, y: p.y, radius: Math.min(gv.pixelRadius / dpr, 60), priority: isSel ? 1e4 : 640 + Math.min(gv.pixelRadius, 50), cls: isSel ? 'selected' : 'galaxy' });
     }
     {
       const mw = this.milkyWay;
       const r = mw.upos.sub(this.rig.upos, new Vector3());
       if (r.length() > mw.radius * 1.4 || sel === mw) {
         const p = this.project(r);
-        if (p) out.push({ rel: r, key: mw.key, text: mw.name, x: p.x, y: p.y, radius: 40, priority: sel === mw ? 1e4 : 700, cls: sel === mw ? 'selected' : 'galaxy' });
+        if (p && !this.occluded(r, null)) out.push({ rel: r, key: mw.key, text: mw.name, x: p.x, y: p.y, radius: 40, priority: sel === mw ? 1e4 : 700, cls: sel === mw ? 'selected' : 'galaxy' });
       }
     }
     if (sel instanceof CatalogStar && !this.near.stars.includes(sel)) {
       const p = this.project(sel.upos.sub(this.rig.upos, rel));
-      if (p) out.push({ rel: rel.clone(), key: sel.key, text: sel.name, x: p.x, y: p.y, radius: 3, priority: 1e4, cls: 'selected' });
+      if (p && !this.occluded(rel, null)) out.push({ rel: rel.clone(), key: sel.key, text: sel.name, x: p.x, y: p.y, radius: 3, priority: 1e4, cls: 'selected' });
     }
     return out;
   }
@@ -1333,6 +1361,7 @@ export class App {
     this.rig.braking = this.input.keys.has('KeyX');
     this.rig.update(dt, this.input);
     this.keepOutsideHorizons();
+    this.keepAboveGround();
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
 
     // The dolly carries the explorer's orientation; a headset pose is applied on top of it.
@@ -1361,6 +1390,14 @@ export class App {
     this.updateActiveSystems();
     this.exo.showOrbits = this.orbits.enabled;
     this.exo.update(this.rig.upos, pixelAngle, this.activeSystems, jd, now / 1000);
+    this.atmospheres.updateExo(this.exo.atmospheres());
+    // landing terrain on the nearest solid world (Solar System body or generated planet)
+    {
+      const cands = [this.bodies.terrainCandidate(), this.exo.terrainCandidate()].filter((c) => c !== null);
+      cands.sort((a, b) => a.alt - b.alt);
+      this.terrain.vr = this.vr.active;
+      this.terrain.update(cands[0] ?? null);
+    }
     this.craft.update(this.rig.upos, pixelAngle, jd, this.system.sun, this.system.byId.get(399)!);
     this.holes.vr = this.vr.active;
     this.holes.update(this.rig.upos, pixelAngle, now / 1000);
