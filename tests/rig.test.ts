@@ -76,4 +76,22 @@ describe('autopilot arrival direction', () => {
     expect(swungAt).toBeLessThan(rs * 300 * Math.E ** 2 * 1.01); // only once the target is visible
     expect(worstAim).toBeLessThan(1e-3);
   });
+
+  it('also swings when flying outwards (leaving the galaxy)', () => {
+    const rig = new CameraRig();
+    const R = 4.6e20;
+    rig.upos.set(2.55e20, 0, 0); // the Sun, 8.3 kpc from the centre
+    const arrive = new Vector3(-0.57, 0, 0.82);
+    rig.flyTo(target(R), R * 2.6, undefined, true, arrive);
+    let prev = 0;
+    for (let i = 0; i < 72 * 20 && rig.autopilot; i++) {
+      rig.update(1 / 72, idle);
+      const d = rig.upos.toVector3().length();
+      expect(d).toBeGreaterThanOrEqual(prev * (1 - 1e-12));
+      prev = d;
+    }
+    const end = rig.upos.toVector3();
+    expect(end.length()).toBeCloseTo(R * 2.6, -18);
+    expect(end.normalize().angleTo(arrive)).toBeLessThan(1e-3);
+  });
 });

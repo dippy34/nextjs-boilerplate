@@ -4,6 +4,7 @@ import { formatUtc } from '../core/time';
 import { formatDistance, LY } from '../core/units';
 import { BlackHole } from '../universe/BlackHoles';
 import { Body, type SpaceObject } from '../universe/Body';
+import { MilkyWay } from '../universe/MilkyWay';
 import { CatalogStar } from '../universe/Stars';
 import { COLORS, Panel } from './Panel';
 
@@ -23,9 +24,9 @@ export interface MenuHost {
 }
 
 type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'holes' | 'search' | 'settings';
-const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small worlds'], ['stars', 'Stars'], ['holes', 'Black holes'], ['search', 'Search'], ['settings', 'Settings']];
+const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small worlds'], ['stars', 'Stars'], ['holes', 'Deep space'], ['search', 'Search'], ['settings', 'Settings']];
 const HOLES = ['Sagittarius A*', 'M87*', 'Cygnus X-1', 'Gaia BH1', 'Gaia BH2', 'Gaia BH3', '3A 0620-003', 'GS 2023+338', 'GRS 1915+105',
-  'XTE J1118+480', '4U 1543-475', 'GRO J0422+32'];
+  'XTE J1118+480', '4U 1543-475'];
 const PLANETS = ['Sun', 'Mercury', 'Venus', 'Earth', 'Moon', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Ceres'];
 const MOON_PARENTS = ['Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
 const STARS = ['Proxima Centauri', 'Rigil Kentaurus', 'Sirius', 'Betelgeuse', 'Rigel', 'Vega', 'Polaris', 'Arcturus', 'Antares', 'Aldebaran',
@@ -89,7 +90,7 @@ export class VRMenu {
       case 'moons': this.paintMoons(p, area); break;
       case 'small': this.paintSmall(p, area); break;
       case 'stars': this.paintGrid(p, area, STARS.map((n) => app.findByName(n)).filter(nonNull).slice(0, 16), 4, 4); break;
-      case 'holes': this.paintGrid(p, area, HOLES.map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull), 4, 3); break;
+      case 'holes': this.paintGrid(p, area, [app.milkyWay, ...HOLES.map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull)], 4, 3); break;
       case 'search': this.paintSearch(p, area); break;
       case 'settings': this.paintSettings(p, area); break;
     }
@@ -99,6 +100,7 @@ export class VRMenu {
     const app = this.host.app;
     const d = o.upos.sub(app.rig.upos, new Vector3()).length();
     if (o instanceof CatalogStar) return `${(d / LY).toFixed(d < 10 * LY ? 2 : 1)} light years`;
+    if (o instanceof MilkyWay) return 'our galaxy, from outside';
     if (o instanceof BlackHole) {
       const ly = d / LY;
       const dist = ly > 1e6 ? `${(ly / 1e6).toFixed(0)} million ly` : ly > 0.01 ? `${Math.round(ly).toLocaleString()} ly` : formatDistance(d);
@@ -117,6 +119,29 @@ export class VRMenu {
     if (this.thumbs && this.thumbIndex && idx) {
       const s = this.thumbIndex.cell;
       c.drawImage(this.thumbs, idx[0] * s, idx[1] * s, s, s, cx - r, cy - r, 2 * r, 2 * r);
+      return;
+    }
+    if (o instanceof MilkyWay) {
+      // a small barred spiral: warm core, two bluish arms
+      const g = c.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, 'rgba(255,236,200,1)');
+      g.addColorStop(0.25, 'rgba(230,200,160,0.8)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      c.fillStyle = g;
+      c.beginPath();
+      c.arc(cx, cy, r, 0, Math.PI * 2);
+      c.fill();
+      c.strokeStyle = 'rgba(190,200,255,0.55)';
+      c.lineWidth = r * 0.09;
+      for (const a0 of [0, Math.PI]) {
+        c.beginPath();
+        for (let t = 0; t < 1; t += 0.02) {
+          const rr = r * (0.18 + 0.75 * t), a = a0 + t * 4.2;
+          const x = cx + rr * Math.cos(a), y = cy + rr * Math.sin(a) * 0.75;
+          if (t === 0) c.moveTo(x, y); else c.lineTo(x, y);
+        }
+        c.stroke();
+      }
       return;
     }
     if (o instanceof BlackHole) {
@@ -215,7 +240,7 @@ export class VRMenu {
     // results
     const rx = a.x + 950, rw = a.w - 950;
     const results = this.query.trim() ? app.searchItems(this.query.trim()).slice(0, 8) : [];
-    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars, 23 black holes', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
+    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars, 23 black holes, billions of generated stars', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
     results.forEach((r, i) => {
       p.button(`res:${r.id}`, rx, a.y + i * 92, rw, 82, r.label, () => {
         const o = app.resolveSearchId(r.id);

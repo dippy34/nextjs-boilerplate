@@ -7,6 +7,7 @@ import { formatUtc } from '../core/time';
 import { formatDistance, formatSpeed } from '../core/units';
 import type { LabelCandidate } from '../render/Labels';
 import { BlackHole } from '../universe/BlackHoles';
+import { MilkyWay } from '../universe/MilkyWay';
 import { Body, type SpaceObject } from '../universe/Body';
 import { CatalogStar } from '../universe/Stars';
 import { VRMenu, type VRSettings } from '../vr/Menu';
@@ -370,6 +371,7 @@ export class VRSupport {
     }
     if (obj instanceof CatalogStar) return Math.max(obj.radius * 9, 1e9);
     if (obj instanceof BlackHole) return obj.radius * 18;
+    if (obj instanceof MilkyWay) return obj.radius * 2.6;
     return obj.radius > 0 ? obj.radius * 80 : 3e7;
   }
 
@@ -394,11 +396,12 @@ export class VRSupport {
           const cam = this.app.renderer.camera;
           cam.updateMatrixWorld(true);
           const headFwd = new Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new Quaternion()));
-          if (tr.target instanceof BlackHole) {
-            // eyes closed: move round to a side that shows the disk at a low angle
+          if (tr.target instanceof BlackHole || tr.target instanceof MilkyWay) {
+            // eyes closed: move round to the side the destination is best seen from
             const from = rig.upos.sub(tr.target.upos, new Vector3());
             const dist = from.length();
-            rig.upos.copy(tr.target.upos).addVec(tr.target.approachDir(from), dist);
+            const dir = tr.target instanceof BlackHole ? tr.target.approachDir(from) : tr.target.viewDir();
+            rig.upos.copy(tr.target.upos).addVec(dir, dist);
           }
           const toTarget = tr.target.upos.sub(rig.upos, new Vector3()).normalize();
           rig.quat.premultiply(new Quaternion().setFromUnitVectors(headFwd, toTarget)).normalize();
@@ -597,7 +600,7 @@ export class VRSupport {
     const { head, up } = this.headPose();
     const top = cands.filter((c) => c.rel).sort((a, b) => b.priority - a.priority).slice(0, MAX_LABELS);
     const placed: Vector3[] = [];
-    const colors: Record<string, string> = { planet: '#9cc4ff', dwarf: '#ffbe7a', moon: '#9fe0bb', star: '#f3e3b0', comet: '#9feaff', blackhole: '#d3a6ff', selected: COLORS.sel };
+    const colors: Record<string, string> = { planet: '#9cc4ff', dwarf: '#ffbe7a', moon: '#9fe0bb', star: '#f3e3b0', comet: '#9feaff', blackhole: '#d3a6ff', galaxy: '#ffe2b0', selected: COLORS.sel };
     let n = 0;
     for (const c of top) {
       const dir = c.rel!.clone().sub(head).normalize();

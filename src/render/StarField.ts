@@ -7,7 +7,7 @@ import type { StarCatalog, StarNode } from '../universe/StarCatalog';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
-const VERT = /* glsl */ `
+export const STAR_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
 ${PROJECT_PARS}
@@ -19,6 +19,7 @@ uniform float uScale;      // pc per position unit
 uniform float uAbsMin;
 uniform float uAbsStep;
 uniform float uHideRadius; // pc: closer stars are drawn by the near-star renderer
+uniform float uExtinction; // mag of dust between the eye and this group of stars
 uniform sampler2D uColorLut;
 varying vec3 vColor;
 varying float vEnergy;
@@ -29,7 +30,7 @@ void main() {
   vec3 rel = uOffset + aPos * uScale;
   float d = length(rel);
   float absMag = uAbsMin + mod(aMT, 256.0) * uAbsStep;
-  float m = absMag + 1.50515 * log2(max(d, 1e-9)) - 5.0;  // 5 log10(d) = 1.50515 log2(d)
+  float m = absMag + 1.50515 * log2(max(d, 1e-9)) - 5.0 + uExtinction;  // 5 log10(d) = 1.50515 log2(d)
   float energy;
   float radius = psfSetup(magToIrradiance(m), energy);
   if (radius <= 0.0 || d < uHideRadius) {
@@ -46,7 +47,7 @@ ${FIX_LOGDEPTH}
   vColor = texture2D(uColorLut, vec2(floor(aMT / 256.0) / 255.0, 0.5)).rgb * 2.0;
 }`;
 
-const FRAG = /* glsl */ `
+export const STAR_FRAG = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
 ${PSF_UNIFORMS}
@@ -89,8 +90,8 @@ export class StarFieldLayer {
     this.colorLut.minFilter = LinearFilter;
     this.colorLut.needsUpdate = true;
     this.template = new ShaderMaterial({
-      vertexShader: VERT,
-      fragmentShader: FRAG,
+      vertexShader: STAR_VERT,
+      fragmentShader: STAR_FRAG,
       uniforms: {
         ...this.psf,
         uOffset: { value: new Vector3() },
@@ -98,6 +99,7 @@ export class StarFieldLayer {
         uAbsMin: { value: -12 },
         uAbsStep: { value: 0.125 },
         uHideRadius: { value: 0.0 },
+        uExtinction: { value: 0.0 },
         uColorLut: { value: this.colorLut },
       },
       transparent: true,

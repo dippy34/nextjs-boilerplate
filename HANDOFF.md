@@ -19,38 +19,37 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   pointing, hover/haptics, info cards, wrist panel, hands. Renders into the XR render target.
 * Visuals: NASA SVS Milky Way, atmospheres, relief maps (LOLA/MOLA/MESSENGER/ETOPO), 8k maps (desktop
   only), Hubble OPAL giants, spectral colours.
-* This round: autopilot uses a two-stretch log-distance Hermite curve (`src/app/CameraRig.ts`,
+* Earlier: autopilot uses a two-stretch log-distance Hermite curve (`src/app/CameraRig.ts`,
   test `tests/rig.test.ts`); destination textures are prefetched and every shader is compiled up front
   (`App.warmUp`, `BodiesLayer.prefetch`), no 8k maps in VR (upload stalls); VR travel = blink, re-aim,
   open eyes, one continuous flight. New star look (`src/render/shaders/psf.ts`): coloured core,
   halo/spikes sized by brightness above the limit, saturation `uSat`.
 
-## In progress: black holes
+* Black holes (done, live): `pipeline/build_blackholes.py` -> `public/data/blackholes.json` (23 real
+  holes), `src/universe/BlackHoles.ts`, renderer `src/render/BlackHoleLayer.ts` + `shaders/blackhole.ts`
+  (per-pixel Schwarzschild tracing over an environment cube captured at the eye, thin disks with
+  Doppler/gravitational shifts). Note: three.js maps AlwaysDepth to NeverDepth with a reversed-Z
+  buffer — the layer asks for NeverDepth there on purpose.
+* Milky Way (done): `src/universe/Galaxy.ts` (parametric model, CPU reference `glowColumn`),
+  `src/render/GalaxyLayer.ts` + `shaders/galaxy.ts` (glow ray-marched into a cube, one face per frame
+  while moving), `Sky.updateWith` cross-fades the NASA map to it 120-700 pc from the Sun (calibration
+  constants in `SkyLayer`). Procedural stars: `src/universe/ProceduralStars.ts` (bands x cells,
+  deterministic, no catalogue duplicates), generated in `src/workers/stars.worker.ts`, drawn by
+  `src/render/ProceduralStarLayer.ts`. "Milky Way" destination: `src/universe/MilkyWay.ts`.
 
-* Data done: `pipeline/build_blackholes.py` -> `public/data/blackholes.json` (23 BHs: BlackCAT
-  dynamical BHs, Sgr A*, M87*, Cyg X-1, Gaia BH1-3; companions with Roche-lobe radii and orbits).
-* `src/universe/BlackHoles.ts`: `BlackHole` SpaceObject (radius = Schwarzschild radius), companion as
-  a `CatalogStar` on its orbit, disk plane from the catalogue inclination. Not wired into the app yet.
-* Next: `src/render/BlackHoleLayer.ts` — camera-centred BackSide sphere at the BH distance; per pixel:
-  impact parameter b (in rs); weak field (b > 40) deflect by 2/b; strong field integrate
-  d²u/dφ² = −u + 1.5u² (rs = 1) from r = 60 rs, capture at u ≥ 1, accretion-disk plane crossings
-  (Novikov–Thorne T profile, Doppler beaming g⁴ + gravitational redshift); background from a
-  CubeCamera capture of sky + star fields (layer 1), refreshed every ~2 s. Then App: load, update
-  companions (`bh.update(jd)`, add companion to `near.stars`), picking, labels, search, menu tab
-  "Black holes", arrival ~18 rs.
+## Next
 
-## Next after that
-
-1. Procedural galaxy: parametric Milky Way (disk, bulge/bar, arms, dust), deterministic procedural
-   star cells beyond the catalogues (billions, brightest-first LOD), volumetric galaxy from outside.
-2. Planetary systems everywhere: NASA Exoplanet Archive (pscomppars) + deterministic generator per
-   star; GPU-generated planet surfaces, atmospheres, rings; menu/travel integration.
+1. Planetary systems everywhere: NASA Exoplanet Archive (pscomppars) for real systems, plus a
+   deterministic generator per star (procedural and catalogue stars); GPU-generated planet surfaces,
+   atmospheres, rings; menu/travel integration; procedural stars become visitable systems.
+2. Nebulae and star clusters (OpenNGC), other galaxies; a sharper galaxy impostor from outside.
+3. Quest performance pass on a real headset (black hole steps, glow size, star counts).
 
 ## Checks before every deploy
 
 `npm run typecheck`, `npm test`, then with `npx vite preview --port 4173` running:
 `node scripts/interact.mjs http://127.0.0.1:4173/ out`, `node scripts/verify.mjs ...`,
-`node scripts/vr.mjs http://127.0.0.1:4173/ out` (IWER Quest 3 emulator; 23 checks). On a machine
+`node scripts/vr.mjs http://127.0.0.1:4173/ out` (IWER Quest 3 emulator; 26 checks). On a machine
 with a real GPU these run far faster than in the cloud container (software rendering, ~1 fps).
 
 ## Licences to keep in mind

@@ -194,7 +194,9 @@ export class CameraRig {
       const L = hermite(g.knots, g.t);
       const dir = g.dir.clone();
       if (g.swing) {
-        const w = smooth((g.swingFrom - L) / Math.max(g.swingFrom - g.swingTo, 1e-6));
+        // inward or outward: progress from swingFrom to swingTo in log distance
+        const span = g.swingTo - g.swingFrom;
+        const w = Math.abs(span) < 1e-6 ? 1 : smooth((L - g.swingFrom) / span);
         dir.applyQuaternion(new Quaternion().slerp(g.swing, w));
       }
       const want = g.target.upos.clone().addVec(dir, Math.exp(L));

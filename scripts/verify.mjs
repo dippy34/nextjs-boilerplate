@@ -28,6 +28,8 @@ export const scenarios = [
   { name: '14-sagittarius-a', query: `time=${T}&paused=1&target=Sagittarius A*&dist=20` },
   { name: '15-gaia-bh1', query: `time=${T}&paused=1&target=Gaia BH1&dist=25&fov=60` },
   { name: '16-cygnus-x1-far', query: `time=${T}&paused=1&target=Cygnus X-1&dist=3000` },
+  { name: '17-galactic-core-in-plane', query: `time=${T}&paused=1&campc=603,-2659,22&look=Sagittarius A*&fov=80` },
+  { name: '18-milky-way-from-outside', query: `time=${T}&paused=1&campc=-35159,-15148,14226&look=Sagittarius A*&fov=60` },
 ];
 
 const browser = await chromium.launch({

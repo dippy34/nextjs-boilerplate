@@ -25,6 +25,7 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; color:
 .label.asteroid, .label.tno { color: #c8b49c; }
 .label.comet { color: #9feaff; }
 .label.blackhole { color: #d3a6ff; }
+.label.galaxy { color: #ffe2b0; font-weight: 600; }
 .label.selected { color: #fff27a; font-weight: 600; }
 
 .hud-top, .hud-time, .hud-info, .hud-bottom, .hud-help, .hud-search {

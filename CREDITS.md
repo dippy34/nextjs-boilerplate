@@ -133,6 +133,26 @@ carry restrictions on commercial use — check the caption of each PIA image bef
   Sgr A\* and M87\* are illustrative — their real accretion flows are faint and radiate mostly in
   radio. The streaky gas texture and its slowed-down rotation are procedural.
 
+## The Milky Way model and procedural stars (`src/universe/Galaxy.ts`, `ProceduralStars.ts`)
+
+A parametric model (parameters typed in, not downloaded data), after published values:
+* Distance to the Galactic centre R0 = 8277 pc and the centre's position: GRAVITY Collaboration 2022
+  (*A&A* 657, L12) and SIMBAD (Sgr A\*).
+* Thin/thick disk scale lengths and heights: Bland-Hawthorn & Gerhard 2016, *ARA&A* 54, 529 (review).
+* Bar/bulge: the boxy "G2" density of Dwek et al. 1995, *ApJ* 445, 716, oriented as in Wegg & Gerhard
+  2013, *MNRAS* 435, 1874 (27°).
+* Nuclear star cluster: mass and size after Schödel et al. 2014, *A&A* 566, A47.
+* Spiral arms: four logarithmic arms with a 12° pitch placed roughly as in Reid et al. 2019, *ApJ* 885,
+  131, plus the local (Orion) spur.
+* Dust: exponential layer (scale height 110 pc) normalised to ~0.8 mag of visual extinction per kpc
+  near the Sun; colour dependence from Cardelli, Clayton & Mathis 1989, *ApJ* 345, 245.
+* Stellar luminosity function (stars per pc³ per magnitude): rounded values of the usual local
+  function (Bahcall & Soneira 1980, *ApJS* 44, 73; Reid, Gizis & Hawley 2002, *AJ* 124, 2721).
+* The glow's brightness is calibrated against the NASA SVS map seen from the Sun (galactic latitudes
+  2–5°), and its clumps (dust clouds, star clouds, H II knots) are procedural noise.
+* Procedural stars are generated only where no catalogue has them: beyond 100 pc from the Sun and
+  fainter than V = 11 as seen from the Sun, allowing for dust.
+
 ## Algorithms and code
 
 * [three.js](https://threejs.org/) (MIT), [Vite](https://vite.dev/) (MIT), [jplephem](https://github.com/brandon-rhodes/python-jplephem) (MIT, pipeline), NumPy, Pillow, Requests, rasterio/GDAL, OpenEXR, Astropy (pipeline).

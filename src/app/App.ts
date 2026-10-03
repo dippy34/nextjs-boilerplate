@@ -5,9 +5,11 @@ import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/un
 import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
+import { GalaxyGlow } from '../render/GalaxyLayer';
 import { Labels, type LabelCandidate } from '../render/Labels';
 import { NearStarsLayer } from '../render/NearStars';
 import { OrbitsLayer } from '../render/Orbits';
+import { ProceduralStarLayer } from '../render/ProceduralStarLayer';
 import { Renderer, type ViewInfo } from '../render/Renderer';
 import { GLOBALS, depthK } from '../render/shaders/xr';
 import { SkyLayer } from '../render/Sky';
@@ -16,6 +18,8 @@ import { StarFieldLayer } from '../render/StarField';
 import { Hud } from '../ui/Hud';
 import { BlackHole, loadBlackHoles } from '../universe/BlackHoles';
 import { Body, type SpaceObject } from '../universe/Body';
+import { GALAXY, glowColumn } from '../universe/Galaxy';
+import { MilkyWay } from '../universe/MilkyWay';
 import { SolarSystem } from '../universe/SolarSystem';
 import { StarCatalog } from '../universe/StarCatalog';
 import { CatalogStar, NamedStars } from '../universe/Stars';
@@ -65,6 +69,12 @@ export class App {
   atmospheres!: AtmospheresLayer;
   blackHoles: BlackHole[] = [];
   holes!: BlackHoleLayer;
+  /** the Milky Way's unresolved light (from the galaxy model) */
+  galaxy!: GalaxyGlow;
+  /** procedural stars filling the galaxy beyond the catalogues */
+  procStars!: ProceduralStarLayer;
+  readonly milkyWay = new MilkyWay();
+  private camGal = new Vector3();
   private cssW = 1;
   private cssH = 1;
   private rateIndex = 0;
@@ -135,9 +145,12 @@ export class App {
     app.atmospheres = atmospheres;
     app.blackHoles = blackHoles;
     app.holes = new BlackHoleLayer(blackHoles, bodies.surfaceExposure, renderer.depthMode === 'reversed-z');
+    app.galaxy = new GalaxyGlow();
+    app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
+    if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
-    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, ...starFields.map((f) => f.group));
+    renderer.scene.add(sky.mesh, bodies.group, atmospheres.group, orbits.group, small.group, near.group, app.holes.group, app.procStars.group, ...starFields.map((f) => f.group));
     await small.load(DATA);
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
@@ -318,6 +331,7 @@ export class App {
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
+    this.galaxy.compile(this.renderer.gl);
     objs.forEach((o, i) => { o.visible = was[i]; });
   }
 
@@ -326,6 +340,11 @@ export class App {
     if (obj instanceof BlackHole) {
       this.rig.flyTo(obj, obj.radius * 30, undefined, true, obj.approachDir(this.rig.upos.sub(obj.upos, new Vector3())));
       this.hud.toast(`Going to ${obj.name}`);
+      return;
+    }
+    if (obj instanceof MilkyWay) {
+      this.rig.flyTo(obj, obj.radius * 2.6, undefined, true, obj.viewDir());
+      this.hud.toast('Leaving the galaxy');
       return;
     }
     let d: number;
@@ -358,6 +377,9 @@ export class App {
     if (c) return c;
     const h = this.blackHoles.find((x) => x.name.toLowerCase() === n || x.data.aliases.some((a) => a.toLowerCase() === n));
     if (h) return h;
+    const ps = this.procStars.find(name);
+    if (ps) return ps;
+    if (n === 'milky way' || n === 'galaxy' || n === 'the galaxy') return this.milkyWay;
     const s = this.named.list.find((x) => x.names.some((nm) => nm.toLowerCase() === n));
     if (s) return this.getStar(this.catalog, s.node, s.slot);
     return null;
@@ -381,6 +403,10 @@ export class App {
       const s = score(c.name);
       if (s >= 0) out.push({ label: c.name, detail: 'comet', id: `comet:${i}`, score: s + 0.2 });
     });
+    {
+      const s = Math.min(...['Milky Way', 'galaxy'].map(score).filter((x) => x >= 0));
+      if (Number.isFinite(s)) out.push({ label: 'Milky Way', detail: 'our galaxy, seen from outside', id: 'mw:0', score: s - 0.2 });
+    }
     this.blackHoles.forEach((h, i) => {
       const names = [h.name, ...h.data.aliases, 'black hole'];
       const best = Math.min(...names.map(score).filter((x) => x >= 0));
@@ -404,6 +430,7 @@ export class App {
     if (kind === 'body') return this.system.byId.get(Number(v)) ?? null;
     if (kind === 'comet') return this.small.cometObjects[Number(v)] ?? null;
     if (kind === 'bh') return this.blackHoles[Number(v)] ?? null;
+    if (kind === 'mw') return this.milkyWay;
     if (kind === 'bhc') return this.blackHoles[Number(v)]?.companion ?? null;
     if (kind === 'star') { const st = this.named.list[Number(v)]; return this.getStar(this.catalog, st.node, st.slot); }
     return null;
@@ -517,6 +544,10 @@ export class App {
     }
     for (const h of this.blackHoles) {
       if (h.companion && h.companion.upos.sub(this.rig.upos, new Vector3()).length() < COMPANION_RADIUS * PC) list.push(h.companion);
+    }
+    for (const { star, dist } of this.procStars.nearest(this.camPc, 1, 12)) {
+      this.nearestStarDist = Math.min(this.nearestStarDist, dist * PC - star.radius);
+      if (dist < NEAR_STAR_RADIUS) list.push(star);
     }
     this.near.stars = list;
   }
@@ -652,6 +683,17 @@ export class App {
         if (s < bestScore) { bestScore = s; bestRef = { cat, node: n.id, slot: i }; }
       }
     }
+    let bestProc: (() => SpaceObject) | null = null;
+    this.procStars.forEachVisible(cam, mLim, (r, m, star) => {
+      if (r.length() < NEAR_STAR_RADIUS) return;
+      const p = this.project(r);
+      if (!p) return;
+      const ds = Math.hypot(p.x - cx, p.y - cy);
+      if (ds > 9) return;
+      const sc = ds + 0.4 * m;
+      if (sc < bestScore) { bestScore = sc; bestProc = star; }
+    });
+    if (bestProc) return (bestProc as () => SpaceObject)();
     if (!bestRef) return null;
     return this.getStar(bestRef.cat, bestRef.node, bestRef.slot);
   }
@@ -712,6 +754,16 @@ export class App {
         if (score < bestScore) { bestScore = score; bestRef = { cat, node: n.id, slot: i }; }
       }
     }
+    let bestProc: (() => SpaceObject) | null = null;
+    this.procStars.forEachVisible(cam, mLim, (r, m, star) => {
+      const dist = r.length();
+      if (dist < NEAR_STAR_RADIUS) return;
+      const ang = Math.acos(Math.max(-1, Math.min(1, r.dot(d) / dist)));
+      if (ang > tol) return;
+      const score = ang / tol + 0.08 * m;
+      if (score < bestScore) { bestScore = score; bestProc = star; }
+    });
+    if (bestProc) return (bestProc as () => SpaceObject)();
     return bestRef ? this.getStar(bestRef.cat, bestRef.node, bestRef.slot) : null;
   }
 
@@ -887,6 +939,14 @@ export class App {
       const p = this.project(r);
       if (p && !this.occluded(r, bh)) out.push({ rel: r, key: bh.key, text: bh.name, x: p.x, y: p.y, radius: shadowPx / dpr, priority: bh === sel ? 1e4 : 420, cls: bh === sel ? 'selected' : 'blackhole' });
     }
+    {
+      const mw = this.milkyWay;
+      const r = mw.upos.sub(this.rig.upos, new Vector3());
+      if (r.length() > mw.radius * 1.4 || sel === mw) {
+        const p = this.project(r);
+        if (p) out.push({ rel: r, key: mw.key, text: mw.name, x: p.x, y: p.y, radius: 40, priority: sel === mw ? 1e4 : 700, cls: sel === mw ? 'selected' : 'galaxy' });
+      }
+    }
     if (sel instanceof CatalogStar && !this.near.stars.includes(sel)) {
       const p = this.project(sel.upos.sub(this.rig.upos, rel));
       if (p) out.push({ rel: rel.clone(), key: sel.key, text: sel.name, x: p.x, y: p.y, radius: 3, priority: 1e4, cls: 'selected' });
@@ -957,7 +1017,12 @@ export class App {
     this.holes.vr = this.vr.active;
     this.holes.update(this.rig.upos, pixelAngle, now / 1000);
     const { xStar, xSurf, mLim, xDark } = this.updateExposure(dt);
-    this.sky.update(xStar / xDark, this.camPc.length());
+    const sunDistPc = this.camPc.length();
+    GALAXY.toGal(this.camPc, this.camGal);
+    this.galaxy.vr = this.vr.active;
+    // one face per frame while travelling; all at once if we find ourselves far out with no map yet
+    if (sunDistPc > 60) this.galaxy.update(this.renderer.gl, this.camGal, !this.galaxy.ready && sunDistPc > 150 ? 6 : 1);
+    this.sky.updateWith(xStar / xDark, sunDistPc, this.galaxy.ready ? this.galaxy.target.texture : null, this.camGal);
     this.lastMLim = mLim;
     const psf = this.starFields[0].psf;
     psf.uExposure.value = xStar;
@@ -967,6 +1032,7 @@ export class App {
     this.bodies.surfaceExposure.value = xSurf;
     for (const c of this.catalogs) c.update(this.camPc, mLim, this.fieldMinDistPc);
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);
+    this.procStars.update(this.camPc, mLim, NEAR_STAR_RADIUS, this.vr.active ? 2 : 4);
     this.near.update(this.rig.upos, pixelAngle, now / 1000);
     this.orbits.focus = this.rig.anchor instanceof Body ? this.rig.anchor : null;
     this.orbits.update(this.rig.upos, pixelAngle, jd);
@@ -1001,7 +1067,7 @@ export class App {
       const d = this.selection.upos.sub(this.rig.upos, new Vector3()).length();
       selection = { name: this.selection.name, rows: this.selection.info(), distance: formatDistance(d) };
     }
-    const drawn = this.starFields.reduce((a, f) => a + f.drawnStars, 0);
+    const drawn = this.starFields.reduce((a, f) => a + f.drawnStars, 0) + this.procStars.drawnStars;
     const loaded = this.catalogs.reduce((a, c) => a + c.loadedStars, 0);
     const total = this.catalogs.reduce((a, c) => a + c.totalStars, 0);
     const pending = this.catalogs.reduce((a, c) => a + c.pending, 0);
@@ -1022,6 +1088,11 @@ export class App {
     });
   }
 
+  /** Galaxy model column (L☉/pc², light beyond 300 pc) along world direction `dir` from the eye (debugging). */
+  debugGlowColumn(dir: [number, number, number]): number {
+    return glowColumn(this.camGal, GALAXY.dirToGal(new Vector3(...dir).normalize()), 400, 300);
+  }
+
   /** Scripting helpers (used by automated tests and the browser console). */
   debugState() {
     return {
@@ -1030,6 +1101,8 @@ export class App {
       anchor: this.rig.anchor?.name ?? null,
       selection: this.selection?.name ?? null,
       starsDrawn: this.starFields.reduce((a, f) => a + f.drawnStars, 0),
+      proceduralDrawn: this.procStars.drawnStars,
+      proceduralPending: this.procStars.pending,
       starsLoaded: this.catalogs.reduce((a, c) => a + c.loadedStars, 0),
       pendingTiles: this.catalogs.reduce((a, c) => a + c.pending, 0),
       exposure: this.bodies.surfaceExposure.value,

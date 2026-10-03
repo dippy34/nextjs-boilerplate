@@ -15,3 +15,4 @@ python3 fetch_horizons_moons.py    # JPL Horizons vectors for moon calibration (
 python3 build_solar_system.py      # second pass applies the Horizons calibration
 python3 fetch_gaia.py              # Gaia DR3 100 pc subset (cached)
 python3 build_stars.py             # AT-HYG + HYG + Gaia -> public/data/stars
+python3 build_exoplanets.py        # NASA Exoplanet Archive -> public/data/exoplanets.json

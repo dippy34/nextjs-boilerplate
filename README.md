@@ -177,15 +177,25 @@ Works and is verified (`npm test`, `npm run verify`, `npm run verify:interact`, 
   Gaia BH1–3, Sagittarius A\*, M87\*) with their companion stars on their real orbits. Light is traced
   past each hole in the Schwarzschild metric per pixel, so the sky behind it bends into Einstein rings,
   the far side of the accretion disk arcs over the shadow, and Doppler beaming brightens the side
-  coming towards you. Search for them, or open the **Black holes** tab in the VR menu.
+  coming towards you. Search for them, or open the **Deep space** tab in the VR menu.
+* The whole Milky Way: a parametric model of the galaxy (thin and thick disks, the boxy bar, four
+  spiral arms and the local spur, dust, the nuclear star cluster around Sgr A\*) drives both the
+  galaxy's unresolved glow — ray-marched through the dust into a cube map, cross-fading from the
+  real NASA map as you leave the Sun's neighbourhood — and **tens of billions of procedural stars**
+  generated on demand in Web Workers wherever the catalogues end. Every generated star is
+  deterministic (it is always the same star, with a designation like `PS 9.41.-3.0-17` you can
+  search for) and none duplicates a catalogued one. Fly to the galactic centre and Sgr A\* sits
+  in a blazing star cluster; search "Milky Way" to leave the galaxy and see the barred spiral from
+  outside.
 
 Known limitations (planned for later phases unless noted):
 
 * Planets are textured ellipsoids with relief shading — LOD terrain geometry and landing are Phase 2.
 * Venus uses procedural banding tinted with the Mariner 10 disk colour; the Viking Mars mosaic is
   somewhat over-saturated; OPAL maps miss the latitudes Hubble could not see (filled zonally).
-* No Milky Way model yet: beyond ~1 kpc you only see catalogue stars (Phase 3 adds the galaxy,
-  nebulae, clusters and procedural stars).
+* The Milky Way model is smooth and idealised (arm positions, a clumpy noise for dust and star
+  clouds); no nebulae, star clusters or other galaxies yet. Procedural stars beyond the catalogues
+  are plausible, not real: their densities, colours and luminosities follow the model.
 * Star radii are estimated from V magnitude and temperature (no bolometric correction). Gaia DR3
   places Sirius B 0.033 pc from Sirius A (a known astrometry problem for that binary).
 * Moons without published sizes get a deterministic procedural radius, flagged "estimated".
@@ -197,8 +207,7 @@ Known limitations (planned for later phases unless noted):
 * Atmospheres are single scattering (no multiple scattering), seen from space; there is no terrain
   geometry or landing yet (relief is shading only). The Milky Way map is Earth-centred and fades out
   beyond ~1 kpc.
-* Black holes are non-spinning (Schwarzschild). Near Sagittarius A\* the sky is mostly empty until the
-  Milky Way model arrives (our star catalogues thin out towards the galactic centre).
+* Black holes are non-spinning (Schwarzschild).
 * Performance has been verified only under software rendering (≈20–30 fps at 720p; ~3–5 ms JS per
   frame). GPU profiling and quality presets come in Phase 6.
 
@@ -206,7 +215,7 @@ Known limitations (planned for later phases unless noted):
 
 2. Planet rendering: cube-sphere quadtree terrain from real DEMs, Bruneton atmospheric scattering,
    oceans, clouds, space-to-surface descent and surface walking.
-3. Milky Way model calibrated on Gaia star counts, nebulae and clusters (OpenNGC), procedural stars.
+3. Nebulae and star clusters (OpenNGC), other galaxies, a finer Milky Way seen from outside.
 4. Procedural planetary systems + NASA Exoplanet Archive systems.
 5. Full UI: search panel, bookmarks, settings and quality presets.
 6. Polish: lens flares, eclipses, spinning (Kerr) black holes, performance tuning.
