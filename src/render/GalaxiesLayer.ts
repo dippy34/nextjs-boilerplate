@@ -351,8 +351,8 @@ function lookFor(g: Galaxy, all: Galaxy[] = []): Look {
     M87: { bulgeRe: 0.33, bulgeN: 4, axes: [1, 0.93, 0.93] },
     // the Whirlpool's companion: amorphous, crossed by dust
     'NGC 5195': { dust: 0.9, dustHr: 0.5, bulge: 0.6, bulgeRe: 0.1, old: 0.35, irreg: 1.5, clumpy: 0.5 },
-    // the LMC: an off-centre bar, one arm, the Tarantula
-    'Large Magellanic Cloud': { bar: 0.12, barLen: 0.2, spot: [0.18, 0.2, 0, 0.02], knots: 0.08, young: 0.25, clumpy: 0.45 },
+    // the LMC: a bar, one arm, patchy star formation (the Tarantula is drawn by the nebulae layer)
+    'Large Magellanic Cloud': { bar: 0.12, barLen: 0.2, knots: 0.08, young: 0.25, clumpy: 0.45 },
     'Small Magellanic Cloud': { bar: 0.1, barLen: 0.35, hz: 0.08, clumpy: 1 },
   };
   const look: Look = { ...l, ...(named[g.name] ?? {}) };
@@ -445,6 +445,7 @@ class GalaxyModel {
     const c = this.coef;
     this.phase = l.armPhase ?? g.seed * 6.2832;
     const tanP = Math.tan(((l.pitchDeg || 14) * Math.PI) / 180);
+    this.tanP = tanP;
     // spiral-coordinate noise: cells about 2.5 times longer along the arms than across them
     const P = Math.atan(tanP);
     this.alongScale = 0.45 / (Math.sin(P) * Math.cos(P) * 2.5);
@@ -465,6 +466,7 @@ class GalaxyModel {
   readonly bright: number;
   readonly alongScale: number;
   readonly phase: number;
+  private readonly tanP: number;
 
   /**
    * Smooth radiance (the model without its noise and dust, in its emission units) along a ray from
@@ -512,39 +514,49 @@ class GalaxyModel {
   /** the noise at texture coordinates */
   private nz(x: number, y: number, z: number): Float32Array { return sampleNoise(this.noise, x, y, z, this.nzv); }
 
+  private dA = new Float32Array(4);
+  private dS = new Float32Array(4);
+  private dI = new Float32Array(4);
   /**
-   * Disc-frame quantities at p (as discNoise() in GAL_MODEL): radius, spiral phase, the big-scale
-   * noise (rgba) and the spiral-coordinate noise (rgba).
+   * Disc-frame quantities at p (as discNoise() in GAL_MODEL): radius, spiral phase, arm-width noise
+   * and the big-scale noise (into `dA`); `streaks()` adds the isotropic (`dI`) and spiral-coordinate
+   * (`dS`) noise. Arrays are reused: copy what must survive the next call.
    */
-  disc(px: number, py: number, pz: number): { r: number; psi: number; A: number[]; S: number[]; I: number[]; wid: number } {
+  disc(px: number, py: number, pz: number): { r: number; psi: number; wid: number } {
     const l = this.look, s = this.g.seed;
     const r = Math.hypot(px, py);
-    const A = Array.from(this.nz(px * 0.9 + s * 0.71, py * 0.9 + s * 0.71, pz * 0.9 + s * 0.71));
-    const B = Array.from(this.nz(px * 0.3 + s * 0.53, py * 0.3 + s * 0.53, pz * 0.3 + s * 0.53));
+    this.dA.set(this.nz(px * 0.9 + s * 0.71, py * 0.9 + s * 0.71, pz * 0.9 + s * 0.71));
+    const B = this.nz(px * 0.3 + s * 0.53, py * 0.3 + s * 0.53, pz * 0.3 + s * 0.53);
     const lr = Math.log(Math.max(r, 0.03));
-    const tanP = Math.tan(((l.pitchDeg || 14) * Math.PI) / 180);
-    const psi = Math.atan2(py, px) - lr / tanP + this.phase + l.irreg * ((B[0] - 0.5) * 3 + (A[0] - 0.5) * 0.8);
+    const psi = Math.atan2(py, px) - lr / this.tanP + this.phase + l.irreg * ((B[0] - 0.5) * 3 + (this.dA[0] - 0.5) * 0.8);
+    return { r, psi, wid: B[1] };
+  }
+
+  streaks(px: number, py: number, pz: number, r: number, psi: number): void {
+    const s = this.g.seed;
     const sw = smooth(0.08, 0.25, r);
-    const I = Array.from(this.nz(px * 2.6 + s * 0.29, py * 2.6 + s * 0.29, pz * 2.6 + s * 0.29));
-    let S = I;
+    this.dI.set(this.nz(px * 2.6 + s * 0.29, py * 2.6 + s * 0.29, pz * 2.6 + s * 0.29));
+    this.dS.set(this.dI);
     if (sw > 0) {
+      const lr = Math.log(Math.max(r, 0.03));
       const Sp = this.nz(Math.cos(psi) * 0.45 + s * 0.37, Math.sin(psi) * 0.45 + s * 0.37, lr * this.alongScale + pz * 1.2 + s * 0.37);
-      S = I.map((v, i) => v + (Sp[i] - v) * sw);
+      for (let i = 0; i < 4; i++) this.dS[i] += (Sp[i] - this.dS[i]) * sw;
     }
-    return { r, psi, A, S, I, wid: B[1] };
   }
 
   /**
    * Draws `n` points from the model's light (component chosen by its share, position from its smooth
    * profile, kept with the probability of the model's modulation there). Calls `put` with the
    * galaxy-frame position, the component index (0 bulge, 1 old, 2 thick, 3 young, 4 knots, 5 bar,
-   * 6 spot) and the local disc scale height.
+   * 6 spot) and the local disc scale height. A generator: yields every few hundred tries, so the
+   * work can be spread over frames.
    */
-  sample(n: number, rnd: () => number, put: (x: number, y: number, z: number, comp: number, hz: number) => void, only?: number[]): void {
+  *sample(n: number, rnd: () => number, put: (x: number, y: number, z: number, comp: number, hz: number) => void, only?: number[]): Generator<void> {
     const l = this.look;
     const cum: number[] = [];
     let acc = 0;
     this.frac.forEach((f, i) => { acc += !only || only.includes(i) ? f : 0; cum.push(acc); });
+    if (acc <= 0) return;
     const lap = () => (rnd() < 0.5 ? 1 : -1) * Math.log(rnd() + 1e-12);
     const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(6.2832 * rnd());
     const v = new Vector3();
@@ -554,6 +566,7 @@ class GalaxyModel {
     const ext = this.ext;
     let tries = 0;
     for (let i = 0; i < n && tries < n * 200; tries++) {
+      if ((tries & 255) === 255) yield;
       const u = rnd() * acc;
       let comp = 0;
       while (comp < cum.length - 1 && u >= cum[comp]) comp++;
@@ -584,26 +597,31 @@ class GalaxyModel {
         px = r * Math.cos(th); py = r * Math.sin(th);
         pz = lap() * (comp === 2 ? 0.05 : comp >= 3 ? 0.45 * hzF(r) : hzF(r));
       }
-      const d = this.disc(px, py, pz);
-      const r = d.r;
+      const r = Math.hypot(px, py);
       const win = (1 - smooth(l.trunc * 0.8, l.trunc, r)) * (1 - smooth(0.75, 1.0, Math.abs(pz) / ext.z));
-      let p = win;
+      if (rnd() > win) continue;
       if (comp === 1) {
+        const d = this.disc(px, py, pz);
         const wave = l.arms > 0 ? 0.5 + 0.5 * Math.cos(l.arms * d.psi) : 0.5;
-        p *= (1 + 0.5 * (wave - 0.5) * am(r)) * (0.8 + 0.4 * d.A[1]) / 1.5;
+        if (rnd() > (1 + 0.5 * (wave - 0.5) * am(r)) * (0.8 + 0.4 * this.dA[1]) / 1.5) continue;
       } else if (comp === 3 || comp === 4) {
+        // two stages: a bound from the cheap terms first, then the streak noise
+        const d = this.disc(px, py, pz);
         const wave = l.arms > 0 ? 0.5 + 0.5 * Math.cos(l.arms * d.psi) : 0.5;
-        const armY = l.arms > 0 ? Math.pow(wave, 4 * (0.5 + 1.1 * d.wid)) * 3.66 * am(r) * (0.2 + 2.4 * d.S[1] * d.S[1]) : am(r);
-        const ring = Math.exp(-(((r - l.ring[0]) / l.ring[1]) ** 2));
-        const ym = armY * (1 - l.clumpy) + smooth(0.35, 0.85, d.A[2]) * 2.8 * (0.5 + d.I[1]) * l.clumpy + l.ring[2] * ring;
-        p *= ym / ymMax;
+        const armPk = l.arms > 0 ? Math.pow(wave, 4 * (0.5 + 1.1 * d.wid)) * 3.66 * am(r) : am(r);
+        const ringY = l.ring[2] * Math.exp(-(((r - l.ring[0]) / l.ring[1]) ** 2));
+        const clumpPk = smooth(0.35, 0.85, this.dA[2]) * 2.8 * l.clumpy;
+        const bound = armPk * (l.arms > 0 ? 2.6 : 1) * (1 - l.clumpy) + clumpPk * 1.5 + ringY;
+        if (rnd() * ymMax > bound) continue;
+        this.streaks(px, py, pz, r, d.psi);
+        const ym = armPk * (l.arms > 0 ? 0.2 + 2.4 * this.dS[1] * this.dS[1] : 1) * (1 - l.clumpy) + clumpPk * (0.5 + this.dI[1]) + ringY;
+        if (rnd() * bound > ym) continue;
         if (comp === 4) {
           const s = this.g.seed * 5.3;
           const kn = this.nz(px * 7 + s, py * 7 + s, pz * 7 + s)[3];
-          p *= smooth(0.75, 0.95, kn);
+          if (rnd() > smooth(0.75, 0.95, kn)) continue;
         }
       }
-      if (rnd() > p) continue;
       v.set(px, py, pz).applyMatrix3(this.rotT);
       put(v.x, v.y, v.z, comp, comp === 2 ? 0.05 : comp >= 3 ? 0.45 * hzF(r) : hzF(r));
       i++;
@@ -622,35 +640,45 @@ function smooth(a: number, b: number, x: number): number {
  */
 const CLOUD_SHARE = 0.4, STAR_SHARE = 0.04;
 
-/** Fills `star` (x, y, z, size) and `flux` (rgb) for a galaxy from its model; returns the count used. */
-function fillCloud(model: GalaxyModel, star: Float32Array, flux: Float32Array, nClouds: number, nStars: number): number {
+/**
+ * Fills `star` (x, y, z, size) and `flux` (rgb) for a galaxy from its model: single stars first,
+ * then star clouds. A generator (spread over frames): `state` reports the count written and the
+ * fractions of the stars and clouds done.
+ */
+function* fillCloud(model: GalaxyModel, star: Float32Array, flux: Float32Array, nClouds: number, nStars: number,
+  state: { n: number; stars: number; clouds: number }): Generator<void> {
   const r = mulberry(model.g.seed + 0.123);
   const red = [1.0, 0.66, 0.42];
   const cols = [C_BULGE, C_OLD, C_OLD, C_YOUNG, C_HII, C_OLD, C_HII];
-  let n = 0;
   const B = model.bright;
-  const fy = model.frac[3] + model.frac[4] + model.frac[6];
-  if (fy > 0) model.sample(nClouds, r, (x, y, z, comp, hz) => {
-    // young star clouds, a few thousandths to a hundredth of a radius, and smaller H II knots
-    const size = comp === 4 || comp === 6 ? 0.002 + 0.005 * r() : Math.min(0.004 + 0.012 * r(), 2 * hz + 0.002);
-    const c = cols[comp];
-    const f = (CLOUD_SHARE * fy * B) / nClouds;
-    star[n * 4] = x; star[n * 4 + 1] = y; star[n * 4 + 2] = z; star[n * 4 + 3] = size;
-    flux[n * 3] = c[0] * f; flux[n * 3 + 1] = c[1] * f; flux[n * 3 + 2] = c[2] * f;
-    n++;
-  }, [3, 4, 6]);
+  state.n = 0; state.stars = 0; state.clouds = 0;
   // single stars: blue supergiants where stars are young, red giants everywhere; a steep
   // luminosity function (most faint, a few brilliant)
-  model.sample(nStars, r, (x, y, z, comp) => {
+  let k = 0;
+  yield* model.sample(nStars, r, (x, y, z, comp) => {
     const young = comp >= 3 && comp !== 5;
     const c = young ? (r() < 0.75 ? C_YOUNG : red) : r() < 0.6 ? red : C_OLD;
     const L = (Math.pow(r(), 6) * 40 + 0.2) / 6.9;
     const f = ((STAR_SHARE * B) / nStars) * L;
+    const n = state.n++;
     star[n * 4] = x; star[n * 4 + 1] = y; star[n * 4 + 2] = z; star[n * 4 + 3] = 2e-5;
     flux[n * 3] = c[0] * f; flux[n * 3 + 1] = c[1] * f; flux[n * 3 + 2] = c[2] * f;
-    n++;
+    state.stars = ++k / nStars;
   });
-  return n;
+  state.stars = 1;
+  const fy = model.frac[3] + model.frac[4] + model.frac[6];
+  k = 0;
+  if (fy > 0) yield* model.sample(nClouds, r, (x, y, z, comp, hz) => {
+    // young star clouds, a few thousandths to a hundredth of a radius, and smaller H II knots
+    const size = comp === 4 || comp === 6 ? 0.002 + 0.005 * r() : Math.min(0.004 + 0.012 * r(), 2 * hz + 0.002);
+    const c = cols[comp];
+    const f = (CLOUD_SHARE * fy * B) / nClouds;
+    const n = state.n++;
+    star[n * 4] = x; star[n * 4 + 1] = y; star[n * 4 + 2] = z; star[n * 4 + 3] = size;
+    flux[n * 3] = c[0] * f; flux[n * 3 + 1] = c[1] * f; flux[n * 3 + 2] = c[2] * f;
+    state.clouds = ++k / nClouds;
+  }, [3, 4, 6]);
+  state.clouds = 1;
 }
 
 export interface GalaxyView { galaxy: Galaxy; rel: Vector3; dist: number; pixelRadius: number }
@@ -673,6 +701,8 @@ export class GalaxiesLayer {
   /** the nearest galaxy as a 3D cloud of star clouds and stars */
   private cloud: Points;
   private cloudOf: Galaxy | null = null;
+  private filling: Generator<void> | null = null;
+  private fill = { n: 0, stars: 0, clouds: 0 };
   private nClouds: number;
   private nStars: number;
   private pixAng = { value: 1e-3 };
@@ -799,18 +829,26 @@ export class GalaxiesLayer {
     if (near && this.cloud.visible) {
       const u = (this.cloud.material as ShaderMaterial).uniforms;
       const model = this.models.get(near)!;
+      const geo = this.cloud.geometry;
       if (this.cloudOf !== near) {
-        const geo = this.cloud.geometry;
-        const cnt = fillCloud(model, geo.attributes.aStar.array as Float32Array, geo.attributes.aFlux.array as Float32Array, this.nClouds, this.nStars);
-        geo.setDrawRange(0, cnt);
-        geo.attributes.aStar.needsUpdate = true;
-        geo.attributes.aFlux.needsUpdate = true;
+        this.filling = fillCloud(model, geo.attributes.aStar.array as Float32Array, geo.attributes.aFlux.array as Float32Array, this.nClouds, this.nStars, this.fill);
+        geo.setDrawRange(0, 0);
         for (const [k, v] of Object.entries(model.u)) {
           const dst = u[k];
           if (v.value instanceof Vector4 || v.value instanceof Vector3 || v.value instanceof Matrix3) (dst.value as Vector4).copy(v.value as Vector4);
           else dst.value = v.value;
         }
         this.cloudOf = near;
+      }
+      if (this.filling) {
+        // a few milliseconds of sampling per frame
+        const t0 = performance.now(), from = this.fill.n;
+        while (performance.now() - t0 < 4) if (this.filling.next().done) { this.filling = null; break; }
+        const a = geo.attributes.aStar as BufferAttribute, f = geo.attributes.aFlux as BufferAttribute;
+        a.clearUpdateRanges(); f.clearUpdateRanges();
+        a.addUpdateRange(from * 4, (this.fill.n - from) * 4); f.addUpdateRange(from * 3, (this.fill.n - from) * 3);
+        a.needsUpdate = true; f.needsUpdate = true;
+        geo.setDrawRange(0, this.fill.n);
       }
       near.upos.sub(cam, rel);
       const R = near.radius;
@@ -838,7 +876,8 @@ export class GalaxiesLayer {
       u.uClipScale.value = 1 / Math.max(dist, R);
       (u.uCam.value as Vector3).set(-rel.dot(g.major) / R, -rel.dot(g.minor) / R, -rel.dot(g.normal) / R);
       // up close the cloud carries part of the light (as star clouds and single stars)
-      const ws = g === near ? wStars : 0, wc = g === near ? wClouds : 0;
+      // (as far as the cloud is filled yet)
+      const ws = g === near && g === this.cloudOf ? wStars * this.fill.stars : 0, wc = g === near && g === this.cloudOf ? wClouds * this.fill.clouds : 0;
       u.uWeight.value = 1 - STAR_SHARE * ws;
       u.uYoungW.value = (1 - STAR_SHARE * ws - CLOUD_SHARE * wc) / (1 - STAR_SHARE * ws);
     }
