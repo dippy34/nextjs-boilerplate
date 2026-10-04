@@ -80,10 +80,10 @@ vec3 psfShade(vec2 pointCoord, float radius, float energy, vec3 color) {
     }
   }
   float edge = 1.0 - smoothstep(0.8, 1.0, sqrt(r2) / radius);
-  // the faintest stars drawn fade in over the last ~0.6 magnitudes above the cut-off instead of all
+  // the faintest stars drawn fade in over the last ~0.4 magnitudes above the cut-off instead of all
   // showing as equal specks (which read as a photograph's grain); the eye barely sees stars near
   // its limit, and their combined light is in the sky's glow already
-  float lum = (core + halo + spikes) * edge * smoothstep(0.0, 0.8, g);
+  float lum = (core + halo + spikes) * edge * smoothstep(0.0, 0.55, g);
   // faint stars show little colour (the eye's colour vision fades with brightness); bright ones
   // their full (gently boosted) blackbody colour
   // (strongly coloured stars, blue OB stars above all, keep most of it: crowded fields of faint

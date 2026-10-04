@@ -56,6 +56,7 @@ Usage: python3 build_elevation.py [body ...]   (downloads via elevation_sources.
 from __future__ import annotations
 
 import base64
+from collections import defaultdict
 import heapq
 import json
 import math
@@ -420,7 +421,7 @@ def build(body: str) -> dict:
     assert (g.max - offset) / step < 65535, f"{body}: range too large for the step"
     out_dir = DEST / body
     if out_dir.exists():
-        for p in sorted(out_dir.rglob("*.png")):
+        for p in sorted([*out_dir.rglob("*.png"), *out_dir.rglob("*.pak")]):
             p.unlink()
     out_dir.mkdir(parents=True, exist_ok=True)
     budget = cfg["budget"] * 1e6
@@ -560,6 +561,79 @@ def write_fixture(body: str, man: dict, count: int = 24) -> None:
     path.write_text(json.dumps(pts, indent=1))
 
 
+PACK_MAX = 1_500_000    # bytes per pack (a whole pack is what a host without range requests sends)
+
+
+def pack(body: str) -> None:
+    """Pack the tile PNGs of each level into small, spatially local files: the tiles of one 4x4
+    block of siblings (one face at levels 0-1), or of a 2x2 block where a 4x4 block would exceed
+    PACK_MAX. A tile is read with an HTTP range request; a host that ignores ranges (Cloudflare
+    Pages) sends the whole pack, whose tiles are all cached (they are the neighbours needed next).
+    The manifest's levels get `packs`: [{file, tiles: [face, x, y, length, ...]}] in file order
+    (offsets are the running sum). The loose PNGs are removed."""
+    out_dir = DEST / body
+    man = json.loads((out_dir / "manifest.json").read_text())
+    for e in man["levels"]:
+        lv = e["level"]
+        d = out_dir / str(lv)
+        tiles = []
+        for p in d.glob("*.png"):
+            f, x, y = (int(v) for v in p.stem.split("-"))
+            tiles.append((f, x, y, p))
+        if not tiles:
+            if not e.get("packs"):
+                raise RuntimeError(f"{body} L{lv}: no tiles and no packs")
+            continue
+        for old in d.glob("*.pak"):
+            old.unlink()
+        groups: dict[tuple, list] = defaultdict(list)
+        sh = 2 if lv >= 2 else lv          # 4x4 blocks (levels 0-1: the whole face)
+        for t in tiles:
+            groups[(t[0], t[1] >> sh, t[2] >> sh, sh)].append(t)
+        blocks = []
+        for (f, bx, by, s_), ts in groups.items():
+            if s_ == 2 and sum(t[3].stat().st_size for t in ts) > PACK_MAX:
+                sub: dict[tuple, list] = defaultdict(list)
+                for t in ts:
+                    sub[(f, t[1] >> 1, t[2] >> 1, 1)].append(t)
+                blocks += list(sub.items())
+            else:
+                blocks.append(((f, bx, by, s_), ts))
+        packs = []
+        for (f, bx, by, s_), ts in sorted(blocks):
+            name = f"{lv}/{f}-{s_}-{bx}-{by}.pak"
+            ts.sort(key=lambda t: (t[2], t[1]))
+            with open(out_dir / name, "wb") as fh:
+                for t in ts:
+                    fh.write(t[3].read_bytes())
+            packs.append({"file": name, "tiles": [v for t in ts for v in (t[0], t[1], t[2], t[3].stat().st_size)]})
+        for t in tiles:
+            t[3].unlink()
+        e["packs"] = packs
+    man["path"] = "packs (HTTP range requests, or whole packs; see levels[].packs)"
+    man["bytes"] = sum(p.stat().st_size for p in out_dir.rglob("*.pak"))
+    (out_dir / "manifest.json").write_text(json.dumps(man, separators=(",", ":")))
+    n = sum(len(e["packs"]) for e in man["levels"])
+    big = max(p.stat().st_size for p in out_dir.rglob("*.pak"))
+    print(f"  {body}: packed into {n} files (largest {big / 1e6:.2f} MB), {man['bytes'] / 1e6:.1f} MB", flush=True)
+
+
+def unpack(body: str) -> None:
+    """Back to loose PNGs (to re-pack with another layout)."""
+    out_dir = DEST / body
+    man = json.loads((out_dir / "manifest.json").read_text())
+    for e in man["levels"]:
+        for pk in e.pop("packs", []):
+            data = (out_dir / pk["file"]).read_bytes()
+            at, t = 0, pk["tiles"]
+            for i in range(0, len(t), 4):
+                f, x, y, n = t[i:i + 4]
+                (out_dir / str(e["level"]) / f"{f}-{x}-{y}.png").write_bytes(data[at:at + n])
+                at += n
+            (out_dir / pk["file"]).unlink()
+    (out_dir / "manifest.json").write_text(json.dumps(man, indent=1))
+
+
 def write_index() -> None:
     bodies = {}
     for d in sorted(DEST.iterdir()):
@@ -573,9 +647,16 @@ def write_index() -> None:
 def main() -> None:
     import elevation_hires
     args = sys.argv[1:]
+    if args[:1] == ["pack"]:            # (re-)pack existing tiles
+        for b in args[1:] or list(BODIES):
+            unpack(b)
+            pack(b)
+        write_index()
+        return
     if args[:1] == ["hires"]:           # only the regional levels (Earth, Moon), keeping the rest
         for b in args[1:] or list(elevation_hires.HI):
             write_fixture(b, elevation_hires.build(b))
+            pack(b)
         write_index()
         return
     for b in args or list(BODIES):
@@ -583,6 +664,7 @@ def main() -> None:
         if b in elevation_hires.HI:
             man = elevation_hires.build(b)
         write_fixture(b, man)
+        pack(b)
     write_index()
 
 
