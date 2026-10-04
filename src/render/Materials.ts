@@ -15,6 +15,7 @@ export const MATERIALS = {
   uMatCol: { value: null as DataArrayTexture | null },
   uMatNrm: { value: null as DataArrayTexture | null },
   uMatOn: { value: 0 },
+  uMatScales: { value: 4 },
   // rock shadows and contact shading on the ground (render/Rocks.ts): two cascades side by side
   // (near, far), R = the rocks' depth towards the Sun (exp-encoded), G = darkening around their
   // bases (seen from above); the matrices take camera-relative world positions to (u, v, depth)
@@ -92,6 +93,27 @@ float rockShadow(vec3 p, float bias, float lite, out float ao) {
 }
 `;
 
+/** a software renderer (SwiftShader, llvmpipe): anisotropic filtering costs it far more than it shows */
+let software = false;
+
+/**
+ * Adapt the materials to the renderer once it is known (called with the WebGL renderer each frame;
+ * cheap after the first call): no anisotropic filtering on a software renderer.
+ */
+export function adaptMaterials(gl: { getContext(): WebGLRenderingContext | WebGL2RenderingContext }): void {
+  if (adaptState.done) return;
+  adaptState.done = true;
+  try {
+    const ctx = gl.getContext();
+    const ext = ctx.getExtension('WEBGL_debug_renderer_info');
+    const name = String(ext ? ctx.getParameter(ext.UNMASKED_RENDERER_WEBGL) : ctx.getParameter(ctx.RENDERER));
+    software = /swiftshader|llvmpipe|softpipe|software/i.test(name);
+  } catch { /* keep the defaults */ }
+  if (!software) return;
+  for (const t of [MATERIALS.uMatCol.value, MATERIALS.uMatNrm.value]) if (t) { t.anisotropy = 1; t.needsUpdate = true; }
+}
+const adaptState = { done: false };
+
 /** Layer indices (manifest order). */
 export const MAT = { regolith: 0, regolithPocked: 1, rockGround: 2, cliff: 3, sand: 4, drySoil: 5, snow: 6, forest: 7 } as const;
 
@@ -143,7 +165,7 @@ export async function loadMaterials(base: string, vr: boolean): Promise<void> {
     t.minFilter = LinearMipmapLinearFilter;
     t.magFilter = LinearFilter;
     t.generateMipmaps = true;
-    t.anisotropy = 4;
+    t.anisotropy = software ? 1 : 4;
     t.needsUpdate = true;
     return t;
   };
@@ -176,6 +198,7 @@ uniform float uMatOn;
 uniform vec3 uTanE;      // body-fixed east, north and up of the material anchor
 uniform vec3 uTanN;
 uniform vec3 uMatO;      // the patch origin in the anchor's frame (m)
+uniform int uMatScales;  // number of texture scales (4)
 vec2 mrot(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(c * v.x - s * v.y, s * v.x + c * v.y); }
 vec2 mhash2(vec2 p) { p = mod(p, 289.0); return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
 float gMatLite;   // headset tier: one tap per material and scale instead of three (cheaper, the tiling shows more)
@@ -193,27 +216,21 @@ void hexMat(vec2 uv, vec2 gx, vec2 gy, float layer, out vec3 col, out vec2 nrm, 
   t.z = 1.0 - t.x - t.y;
   float s = step(0.0, -t.z), s2 = 2.0 * s - 1.0;
   vec3 w = vec3(-t.z * s2, s - t.y * s2, s - t.x * s2);
-  vec2 v1 = id + vec2(s, s), v2 = id + vec2(s, 1.0 - s), v3 = id + vec2(1.0 - s, s);
-  col = vec3(0.0); nrm = vec2(0.0); hgt = 0.0;
-  vec4 c[3]; vec4 n[3]; float a[3];
-  for (int i = 0; i < 3; i++) {
-    vec2 v = i == 0 ? v1 : i == 1 ? v2 : v3;
-    vec2 r = mhash2(v);
-    a[i] = r.x * 6.2831853;
-    vec2 q = mrot(uv, a[i]) + r * 7.31 + r.yx * 3.17;
-    vec2 qx = mrot(gx, a[i]), qy = mrot(gy, a[i]);
-    c[i] = textureGrad(uMatCol, vec3(q, layer), qx, qy);
-    n[i] = textureGrad(uMatNrm, vec3(q, layer), qx, qy);
-  }
+  // the three lattice vertices around the point, each showing the scan at its own offset and turn
+  // (written out, no arrays: cheaper to compile and to run)
+  vec2 r1 = mhash2(id + vec2(s, s)), r2 = mhash2(id + vec2(s, 1.0 - s)), r3 = mhash2(id + vec2(1.0 - s, s));
+  float a1 = r1.x * 6.2831853, a2 = r2.x * 6.2831853, a3 = r3.x * 6.2831853;
+  vec3 q1 = vec3(mrot(uv, a1) + r1 * 7.31 + r1.yx * 3.17, layer), q2 = vec3(mrot(uv, a2) + r2 * 7.31 + r2.yx * 3.17, layer), q3 = vec3(mrot(uv, a3) + r3 * 7.31 + r3.yx * 3.17, layer);
+  vec4 n1 = textureGrad(uMatNrm, q1, mrot(gx, a1), mrot(gy, a1));
+  vec4 n2 = textureGrad(uMatNrm, q2, mrot(gx, a2), mrot(gy, a2));
+  vec4 n3 = textureGrad(uMatNrm, q3, mrot(gx, a3), mrot(gy, a3));
   // sharpen the lattice weights and let the higher grain win
-  vec3 W = w * w * w * vec3(0.25 + n[0].a, 0.25 + n[1].a, 0.25 + n[2].a);
+  vec3 W = w * w * w * (0.25 + vec3(n1.a, n2.a, n3.a));
   W /= W.x + W.y + W.z;
-  for (int i = 0; i < 3; i++) {
-    col += W[i] * c[i].rgb;
-    nrm += W[i] * mrot(n[i].rg * 2.0 - 1.0, -a[i]);
-    hgt += W[i] * n[i].a;
-  }
-  col *= 2.0;
+  col = (W.x * textureGrad(uMatCol, q1, mrot(gx, a1), mrot(gy, a1)).rgb + W.y * textureGrad(uMatCol, q2, mrot(gx, a2), mrot(gy, a2)).rgb
+       + W.z * textureGrad(uMatCol, q3, mrot(gx, a3), mrot(gy, a3)).rgb) * 2.0;
+  nrm = W.x * mrot(n1.rg * 2.0 - 1.0, -a1) + W.y * mrot(n2.rg * 2.0 - 1.0, -a2) + W.z * mrot(n3.rg * 2.0 - 1.0, -a3);
+  hgt = W.x * n1.a + W.y * n2.a + W.z * n3.a;
 }
 // the hex-tiled height alone
 float hexH(vec2 uv, vec2 gx, vec2 gy, float layer) {
@@ -225,13 +242,11 @@ float hexH(vec2 uv, vec2 gx, vec2 gy, float layer) {
   float s = step(0.0, -t.z), s2 = 2.0 * s - 1.0;
   vec3 w = vec3(-t.z * s2, s - t.y * s2, s - t.x * s2);
   vec2 v1 = id + vec2(s, s), v2 = id + vec2(s, 1.0 - s), v3 = id + vec2(1.0 - s, s);
-  vec3 h;
-  for (int i = 0; i < 3; i++) {
-    vec2 v = i == 0 ? v1 : i == 1 ? v2 : v3;
-    vec2 r = mhash2(v);
-    float a = r.x * 6.2831853;
-    h[i] = textureGrad(uMatNrm, vec3(mrot(uv, a) + r * 7.31 + r.yx * 3.17, layer), mrot(gx, a), mrot(gy, a)).a;
-  }
+  vec2 r1 = mhash2(v1), r2 = mhash2(v2), r3 = mhash2(v3);
+  float a1 = r1.x * 6.2831853, a2 = r2.x * 6.2831853, a3 = r3.x * 6.2831853;
+  vec3 h = vec3(textureGrad(uMatNrm, vec3(mrot(uv, a1) + r1 * 7.31 + r1.yx * 3.17, layer), mrot(gx, a1), mrot(gy, a1)).a,
+                textureGrad(uMatNrm, vec3(mrot(uv, a2) + r2 * 7.31 + r2.yx * 3.17, layer), mrot(gx, a2), mrot(gy, a2)).a,
+                textureGrad(uMatNrm, vec3(mrot(uv, a3) + r3 * 7.31 + r3.yx * 3.17, layer), mrot(gx, a3), mrot(gy, a3)).a);
   vec3 W = w * w * w * (0.25 + h);
   return dot(W, h) / (W.x + W.y + W.z);
 }
@@ -253,18 +268,24 @@ vec3 groundDetailS(vec3 g, vec3 up, vec3 tn, float mpp, vec4 sel, float mix2, fl
   vec3 bend = vec3(0.0);
   float vis = 0.0;
   float S = 2.0;
-  float shown = 0.0;
+  float shown = 0.0, shownW = 0.0;
   float finer = 0.0;     // visibility of the next finer scale
-  for (int k = 0; k < 4; k++) {
+  // (a loop bound from a uniform: compiled once rather than unrolled four times)
+  for (int k = 0; k < uMatScales; k++) {
     // a scale is drawn while one repeat of it spans more than ~20 pixels
     float v = smoothstep(20.0, 90.0, S / max(mpp, 1e-4));
-    if (lite > 0.5 && shown >= 2.0) v = 0.0;
+    // at most three scales at a time (two in the headset): a fourth, coarser one would add only faint
+    // mottling (faded out smoothly as the finer ones come in)
+    v = min(v, clamp((lite > 0.5 ? 2.0 : 3.0) - shownW, 0.0, 1.0));
     if (v > 0.002) {
       shown += 1.0;
+      shownW += v;
       // where a finer scale is drawn, this one adds only its mottling (blurred), weaker
       float blur = mix(1.0, 5.0, finer);
       float amp = mix(1.0, 0.55, finer);
-      vec2 o = vec2(0.37, 0.11) * float(k);
+      // under a finer scale this one is only blurred mottling: one tap is enough (no tiling to hide)
+      gMatLite = lite > 0.5 || finer > 0.5 ? 1.0 : 0.0;
+      vec2 o = vec2(0.37, 0.11) * float(k);   // (k: the scale's index)
       vec2 uv = P.xy / S + o;
       vec2 gx = dPx.xy / S * blur, gy = dPy.xy / S * blur;
       vec3 cA, cB, cS, cW; vec2 nA, nB, nS, nW; float hA, hB, hS, hW;
@@ -304,7 +325,7 @@ vec3 groundDetailS(vec3 g, vec3 up, vec3 tn, float mpp, vec4 sel, float mix2, fl
       col *= mix(vec3(1.0), c, v * amp);
       bend += b * v * amp / blur;
       // grain shadows at low sun (finest drawn scale, desktop): the height towards the Sun rising above the light ray
-      if (lite < 0.5 && shown < 1.5 && v > 0.3) {
+      if (lite < 0.5 && shown < 1.5 && v > 0.3 && mpp < 0.012) {
         vec2 sd = vec2(dot(sunB, e), dot(sunB, nr));
         float sl = length(sd);
         float su = dot(sunB, up);
@@ -313,12 +334,12 @@ vec3 groundDetailS(vec3 g, vec3 up, vec3 tn, float mpp, vec4 sel, float mix2, fl
           float tanEl = su / sl;
           float occ = 0.0;
           // heights are about 4 % of the repeat (a 2 m scan of regolith: ~8 cm of relief)
-          for (int j = 1; j <= 4; j++) {
-            float dist = float(j * j) * 0.006;
+          for (int j = 1; j <= 3; j++) {
+            float dist = float(j * j) * 0.01;
             float hq = hexH(uv + sd * dist, gx, gy, mix2 > 0.5 ? sel.y : sel.x);
             occ = max(occ, ((hq - hF) * 0.04 - dist * tanEl) / 0.004);
           }
-          shadow = mix(1.0, 1.0 - clamp(occ, 0.0, 1.0) * 0.85, v * (1.0 - steep));
+          shadow = mix(1.0, 1.0 - clamp(occ, 0.0, 1.0) * 0.85, v * (1.0 - steep) * smoothstep(0.012, 0.006, mpp));
         }
       }
       vis = max(vis, v);

@@ -418,7 +418,8 @@ void main() {
     // patches of the second material, fixed to the ground (lattices of 400 m and 90 m cells)
     float patchN = 0.65 * bnAt(uOI0, uOF0 + vLocal / 400.0) + 0.35 * bnAt(uOI1, uOF1 + vLocal / 90.0);
     if (uMatMode < 0.5) {
-      mix2 = smoothstep(0.5, 0.7, patchN) * 0.8 + freshAll * 0.5;
+      // (patches entirely of one material or the other, blended only at their edges: cheaper)
+      mix2 = clamp(smoothstep(0.5, 0.62, patchN) + freshAll * 0.5, 0.0, 1.0);
       // lunar and Mercurian regolith: a faint warm (reddish) tint of mature soil
       albedo *= mix(vec3(1.0), vec3(1.02, 1.0, 0.96), uHScale);
     } else if (uMatMode < 1.5) {

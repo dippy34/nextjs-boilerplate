@@ -6,7 +6,7 @@ import {
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { UPos } from '../core/upos';
 import { baseRadius, vnoise } from '../universe/Terrain';
-import { MAT, MATERIALS, ROCK_SHADOW_GLSL } from './Materials';
+import { adaptMaterials, MAT, MATERIALS, ROCK_SHADOW_GLSL } from './Materials';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import type { TerrainPatch } from './TerrainPatch';
 
@@ -328,6 +328,7 @@ export class Rocks {
 
   /** Per frame, after the terrain patch. `cam`: the explorer's position; `gl` renders the shadow map. */
   update(cam: UPos, gl?: WebGLRenderer): void {
+    if (gl) adaptMaterials(gl);
     const t = this.terrain;
     const c = t.current;
     const below = t.below(cam);
