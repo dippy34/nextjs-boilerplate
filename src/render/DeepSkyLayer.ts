@@ -42,6 +42,25 @@ ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
+/**
+ * A nebula too small to resolve: a soft glow of its colour that keeps the nebula's light (its
+ * integrated flux) down to below a pixel, as the volume fades out.
+ */
+const FAR_FRAG = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+uniform vec3 uCol;
+uniform float uGain;
+uniform float uAmp;
+varying vec2 vP;
+void main() {
+  float r2 = dot(vP, vP);
+  if (r2 > 1.0) discard;
+  gl_FragColor = vec4(uCol * uAmp * uGain * exp(-4.0 * r2), 1.0);
+${OUTPUT_FRAGMENT}
+  #include <logdepthbuf_fragment>
+}`;
+
 function rnd(seed: number): () => number {
   let a = Math.floor(seed * 4294967296) >>> 0 || 1;
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -112,17 +131,18 @@ uniform sampler3D uNoise;
 uniform vec3 uCenter;   // camera-relative (m)
 uniform float uRadius;  // m
 uniform mat3 uRot;      // world -> nebula frame
-uniform float uType;    // 0 emission, 1 planetary, 2 supernova remnant
+uniform float uType;    // 0 emission, 1 planetary, 2 supernova remnant, 3 reflection
 uniform float uShape;
 uniform float uSeed;
 uniform float uGain;
 uniform float uBright;
+uniform float uFade;    // gives way to the far glow when a few pixels small
 uniform float uLite;
 uniform float uPixAng;
 uniform vec3 uAxes;     // envelope axes (nebula frame, radii)
 uniform vec3 uAxis;     // symmetry axis (nebula frame)
 uniform vec4 uP;        // emission: cavity radius, pillars, lanes, [O III] extent
-uniform vec4 uQ;        // emission: filaments, pillar angular scale, -, reflection
+uniform vec4 uQ;        // emission: filaments, pillar angular scale, ionisation-front bar, reflection
 varying vec3 vPos;
 float sq(float x) { return x * x; }
 vec4 nz(vec3 p, float lod) { return textureLod(uNoise, p, max(lod, 0.0)); }
@@ -163,6 +183,13 @@ void emission(vec3 p, float lod, out vec3 e, out float dust) {
   float oiii = 1.0 - smoothstep(uP.w * 0.5, uP.w * 1.4, rp + 0.3 * (n1.a - 0.5));
   vec3 tint = mix(mix(vec3(1.0, 0.16, 0.26), vec3(1.0, 0.32, 0.38), n0.r), vec3(0.32, 0.95, 0.82), oiii * 0.8);
   e = tint * dens * ion * 6.0;
+  if (uQ.z > 0.0) {
+    // an ionisation front seen edge-on: a bright straight ridge beside the cluster (Orion's Bright Bar)
+    vec3 bc = vec3(0.1, -0.16, 0.12), bn = normalize(vec3(0.55, 0.85, 0.0)), ba = normalize(vec3(0.85, -0.55, 0.0));
+    vec3 dq = p - bc;
+    float bar = exp(-sq(dot(dq, bn) / 0.025) - sq(dq.z / 0.12)) * smoothstep(0.24, 0.1, abs(dot(dq, ba)));
+    e += mix(vec3(1.0, 0.35, 0.35), vec3(0.9, 0.85, 0.6), 0.4) * bar * uQ.z * (0.6 + 0.8 * n1.g) * ion * 3.0;
+  }
   dust = 0.0;
   if (uP.y > 0.0) {
     // pillars: a few short columns of dense dust in the walls, pointing at the stars (noise of the
@@ -175,7 +202,7 @@ void emission(vec3 p, float lod, out vec3 e, out float dust) {
     float tip = uP.x * 1.1 + 0.3 * np.g;
     float len = 0.08 + 0.14 * np.b;
     float x = (rp - tip) / len;                         // 0 at the tip, 1 at the base
-    float width = 0.9 - 0.05 * clamp(x, 0.0, 1.0);
+    float width = 0.9 - 0.05 * clamp(x, 0.0, 1.0) - 0.06 * clamp(uP.y - 1.0, 0.0, 1.0);   // strong pillars are broad
     float inCol = thr(np.r, width, width + 0.025, lod + log2(uQ.y / max(rp, 0.1))) * site;
     float along = smoothstep(0.0, 0.05, x) * (1.0 - smoothstep(0.7, 1.1, x));
     dust += inCol * along * uP.y * 90.0 * (0.6 + 0.8 * n1.g);
@@ -270,7 +297,8 @@ void remnant(vec3 p, float lod, out vec3 e) {
     float web = smoothstep(0.72, 0.95, ridge(n1.b)) * (0.15 + 1.1 * smoothstep(0.4, 0.75, n0.g))
       + (hi ? 0.6 * smoothstep(0.78, 0.97, ridge(n2.g)) : 0.0);
     web *= smoothstep(0.15, 0.6, rq);
-    vec3 fil = mix(vec3(1.0, 0.28, 0.14), vec3(1.0, 0.7, 0.35), smoothstep(0.35, 0.75, n0.r));
+    // red (hydrogen, sulphur) and yellow-green (neutral oxygen) filaments
+    vec3 fil = mix(vec3(1.0, 0.3, 0.16), vec3(0.78, 0.92, 0.38), smoothstep(0.4, 0.7, n0.r));
     vec3 sync = vec3(0.48, 0.64, 1.0) * smoothstep(0.85, 0.05, rq) * (0.5 + 0.6 * n1.a);
     e = fil * web * body * 5.0 + sync * 0.75;
   } else if (uShape < 1.5) {
@@ -287,6 +315,26 @@ void remnant(vec3 p, float lod, out vec3 e) {
     vec3 col = mix(mix(vec3(0.45, 1.0, 0.55), vec3(1.0, 0.3, 0.25), smoothstep(0.3, 0.6, n1.g)), vec3(0.5, 0.6, 1.0), smoothstep(0.7, 0.9, n0.g));
     e = col * shell * kn * 9.0 + vec3(0.45, 0.6, 1.0) * exp(-sq((r - 0.95) / 0.04)) * 0.25 * (0.5 + n1.a);
   }
+}
+
+// a reflection nebula: dust lit by the cluster's hot stars, blue, in fine parallel striations
+// (the Pleiades' nebulosity is a cloud the cluster is passing through, combed by its light)
+void reflection(vec3 p, float lod, out vec3 e) {
+  float r = length(p);
+  vec3 q = p * vec3(1.0, 4.0, 1.0);                 // striations along x
+  vec4 n0 = nz(p * 0.5 + sd, lod - 1.0);
+  vec4 n1 = nz(q * 0.9 + sd * 1.3 + (n0.xyz - 0.5) * 0.5, lod + 1.85);
+  vec4 n2 = hi ? nz(q * 2.4 + sd * 1.7, lod + 3.26) : vec4(0.5);
+  float dens = thr(n0.r, 0.3, 0.75, lod - 1.0) * (0.3 + 1.4 * n1.g * (0.5 + n2.b)) * (1.0 - smoothstep(0.55, 1.0, r));
+  // lit by the bright stars near the middle
+  float lit = 0.0;
+  for (int k = 0; k < 5; k++) {
+    vec3 sp = (vec3(fract(sin(float(k) * 12.9898 + uSeed * 78.233) * 43758.5453), fract(sin(float(k) * 39.346 + uSeed * 11.135) * 43758.5453),
+      fract(sin(float(k) * 73.156 + uSeed * 52.235) * 43758.5453)) - 0.5) * 0.5;
+    vec3 d = p - sp;
+    lit += 1.0 / (0.01 + dot(d, d) * 12.0);
+  }
+  e = vec3(0.42, 0.58, 1.0) * dens * lit * 0.08;
 }
 
 void main() {
@@ -317,7 +365,8 @@ void main() {
     float dust = 0.0;
     if (uType < 0.5) emission(p, lod, e, dust);
     else if (uType < 1.5) planetary(p, lod, e);
-    else remnant(p, lod, e);
+    else if (uType < 2.5) remnant(p, lod, e);
+    else reflection(p, lod, e);
     col += T * e * dt;
     T *= exp(-dust * dt);
   }
@@ -334,14 +383,14 @@ void main() {
     }
   }
   // the dying star at a planetary nebula's centre, the pulsar in the Crab
-  if (uType > 0.5 && uType < 1.5 || uType > 1.5 && uShape < 0.5) {
+  if (uType > 0.5 && uType < 1.5 || uType > 1.5 && uType < 2.5 && uShape < 0.5) {
     float ts = dot(-oc, dir);
     if (ts > 0.0) {
       float d = length(oc + dir * ts) / max(ts, 1e-3);
       col += vec3(0.8, 0.88, 1.0) * (exp(-sq(d / max(0.0015, uPixAng * 0.8))) * 25.0 + 0.04 / (1.0 + sq(d / 0.008)));
     }
   }
-  gl_FragColor = vec4(col * 0.7 * uGain * uBright, 1.0);
+  gl_FragColor = vec4(col * 0.7 * uGain * uBright * uFade, 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
@@ -355,6 +404,8 @@ interface NebLook {
   /** emission: filaments, pillar angular scale, -, reflection */
   q?: [number, number, number, number];
   bright?: number;
+  /** a reflection nebula around a cluster */
+  reflection?: boolean;
   /** planetary / remnant: tilt of the symmetry axis from our line of sight (degrees) */
   tilt?: number;
 }
@@ -365,8 +416,8 @@ interface NebLook {
  * 4 Cat's Eye. Remnants: 0 filled (Crab), 1 thin shell (Veil), 2 knotty shell (Cas A).
  */
 const LOOKS: Record<string, NebLook> = {
-  'Orion Nebula': { shape: 2, axes: [1, 1, 0.7], p: [0.15, 0, 0.8, 0.3], q: [1.2, 3, 0, 0.4], bright: 1.6 },
-  'Eagle Nebula': { shape: 0, axes: [1, 1.1, 0.85], p: [0.3, 1.0, 0.3, 0.3], q: [1.0, 2.2, 0, 0] },
+  'Orion Nebula': { shape: 2, axes: [1, 1, 0.7], p: [0.15, 0, 0.8, 0.3], q: [1.2, 3, 1.0, 0.4], bright: 1.6 },
+  'Eagle Nebula': { shape: 0, axes: [1, 1.1, 0.85], p: [0.3, 2.0, 0.3, 0.3], q: [1.0, 1.1, 0, 0] },
   'Lagoon Nebula': { shape: 0, axes: [1, 0.6, 0.7], p: [0.2, 0.3, 1.1, 0.2], q: [1.0, 3, 0, 0.2] },
   'Carina Nebula': { shape: 0, axes: [1, 0.85, 0.8], p: [0.25, 0.8, 1.1, 0.35], q: [1.1, 2.6, 0, 0.1], bright: 2.2 },
   'Rosette Nebula': { shape: 1, axes: [1, 1, 1], p: [0.35, 0.35, 0.3, 0.45], q: [0.9, 5, 0, 0] },
@@ -376,6 +427,7 @@ const LOOKS: Record<string, NebLook> = {
   'Omega Nebula': { shape: 0, axes: [1, 0.7, 0.7], p: [0.2, 0.3, 0.6, 0.3], q: [1.2, 3, 0, 0], bright: 1.3 },
   'California Nebula': { shape: 0, axes: [1, 0.3, 0.4], p: [0.2, 0.2, 0.4, 0.1], q: [1.4, 3, 0, 0] },
   'Heart Nebula': { shape: 1, axes: [1, 0.9, 0.9], p: [0.4, 0.6, 0.4, 0.2], q: [1.0, 3, 0, 0] },
+  Pleiades: { shape: 0, reflection: true, bright: 1.6 },
   'Ring Nebula': { shape: 0, tilt: 25 },
   'Helix Nebula': { shape: 3, tilt: 18 },
   'Southern Ring Nebula': { shape: 0, tilt: 45 },
@@ -407,6 +459,7 @@ export class DeepSkyLayer {
   views: DeepSkyView[] = [];
   private glows = new Map<DeepSkyObject, Mesh>();
   private volumes = new Map<DeepSkyObject, Mesh>();
+  private far = new Map<DeepSkyObject, Mesh>();
   private stars = new Map<DeepSkyObject, Points>();
   readonly gain = { value: 0.6 };
   private pixAng = { value: 1e-3 };
@@ -418,7 +471,7 @@ export class DeepSkyLayer {
     const noise = noise3D().tex;
     for (const o of objects) {
       const k = o.data.kind;
-      if (k === 'open') continue;
+      if (k === 'open' && !LOOKS[o.name]?.reflection) continue;
       if (k === 'globular') {
         const m = new Mesh(quad, new ShaderMaterial({
           name: 'cluster-glow', vertexShader: BILL_VERT, fragmentShader: GLOW_FRAG,
@@ -458,12 +511,12 @@ export class DeepSkyLayer {
       const ey = new Vector3().crossVectors(L, ex).normalize();
       const rot = new Matrix3().set(ex.x, ex.y, ex.z, ey.x, ey.y, ey.z, L.x, L.y, L.z);
       const tilt = ((look.tilt ?? 0) * Math.PI) / 180;
-      const type = k === 'emission' ? 0 : k === 'planetary' ? 1 : 2;
+      const type = look.reflection ? 3 : k === 'emission' ? 0 : k === 'planetary' ? 1 : 2;
       const m = new Mesh(sphere, new ShaderMaterial({
         name: 'nebula-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG,
         uniforms: {
           uNoise: { value: noise }, uCenter: { value: new Vector3() }, uRadius: { value: o.radius }, uRot: { value: rot },
-          uType: { value: type }, uShape: { value: look.shape }, uSeed: { value: o.seed }, uGain: this.gain, uBright: { value: look.bright ?? 1 },
+          uType: { value: type }, uShape: { value: look.shape }, uSeed: { value: o.seed }, uGain: this.gain, uBright: { value: look.bright ?? 1 }, uFade: { value: 1 },
           uLite: LITE.uLite, uPixAng: this.pixAng, uAxes: { value: new Vector3(...(look.axes ?? [1, 1, 1])) },
           uAxis: { value: new Vector3(Math.sin(tilt), 0, Math.cos(tilt)) },
           uP: { value: new Vector4(...(look.p ?? [0.2, 0, 0, 0.3])) }, uQ: { value: new Vector4(...(look.q ?? [1, 3, 0, 0])) },
@@ -477,6 +530,20 @@ export class DeepSkyLayer {
       m.name = o.name;
       this.group.add(m);
       this.volumes.set(o, m);
+      // its far glow (about the volume's light when a few pixels across)
+      const col: [number, number, number] = type === 3 ? [0.45, 0.6, 1.0] : type === 0 ? [1.0, 0.32, 0.4] : type === 1 ? [0.45, 0.9, 0.85] : [1.0, 0.55, 0.4];
+      const amp = (type === 3 ? 0.3 : type === 0 ? 2.0 : type === 1 ? 1.5 : 1.0) * (look.bright ?? 1);
+      const far = new Mesh(quad, new ShaderMaterial({
+        name: 'nebula-far', vertexShader: BILL_VERT, fragmentShader: FAR_FRAG,
+        uniforms: { uCol: { value: new Vector3(...col) }, uGain: this.gain, uAmp: { value: 0 }, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+        transparent: true, depthWrite: false, blending: AdditiveBlending,
+      }));
+      far.matrixAutoUpdate = false;
+      far.frustumCulled = false;
+      far.renderOrder = -1;
+      far.userData.amp = amp;
+      this.group.add(far);
+      this.far.set(o, far);
     }
   }
 
@@ -489,9 +556,15 @@ export class DeepSkyLayer {
   /** `camPc`: camera position (pc); `adapt`: dark adaptation (1 = dark-adapted). */
   update(cam: UPos, camPc: Vector3, pixelAngle: number, adapt: number): void {
     this.views = [];
-    this.gain.value = 0.55 * Math.pow(Math.max(adapt, 0), 0.55);
     this.pixAng.value = pixelAngle;
     const rel = new Vector3();
+    // inside a bright nebula the eye adapts to the glowing gas all around (no wash-out to white)
+    let inside = 0;
+    for (const o of this.volumes.keys()) {
+      const k = o.upos.sub(cam, rel).length() / o.radius;
+      if (k < 1.3) inside = Math.max(inside, (1.3 - Math.max(k, 0.3)) / 1.0 * (o.data.kind === 'emission' ? 1 : 0.5));
+    }
+    this.gain.value = 0.55 * Math.pow(Math.max(adapt, 0), 0.55) / (1 + 1.5 * inside);
     for (const o of this.objects) {
       o.upos.sub(cam, rel);
       const dist = rel.length();
@@ -499,9 +572,23 @@ export class DeepSkyLayer {
       this.views.push({ obj: o, rel: rel.clone(), dist, pixelRadius: pr });
       const vol = this.volumes.get(o);
       if (vol) {
-        vol.visible = pr > 0.6;
+        // below a few pixels the volume hands over to a glow that keeps its light
+        const wFar = 1 - Math.min(1, Math.max(0, (pr - 3) / 6));
+        const far = this.far.get(o)!;
+        far.visible = wFar > 0.01 && pr > 0.01;
+        if (far.visible) {
+          const sPx = Math.max(pr, 1.5);
+          const s = (sPx * pixelAngle) * dist;
+          far.matrix.makeScale(s, s, s).setPosition(rel);
+          far.matrixWorldNeedsUpdate = true;
+          const fu = (far.material as ShaderMaterial).uniforms;
+          fu.uAmp.value = far.userData.amp * (pr / sPx) ** 2 * wFar;
+          fu.uClipScale.value = 1 / Math.max(dist, 1);
+        }
+        vol.visible = pr > 3 && wFar < 0.99;
         if (vol.visible) {
           const u = (vol.material as ShaderMaterial).uniforms;
+          u.uFade.value = 1 - wFar;
           (u.uCenter.value as Vector3).copy(rel);
           u.uClipScale.value = 1 / Math.max(dist, o.radius);
           vol.matrix.makeScale(o.radius, o.radius, o.radius).setPosition(rel);
