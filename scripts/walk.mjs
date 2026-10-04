@@ -352,6 +352,25 @@ if (which !== 'desktop') {
   await frames(3);
   st = await page.evaluate(() => window.app.walk.state);
   check('v5: menu Fly button returns to free flight', st === 'off', st);
+
+  // Places tab with "Walk there": choosing Apollo 11 travels there, lands and walks
+  await page.evaluate(() => {
+    const a = window.app, m = a.vr.menu, p = m.panel;
+    if (!m.isOpen) a.vr.toggleMenu();
+    const click = (id) => { p.dirty = true; p.update(); const r = p.regions.find((x) => x.id === id); if (!r) throw new Error(`no region ${id}`); r.onClick(); };
+    click('tab:places');
+    click('places:Moon');
+    click('places:walk');
+    click('go:place:Apollo 11 landing site');
+  });
+  await page.waitForFunction(() => window.app.walk.state === 'walk', null, { timeout: 900000 });
+  st = await page.evaluate(() => {
+    const a = window.app, w = a.walk, d = w.debug();
+    const lm = a.landmarks.find((l) => l.name === 'Apollo 11 landing site');
+    return { world: d.world, eyeH: d.eyeH, fromSite: lm.upos.sub(a.rig.upos).length() };
+  });
+  check('v6: Places → Walk there → Apollo 11 travels there, lands and walks', st.world === 'Moon' && st.fromSite < 3000, JSON.stringify(st));
+  await page.screenshot({ timeout: 400000, path: path.join(outDir, 'v6-vr-apollo11.png') });
   await page.close();
 }
 

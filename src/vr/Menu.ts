@@ -58,6 +58,8 @@ export class VRMenu {
   private tab: Tab = 'planets';
   private moonParent = 'Jupiter';
   private placeGroup = 'Highlights';
+  /** Places tab: choosing a place lands there and walks (src/app/Walk.ts) instead of looking from above */
+  private walkThere = false;
   private query = '';
   private thumbs: HTMLImageElement | null = null;
   private thumbIndex: { cell: number; bodies: Record<string, [number, number]> } | null = null;
@@ -234,7 +236,10 @@ export class VRMenu {
     p.text(o.name, tx, y + h * 0.4, 34, sel ? COLORS.sel : COLORS.text, 700, 'left', w - (tx - x) - 16);
     p.text(this.subtitle(o), tx, y + h * 0.66, 22, COLORS.dim, 400, 'left', w - (tx - x) - 16);
     p.region({ id, x, y, w, h, onClick: () => {
-      if (o instanceof TourEvent) { const t = this.host.app.prepareTour(o.what); if (t) this.host.travelTo(t); } else this.host.travelTo(o);
+      if (o instanceof TourEvent) { const t = this.host.app.prepareTour(o.what); if (t) this.host.travelTo(t); }
+      // Places with "walk there" on (src/app/Walk.ts): land at the place and walk
+      else if (o instanceof Landmark && this.walkThere && this.tab === 'places') { this.host.closeMenu(); this.host.app.walk.walkAt(o); }
+      else this.host.travelTo(o);
     } });
   }
 
@@ -251,6 +256,7 @@ export class VRMenu {
     PLACE_GROUPS.forEach((n, i) => {
       p.button(`places:${n}`, a.x, a.y + i * 104, 250, 90, n, () => { this.placeGroup = n; p.dirty = true; }, { active: this.placeGroup === n, size: 30 });
     });
+    p.button('places:walk', a.x, a.y + PLACE_GROUPS.length * 104 + 14, 250, 90, this.walkThere ? 'Walk there ✓' : 'Walk there', () => { this.walkThere = !this.walkThere; p.dirty = true; }, { active: this.walkThere, size: 26 });
     let items: (SpaceObject | null)[];
     if (this.placeGroup === 'Highlights') {
       const jup = app.findByName('Jupiter'), moon = app.findByName('Moon');
