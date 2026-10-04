@@ -602,7 +602,7 @@ export class Walk {
     this.state = 'approach';
     if (cand instanceof Landmark && app.vr.active) {
       // the headset's own travel (blink, re-aim, vignette), then down from the viewpoint
-      app.vr.travelTo(cand);
+      app.vr.travelTo(cand, { above: 1500 });
     } else if (cand instanceof Landmark) {
       app.select(cand);
       app.rig.flyTo(cand, 1500, undefined, true, cand.up());

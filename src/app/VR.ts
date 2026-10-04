@@ -69,7 +69,7 @@ export class VRSupport {
   private hoverKey = '';
   private vignette: Mesh;
   private vig = { fade: { value: 0 }, tunnel: { value: 0 } };
-  private travel: { phase: 'enter' | 'out' | 'reveal' | 'fly' | 'jump' | 'done'; t: number; target: SpaceObject } | null = null;
+  private travel: { phase: 'enter' | 'out' | 'reveal' | 'fly' | 'jump' | 'done'; t: number; target: SpaceObject; above?: number } | null = null;
   private pendingMenu = false;
   private flashText = '';
   private flashUntil = 0;
@@ -372,12 +372,16 @@ export class VRSupport {
     return !!this.travel && this.travel.phase !== 'done';
   }
 
-  travelTo(obj: SpaceObject): void {
+  /**
+   * `above` (metres, places only): arrive straight above the place at that height, level, instead
+   * of at its sunlit viewpoint (walking there: src/app/Walk.ts then comes straight down).
+   */
+  travelTo(obj: SpaceObject, opts?: { above?: number }): void {
     this.app.select(obj);
     if (obj instanceof Body) this.app.bodies.prefetch(obj);
     this.menu.panel.setVisible(false);
     this.card.setVisible(false);
-    this.travel = { phase: 'out', t: 0, target: obj };
+    this.travel = { phase: 'out', t: 0, target: obj, above: obj instanceof Landmark ? opts?.above : undefined };
     this.flash(`Flying to ${obj.name}`);
   }
 
@@ -429,13 +433,25 @@ export class VRSupport {
             const from = rig.upos.sub(t.upos, new Vector3());
             const dist = from.length();
             const dir = t instanceof BlackHole ? t.approachDir(from) : t instanceof Galaxy ? t.viewDir(from) : t instanceof MilkyWay ? t.viewDir()
-              : t instanceof Landmark ? t.approachDir(this.app.system.sun.upos.sub(t.world.upos, new Vector3()).normalize()) : (t as RingSpot).approachDir();
+              : t instanceof Landmark ? (tr.above !== undefined ? t.up() : t.approachDir(this.app.system.sun.upos.sub(t.world.upos, new Vector3()).normalize())) : (t as RingSpot).approachDir();
             rig.upos.copy(t.upos).addVec(dir, dist);
           }
-          const toTarget = tr.target.upos.sub(rig.upos, new Vector3()).normalize();
-          rig.quat.premultiply(new Quaternion().setFromUnitVectors(headFwd, toTarget)).normalize();
+          if (tr.above !== undefined && tr.target instanceof Landmark) {
+            // straight above the place: stay level (the horizon level), facing the way the head faced
+            const up = tr.target.up();
+            const flat = headFwd.clone().addScaledVector(up, -headFwd.dot(up));
+            if (flat.lengthSq() < 1e-6) flat.copy(new Vector3(1, 0, 0)).addScaledVector(up, -up.x);
+            const headInDolly = headFwd.clone().applyQuaternion(rig.quat.clone().invert());
+            rig.quat.setFromRotationMatrix(new Matrix4().lookAt(new Vector3(), flat.normalize(), up));
+            // the head keeps its own yaw on top of the dolly: turn the dolly so the head faces `flat`
+            headInDolly.y = 0;
+            if (headInDolly.lengthSq() > 1e-6) rig.quat.multiply(new Quaternion().setFromUnitVectors(new Vector3(0, 0, -1), headInDolly.normalize()).invert());
+          } else {
+            const toTarget = tr.target.upos.sub(rig.upos, new Vector3()).normalize();
+            rig.quat.premultiply(new Quaternion().setFromUnitVectors(headFwd, toTarget)).normalize();
+          }
           if (this.settings.travel === 'blink') {
-            rig.flyTo(tr.target, this.arrivalDistance(tr.target), 0.05, false);
+            rig.flyTo(tr.target, tr.above ?? this.arrivalDistance(tr.target), 0.05, false);
             tr.phase = 'jump';
           } else {
             tr.phase = 'reveal';
@@ -447,7 +463,7 @@ export class VRSupport {
         // eyes open on the destination before moving
         v.fade.value = Math.max(0, 1 - tr.t / 0.25);
         if (v.fade.value <= 0) {
-          rig.flyTo(tr.target, this.arrivalDistance(tr.target), undefined, false);
+          rig.flyTo(tr.target, tr.above ?? this.arrivalDistance(tr.target), undefined, false);
           tr.phase = 'fly';
           tr.t = 0;
         }
