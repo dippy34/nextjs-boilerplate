@@ -17,6 +17,11 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   HDR, JPL DE442S ephemeris, 459 moons, small bodies, 2.75 M real stars (AT-HYG, Gaia DR3 100 pc).
 * VR (WebXR): in-headset menu (Planets, Moons, Small worlds, Stars, Search keyboard, Settings), laser
   pointing, hover/haptics, info cards, wrist panel, hands. Renders into the XR render target.
+  Depth in the headset: logarithmic by default (it writes the fragment depth, so the GPU cannot
+  reject hidden fragments early); `?xrdepth=reversed` tries reversed-Z instead (needs
+  EXT_clip_control, else log depth; the console says which): `Renderer.reverseXrProjections`
+  rebuilds the runtime's eye projections as reversed-Z each frame (three has no reversed-Z path for
+  XR cameras), and the far-geometry pull-in is off in that mode. For an A/B on the device.
 * Visuals: NASA SVS Milky Way, atmospheres, relief maps (LOLA/MOLA/MESSENGER/ETOPO), 8k maps (desktop
   only), Hubble OPAL giants, spectral colours.
 * Earlier: autopilot uses a two-stretch log-distance Hermite curve (`src/app/CameraRig.ts`,

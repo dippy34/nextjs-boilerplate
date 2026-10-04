@@ -1638,7 +1638,8 @@ export class App {
     this.view = this.renderer.viewInfo();
     this.invQuat.copy(this.view.quat).invert();
     // Headset runtimes may clamp the far plane: pull distant geometry inside it, and fit log depth to it.
-    const finiteFar = this.view.xr && Number.isFinite(this.view.far);
+    // (not with reversed-Z in the headset: Renderer.reverseXrProjections drops the runtime's far plane)
+    const finiteFar = this.view.xr && Number.isFinite(this.view.far) && this.renderer.depthMode !== 'reversed-z';
     GLOBALS.uPullIn.value = finiteFar ? this.view.far * 0.5 : 0;
     LITE.uLite.value = this.vr.active ? 1 : 0;
     GLOBALS.uDepthK.value = finiteFar ? depthK(this.renderer.camera.far) : 1;

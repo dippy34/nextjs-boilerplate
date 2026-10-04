@@ -1,7 +1,7 @@
 import {
   CustomToneMapping, DepthTexture, FloatType, Group, HalfFloatType, LinearFilter, Mesh, NoBlending, NoToneMapping,
   OrthographicCamera, PerspectiveCamera, PlaneGeometry, Quaternion, RGBAFormat, Scene, ShaderMaterial, Vector2,
-  Vector3, WebGLRenderer, WebGLRenderTarget,
+  Vector3, WebGLCoordinateSystem, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { installToneMapping, TONE_GLSL } from './shaders/tone';
 
@@ -70,8 +70,12 @@ export class Renderer {
 
   constructor(readonly canvas: HTMLCanvasElement, readonly xrCapable = false) {
     installToneMapping();
-    const reversed = !xrCapable && Renderer.supportsClipControl();
+    // a headset uses logarithmic depth unless asked for reversed-Z (?xrdepth=reversed): log depth
+    // writes the fragment depth, which turns off early depth rejection (see reverseXrProjections)
+    const xrReversed = xrCapable && new URLSearchParams(location.search).get('xrdepth') === 'reversed';
+    const reversed = (!xrCapable || xrReversed) && Renderer.supportsClipControl();
     this.depthMode = reversed ? 'reversed-z' : 'logarithmic';
+    if (xrReversed) console.info(`xrdepth=reversed: ${reversed ? 'reversed-Z depth (EXT_clip_control)' : 'EXT_clip_control unavailable, logarithmic depth'}`);
     this.gl = new WebGLRenderer({
       canvas,
       antialias: xrCapable, // MSAA for the headset framebuffer; desktop uses its own MSAA target
@@ -253,6 +257,33 @@ export class Renderer {
     try { return fn(); } finally { this.gl.setRenderTarget(was); }
   }
 
+  /**
+   * Reversed-Z in a headset (?xrdepth=reversed): three copies each view's projection from the
+   * runtime as is (OpenGL depth, finite far plane) and has no reversed-Z path for XR cameras. So
+   * the XR camera is updated here, then each eye's projection (and the combined one used for
+   * culling) is rebuilt as reversed-Z with the runtime's frustum edges and near plane and the
+   * desktop camera's far plane, and marked reversed so three does not rebuild it from fov and
+   * aspect. No pull-in is needed (App: uPullIn 0): depth no longer depends on the runtime's far.
+   */
+  private reverseXrProjections(): void {
+    const xr = this.gl.xr;
+    xr.cameraAutoUpdate = false;
+    xr.updateCamera(this.camera);
+    const xc = xr.getCamera();
+    const far = this.camera.far;
+    for (const c of [...xc.cameras, xc]) {
+      const e = c.projectionMatrix.elements;
+      // OpenGL form only (z row: -(f+n)/(f-n) ~ -1); a matrix already rebuilt is left alone
+      if (!(e[10] < -0.5)) continue;
+      const n = c.near;
+      const l = (n * (e[8] - 1)) / e[0], r = (n * (e[8] + 1)) / e[0];
+      const b = (n * (e[9] - 1)) / e[5], t = (n * (e[9] + 1)) / e[5];
+      c.projectionMatrix.makePerspective(l, r, t, b, n, far, WebGLCoordinateSystem, true);
+      c.projectionMatrixInverse.copy(c.projectionMatrix).invert();
+      (c as unknown as { _reversedDepth: boolean })._reversedDepth = true;
+    }
+  }
+
   private warnedXrTarget = false;
   private _p = new Vector3();
   private _s = new Vector3();
@@ -269,6 +300,7 @@ export class Renderer {
       }
       gl.setClearColor(0x000000, 1);
       gl.clear(true, true, true);
+      if (this.depthMode === 'reversed-z') this.reverseXrProjections();
       gl.render(this.scene, this.camera);
       return;
     }
