@@ -375,7 +375,7 @@ vec3 biome(float h, float sea, float low, float lat, float slope, vec3 nB, float
 
 // giants: belts and zones, vortices, filaments; returns the albedo ('streakOut' modulates a hot
 // Jupiter's glow)
-vec3 giant(vec3 nB, out float streakOut) {
+vec3 giant(vec3 nB, float fp, out float streakOut) {
   bool lite = uLite > 0.5;
   float la0 = asin(clamp(nB.z, -1.0, 1.0));
   // differential rotation: each latitude drifts at its own rate
@@ -429,6 +429,14 @@ vec3 giant(vec3 nB, out float streakOut) {
   col = mix(col, uC3, smoothstep(0.64, 0.82, streak) * 0.35 * b);
   col *= 1.0 - 0.3 * smoothstep(0.58, 0.78, 1.0 - streak) * (1.0 - b) * uTurb;
   col *= 0.86 + 0.28 * fine * (0.4 + uTurb);
+  // finer turbulence down to the pixel when close (stretched along the flow)
+  float fa = 0.14, ff = 60.0;
+  for (int i = 0; i < 6; i++) {
+    if (lite || ff * fp > 0.5) break;
+    float nz = pn(vec3(ring * ff * 0.3 + eddy * 2.0, lw * ff * 1.4) + uSeed * 4.0 + float(i) * 3.1) - 0.5;
+    col *= 1.0 + fa * nz * (0.5 + uTurb) * smoothstep(0.5, 0.25, ff * fp);
+    ff *= 2.1; fa *= 0.8;
+  }
   // small bright plumes and dark barges inside the belts
   if (!lite && uType >= 8) {
     vec2 u = vec2(lon, lw) * (48.0 / 6.2832) + vec2(eddy * 0.6, 0.0);
@@ -479,7 +487,7 @@ void main() {
   vec3 hillTilt = vec3(0.0);
   if (uType >= 6) {
     float streak;
-    albedo = giant(nB, streak);
+    albedo = giant(nB, fp, streak);
     // limb darkening (high haze over the clouds)
     limb = pow(max(dot(nW, V), 0.0), 0.2);
     if (uType == 9) emit = uGlow * (0.55 + 0.45 * streak);
@@ -615,10 +623,13 @@ void main() {
       float lake = smoothstep(-0.4, -0.5, hn + 0.1 * var);
       albedo = mix(albedo, uC1 * 0.6, lake);
       // seams between crust plates glow (wider and hotter in the lowlands), small cracks inside them
-      float live = smoothstep(0.5, 0.75, pn(nB * 3.5 + uSeed * 2.2) + 0.3 * smoothstep(0.1, -0.4, hn));
-      float cracks = (smoothstep(0.05, 0.0, seam) * 0.8 + smoothstep(0.04, 0.0, seam2) * 0.3) * live;
+      float live = smoothstep(0.62, 0.85, pn(nB * 3.5 + uSeed * 2.2) + 0.25 * smoothstep(0.1, -0.4, hn));
+      live *= live;
+      float cracks = (smoothstep(0.04, 0.0, seam) * 0.8 + smoothstep(0.03, 0.0, seam2) * 0.3) * live;
       albedo *= 1.0 - 0.5 * cracks;
       emit = uGlow * (cracks + lake * (0.6 + 0.4 * pn(nB * 60.0 + uSeed)));
+      // hotter (yellower) in the middle of wide seams and lakes, dull red at the edges
+      emitColor = mix(vec3(0.9, 0.16, 0.03), vec3(1.0, 0.5, 0.14), clamp(cracks * 1.2 + lake * 0.8, 0.0, 1.0));
       msel = vec4(2.0, 0.0, 3.0, 6.0);           // lava fields: dark rocky ground
     } else if (uType == 5) {
       // ice: bright plains, darker older terrain, long crossing ridges and cracks (lineae, along
@@ -728,7 +739,7 @@ void main() {
   radiance += uAtmoColor * sunL * uAtmo * rim * smoothstep(-0.25, 0.3, mu0) * 0.9 * (1.0 - uTerrain);   // (the sphere's limb only)
   // thermal glow (night side mostly)
   // (scaled to the starlight so it shows at the exposure the lit planet sets)
-  radiance += emitColor * emit * luminance(sunL) * (0.012 + 0.4 * smoothstep(0.2, -0.2, mu0));
+  radiance += emitColor * emit * luminance(sunL) * (0.012 + 0.2 * smoothstep(0.2, -0.2, mu0));
   gl_FragColor = vec4(min(radiance * uExposure, vec3(6.0e4)), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>

@@ -108,14 +108,13 @@ function paletteFor(p: ExoPlanet): Record<string, number | V3> {
     case 'giant': {
       // ammonia clouds when cold (Jupiter, Saturn), water clouds when temperate (bright white),
       // cloudless and blue when warmer still
-      const pal = T < 150 ? pick<V3[]>([
-        [[0.36, 0.24, 0.15], [0.66, 0.6, 0.5], [0.8, 0.77, 0.7], [0.6, 0.3, 0.17]],       // Jupiter-like
-        [[0.36, 0.24, 0.15], [0.66, 0.6, 0.5], [0.8, 0.77, 0.7], [0.6, 0.3, 0.17]],
-        [[0.5, 0.4, 0.26], [0.66, 0.57, 0.4], [0.75, 0.68, 0.52], [0.62, 0.48, 0.3]],     // Saturn-like
-        [[0.42, 0.3, 0.24], [0.6, 0.5, 0.42], [0.75, 0.7, 0.62], [0.55, 0.28, 0.2]],      // ruddy
-      ]) : T < 350 ? [[0.6, 0.6, 0.6], [0.78, 0.78, 0.76], [0.88, 0.88, 0.87], [0.7, 0.65, 0.6]]
+      const JUPITER: V3[] = [[0.36, 0.24, 0.15], [0.66, 0.6, 0.5], [0.8, 0.77, 0.7], [0.6, 0.3, 0.17]];
+      const SATURN: V3[] = [[0.5, 0.4, 0.26], [0.66, 0.57, 0.4], [0.75, 0.68, 0.52], [0.62, 0.48, 0.3]];
+      const RUDDY: V3[] = [[0.42, 0.3, 0.24], [0.6, 0.5, 0.42], [0.75, 0.7, 0.62], [0.55, 0.28, 0.2]];
+      const pal = T < 150 ? pick([JUPITER, JUPITER, SATURN, RUDDY])
+        : T < 350 ? [[0.6, 0.6, 0.6], [0.78, 0.78, 0.76], [0.88, 0.88, 0.87], [0.7, 0.65, 0.6]]
         : [[0.12, 0.18, 0.35], [0.18, 0.26, 0.45], [0.35, 0.42, 0.6], [0.2, 0.2, 0.35]];
-      const saturn = pal[0][0] === 0.5;
+      const saturn = pal === SATURN;
       return giantLook(pal as V3[], {
         uBands: saturn ? 12 + 6 * r() : 7 + 5 * r(), uTurb: saturn ? 0.25 + 0.15 * r() : T < 150 ? 0.6 + 0.5 * r() : 0.3 + 0.3 * r(),
         uStorms: saturn ? 1 + Math.floor(2 * r()) : 3 + Math.floor(6 * r()), uAtmo: 0.25, uAtmoColor: [0.9, 0.85, 0.8],
