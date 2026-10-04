@@ -238,6 +238,13 @@ describe('rocks', () => {
     expect(maxRise).toBeLessThan(STEP_UP + 0.1);
     expect(blocked).toBe(true);
   });
+  it('a dome-shaped boulder (most of it buried) cannot be walked up in small steps', () => {
+    const dome = rock(3, 0.99, -0.18); // 0.81 m high, gentle on top but steep at its foot
+    const { b, maxRise, blocked } = walkInto([dome], new Vector3(0, 1, 0), 8);
+    expect(blocked).toBe(true);
+    expect(maxRise).toBeLessThan(0.05);
+    expect(b.pos.y).toBeLessThan(3 - 0.9);
+  });
   it('walking at a boulder at an angle slides you along it and past', () => {
     const boulder = rock(3, 1.2, 0.4);
     const dir = new Vector3(0.35, 1, 0).normalize();

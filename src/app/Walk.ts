@@ -34,6 +34,8 @@ export const JUMP_SPEED = 2.5;
 export const MAX_JUMP_HEIGHT = 25;
 /** highest step (a rock, a ledge) walked up without jumping (m) */
 export const STEP_UP = 0.4;
+/** the walker's body radius for bumping into rocks (m) */
+export const BODY_RADIUS = 0.25;
 /** gravity below which running becomes a bounding lope (m/s²) */
 export const LOPE_G = 5;
 /** offered within this height of the ground (m); higher up, walking first flies down to land */
@@ -124,6 +126,7 @@ export class WalkBody {
   rocks: { centre: Vector3; radius: number }[] = [];
   /** the last step was stopped or deflected by a wall (a boulder, a ledge) */
   blocked = false;
+  private terrainFn: GroundFn | null = null;
 
   /** Radius of what the feet stand on along unit direction `n`: the ground, or the top of a rock there. */
   surface(n: Vector3, ground: GroundFn): number {
@@ -136,6 +139,29 @@ export class WalkBody {
       if (disc > 0) r = Math.max(r, along + Math.sqrt(disc));
     }
     return r;
+  }
+
+  /**
+   * A rock taller than a step that the body at feet position `p` would be inside (its slice at
+   * the height of the feet, plus the body radius), unless the feet are already up near its top
+   * (standing on it after a jump). Returns the rock's horizontal direction from `p` (unit, tangent), or null.
+   */
+  private rockWall(p: Vector3, terrain: GroundFn): Vector3 | null {
+    const feetR = p.length();
+    const up = p.clone().divideScalar(feetR);
+    for (const k of this.rocks) {
+      const cR = k.centre.length();
+      const top = cR + k.radius;
+      if (feetR > top - STEP_UP) continue;               // up on it (or above it)
+      if (top - terrain(k.centre.clone().divideScalar(cR)) <= STEP_UP) continue; // low: stepped onto
+      const dz = feetR - cR;
+      const slice = Math.abs(dz) < k.radius ? Math.sqrt(k.radius * k.radius - dz * dz) : 0;
+      const h = k.centre.clone().sub(p);
+      h.addScaledVector(up, -h.dot(up));
+      const dist = h.length();
+      if (dist < slice + BODY_RADIUS) return dist > 1e-9 ? h.divideScalar(dist) : h.set(0, 0, 0);
+    }
+    return null;
   }
 
   /** The walked-on surface as a ground function (just the ground when no rocks are near). */
@@ -216,6 +242,7 @@ export class WalkBody {
     this.landed = false;
     this.jumped = false;
     this.blocked = false;
+    this.terrainFn = terrain;
     const ground = this.surfaceFn(terrain);
     if (dt <= 0) return;
     const r = this.pos.length();
@@ -264,17 +291,21 @@ export class WalkBody {
       let d = vt.length() * dt;
       let nUp = _n.copy(this.pos).addScaledVector(vt, dt).normalize().clone();
       let nR = ground(nUp);
-      if (nR - gR > STEP_UP + d * Math.tan(SLOPE_LIMIT)) {
+      const wallAt = (u: Vector3, rr: number) => this.rockWall(u.clone().multiplyScalar(rr), terrain);
+      const tooHigh = (rr: number, dd: number) => rr - gR > STEP_UP + dd * Math.tan(SLOPE_LIMIT);
+      let rockHit = wallAt(nUp, Math.min(nR, r));
+      if (rockHit || tooHigh(nR, d)) {
         // a wall (a boulder, a ledge): no climbing it; slide along it instead
         this.blocked = true;
-        const wall = this.wallNormal(nUp, terrain, ground);
+        const wall = rockHit ?? this.wallNormal(nUp, terrain, ground);
         const into = vt.dot(wall);
         if (into > 0) vt.addScaledVector(wall, -into);
         d = vt.length() * dt;
         // along the wall, kept a hair off it (a curved face would otherwise be met again)
         nUp = _n.copy(this.pos).addScaledVector(vt, dt).addScaledVector(wall, -(0.5 * d + 1e-3)).normalize().clone();
         nR = ground(nUp);
-        if (nR - gR > STEP_UP + d * Math.tan(SLOPE_LIMIT)) {
+        rockHit = wallAt(nUp, Math.min(nR, r));
+        if (rockHit || tooHigh(nR, d)) {
           // still into it: stop here
           vt.set(0, 0, 0);
           d = 0;
@@ -320,7 +351,7 @@ export class WalkBody {
     this.apex = Math.max(this.apex, r - this.takeoffR);
     const nUp = _n.copy(this.pos).divideScalar(r);
     let gR = ground(nUp);
-    if (r <= gR && gR - r > STEP_UP) {
+    if ((r <= gR && gR - r > STEP_UP) || this.rockWall(this.pos, this.terrainFn ?? ground)) {
       // flew into the side of something (a boulder): back out sideways, keep falling
       this.blocked = true;
       this.pos.copy(prevUp).multiplyScalar(r);
