@@ -5,6 +5,7 @@ import { eclToEqu } from '../core/frames';
 import { AU, GM_SUN } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { Comet } from './SmallBodies';
+import { VOLUMES } from './Renderer';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const VERT = /* glsl */ `
@@ -298,6 +299,9 @@ export class CometTails {
       m.frustumCulled = false;
       m.visible = false;
       m.renderOrder = 8;
+      // glowing gas, additive: drawn in the renderer's reduced-resolution volume pass
+      m.layers.set(VOLUMES.layer);
+      VOLUMES.meshes.add(m);
       this.meshes.push(m);
       this.group.add(m);
     }
