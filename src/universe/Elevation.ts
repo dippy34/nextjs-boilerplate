@@ -99,6 +99,11 @@ export interface ElevationLevel {
   bitmap?: string;
   /** the tiles present as flat [face, x, y, face, x, y, ...] (deep, sparse levels) */
   list?: number[];
+  /**
+   * The level's tiles packed into files (fetched with HTTP range requests): each lists its tiles
+   * as flat [face, x, y, byteLength, ...] in file order (offsets are the running sum).
+   */
+  packs?: { file: string; tiles: number[] }[];
 }
 
 export interface ElevationManifest {
@@ -194,6 +199,8 @@ interface BodyState {
   bits: (Uint8Array | Set<number> | null)[];
   /** key offset of each level */
   base: number[];
+  /** where each tile is in the pack files (key -> file, offset, length) */
+  loc: Map<number, { file: string; off: number; len: number }>;
   maxLevel: number;
   tiles: Map<number, Tile>;
   pending: Map<number, Promise<void>>;
@@ -219,13 +226,13 @@ export interface ElevationOptions {
   /** memory cap of the decoded tiles above level 1 (bytes) */
   maxBytes?: number;
   /** fetch replacement (tests) */
-  fetch?: (url: string) => Promise<{ ok: boolean; status?: number; arrayBuffer(): Promise<ArrayBuffer>; json(): Promise<unknown> }>;
+  fetch?: (url: string, init?: { headers?: Record<string, string> }) => Promise<{ ok: boolean; status?: number; arrayBuffer(): Promise<ArrayBuffer>; json(): Promise<unknown> }>;
 }
 
 export class ElevationStore {
   private base = defaultBase();
   private maxBytes = 24 * 2 ** 20;
-  private fetchFn: NonNullable<ElevationOptions['fetch']> = (u) => fetch(u);
+  private fetchFn: NonNullable<ElevationOptions['fetch']> = (u, init) => fetch(u, init);
   private bodies = new Map<string, BodyState>();
   private clock = 0;
   private bytes = 0;
@@ -248,7 +255,7 @@ export class ElevationStore {
   private state(key: string): BodyState {
     let s = this.bodies.get(key);
     if (!s) {
-      s = { man: null, loading: null, bits: [], base: [], maxLevel: -1, tiles: new Map(), pending: new Map(), failed: new Map(), version: 0 };
+      s = { man: null, loading: null, bits: [], base: [], loc: new Map(), maxLevel: -1, tiles: new Map(), pending: new Map(), failed: new Map(), version: 0 };
       this.bodies.set(key, s);
     }
     return s;
@@ -286,6 +293,14 @@ export class ElevationStore {
         s.bits[l] = set;
       } else if (e.bitmap) s.bits[l] = Uint8Array.from(atob(e.bitmap), (c) => c.charCodeAt(0));
       else s.bits[l] = null;
+      for (const pk of e?.packs ?? []) {
+        let at = 0;
+        for (let i = 0; i + 3 < pk.tiles.length; i += 4) {
+          const [f, x, y, len] = [pk.tiles[i], pk.tiles[i + 1], pk.tiles[i + 2], pk.tiles[i + 3]];
+          s.loc.set(s.base[l] + (f * n + y) * n + x, { file: pk.file, off: at, len });
+          at += len;
+        }
+      }
     }
   }
 
@@ -355,11 +370,16 @@ export class ElevationStore {
     if (failedAt !== undefined && Date.now() - failedAt < 30e3) throw new Error('tile failed recently');
     let p = s.pending.get(k);
     if (!p) {
-      const url = `${this.base}/${bodyKey}/${man.path.replace('{level}', `${level}`).replace('{face}', `${face}`).replace('{x}', `${x}`).replace('{y}', `${y}`)}`;
-      p = this.fetchFn(url)
-        .then((r) => {
+      // packed tiles: a byte range of the pack file (a server that ignores ranges sends the whole
+      // file, which is sliced); otherwise one PNG per tile
+      const loc = s.loc.get(k);
+      const url = loc ? `${this.base}/${bodyKey}/${loc.file}`
+        : `${this.base}/${bodyKey}/${man.path.replace('{level}', `${level}`).replace('{face}', `${face}`).replace('{x}', `${x}`).replace('{y}', `${y}`)}`;
+      p = this.fetchFn(url, loc ? { headers: { Range: `bytes=${loc.off}-${loc.off + loc.len - 1}` } } : undefined)
+        .then(async (r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status ?? '?'} for ${url}`);
-          return r.arrayBuffer();
+          const b = await r.arrayBuffer();
+          return loc && r.status !== 206 && b.byteLength > loc.len ? b.slice(loc.off, loc.off + loc.len) : b;
         })
         .then((b) => decodePng16(b))
         .then(({ width, height, data }) => {

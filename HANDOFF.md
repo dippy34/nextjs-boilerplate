@@ -174,7 +174,11 @@ procedural generation for the rest. Never use SpaceEngine's own files.
 
 `pipeline/build_elevation.py` (sources and resumable downloads in `pipeline/elevation_sources.py`,
 raw files and int16 work grids in `data-raw/elevation/`, ~25 GB while building) ->
-`public/data/elevation/<body>/<level>/<face>-<x>-<y>.png` + `manifest.json`, and `index.json`.
+`public/data/elevation/<body>/<level>/<face>-<k>.pak` (tiles packed per level and face, at most
+16 MB a file; 214 files instead of 6,617, for static hosts' file caps) + `manifest.json` (each level's
+`packs`: tiles in file order with their byte lengths; Elevation.ts fetches one tile with an HTTP range
+request and slices the whole file if a server ignores ranges), and `index.json`. The build writes
+loose PNGs, then `pack()` concatenates them (`python3 build_elevation.py pack` packs loose tiles).
 Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/elevation.test.ts`
 (fixture `tests/fixtures/elevation_points.json` is written by the build).
 

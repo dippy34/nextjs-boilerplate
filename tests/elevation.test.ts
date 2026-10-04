@@ -7,12 +7,16 @@ const ROOT = join(__dirname, '..', 'public', 'data', 'elevation');
 const POINTS = join(__dirname, 'fixtures', 'elevation_points.json');
 
 /** fetch from public/data/elevation on disk */
-const diskFetch = async (url: string) => {
+let ranged = 0;
+const diskFetch = async (url: string, init?: { headers?: Record<string, string> }) => {
   const p = join(ROOT, url.replace(/^disk:\/\/elevation\//, ''));
   if (!existsSync(p)) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0), json: async () => null };
-  const b = readFileSync(p);
+  let b = readFileSync(p);
+  // HTTP range requests (pack files), like a static file server
+  const m = /^bytes=(\d+)-(\d+)$/.exec(init?.headers?.Range ?? '');
+  if (m) { b = b.subarray(Number(m[1]), Number(m[2]) + 1); ranged++; }
   return {
-    ok: true, status: 200,
+    ok: true, status: m ? 206 : 200,
     arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer,
     json: async () => JSON.parse(b.toString('utf8')) as unknown,
   };
@@ -86,11 +90,23 @@ const points = existsSync(POINTS) ? (JSON.parse(readFileSync(POINTS, 'utf8')) as
 describe.skipIf(!bodies.length)('elevation tiles', () => {
   const store = new ElevationStore({ base: 'disk://elevation', fetch: diskFetch, maxBytes: 512 * 2 ** 20 });
 
-  it('decodes a tile', async () => {
-    const b = readFileSync(join(ROOT, bodies[0], '0', '0-0-0.png'));
+  it('decodes a tile from a pack file (range request), and a server that ignores ranges', async () => {
+    const man = (await store.load(bodies[0])) as ElevationManifest;
+    const pk = man.levels[0].packs![0];
+    const b = readFileSync(join(ROOT, bodies[0], pk.file)).subarray(0, pk.tiles[3]);
     const t = await decodePng16(b);
     expect(t.width).toBe(TILE + 3);
     expect(t.height).toBe(TILE + 3);
+    ranged = 0;
+    const s2 = new ElevationStore({ base: 'disk://elevation', fetch: diskFetch });
+    await s2.request(bodies[0], pk.tiles[0], 0, 0, 0);
+    expect(ranged).toBe(1);
+    // whole file back (status 200): sliced locally
+    const noRange = async (url: string) => diskFetch(url);
+    const s3 = new ElevationStore({ base: 'disk://elevation', fetch: noRange });
+    await s3.request(bodies[0], pk.tiles[0], 0, 0, 0);
+    expect(s3.loaded(bodies[0], pk.tiles[0], 0, 0, 0)).toBe(true);
+    expect(s3.sample(bodies[0], faceToDir(pk.tiles[0], 0.5, 0.5), 1e9)).toBeCloseTo(s2.sample(bodies[0], faceToDir(pk.tiles[0], 0.5, 0.5), 1e9)!, 6);
   });
 
   for (const body of bodies) {

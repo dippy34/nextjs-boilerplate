@@ -420,7 +420,7 @@ def build(body: str) -> dict:
     assert (g.max - offset) / step < 65535, f"{body}: range too large for the step"
     out_dir = DEST / body
     if out_dir.exists():
-        for p in sorted(out_dir.rglob("*.png")):
+        for p in sorted([*out_dir.rglob("*.png"), *out_dir.rglob("*.pak")]):
             p.unlink()
     out_dir.mkdir(parents=True, exist_ok=True)
     budget = cfg["budget"] * 1e6
@@ -560,6 +560,55 @@ def write_fixture(body: str, man: dict, count: int = 24) -> None:
     path.write_text(json.dumps(pts, indent=1))
 
 
+PACK_MAX = 16_000_000   # bytes per pack file (Cloudflare Pages: 25 MiB per file)
+
+
+def pack(body: str) -> None:
+    """Concatenate the tile PNGs of each (level, face) into pack files of at most PACK_MAX bytes,
+    read back with HTTP range requests (static hosts cap the number of files: ~6,600 tiles become
+    ~50 packs). The manifest's levels get `packs`: [{file, tiles: [face, x, y, length, ...]}] in
+    file order (offsets are the running sum). The loose PNGs are removed."""
+    out_dir = DEST / body
+    man = json.loads((out_dir / "manifest.json").read_text())
+    for e in man["levels"]:
+        lv = e["level"]
+        d = out_dir / str(lv)
+        tiles = []
+        for p in d.glob("*.png"):
+            f, x, y = (int(v) for v in p.stem.split("-"))
+            tiles.append((f, y, x, p))
+        if not tiles:
+            if not e.get("packs"):
+                raise RuntimeError(f"{body} L{lv}: no tiles and no packs")
+            continue
+        tiles.sort()
+        for old in d.glob("*.pak"):
+            old.unlink()
+        packs, cur, size, k = [], None, 0, 0
+        for f, y, x, p in tiles:
+            n = p.stat().st_size
+            if cur is None or cur["face"] != f or size + n > PACK_MAX:
+                if cur:
+                    packs.append(cur)
+                name = f"{lv}/{f}-{k}.pak"
+                k += 1
+                cur, size = {"file": name, "face": f, "tiles": [], "fh": open(out_dir / name, "wb")}, 0
+            cur["fh"].write(p.read_bytes())
+            cur["tiles"] += [f, x, y, n]
+            size += n
+        packs.append(cur)
+        for pk in packs:
+            pk["fh"].close()
+        for _, _, _, p in tiles:
+            p.unlink()
+        e["packs"] = [{"file": pk["file"], "tiles": pk["tiles"]} for pk in packs]
+    man["path"] = "packs (HTTP range requests; see levels[].packs)"
+    man["bytes"] = sum(p.stat().st_size for p in out_dir.rglob("*.pak"))
+    (out_dir / "manifest.json").write_text(json.dumps(man, separators=(",", ":")))
+    n = sum(len(e["packs"]) for e in man["levels"])
+    print(f"  {body}: packed into {n} files, {man['bytes'] / 1e6:.1f} MB", flush=True)
+
+
 def write_index() -> None:
     bodies = {}
     for d in sorted(DEST.iterdir()):
@@ -573,9 +622,15 @@ def write_index() -> None:
 def main() -> None:
     import elevation_hires
     args = sys.argv[1:]
+    if args[:1] == ["pack"]:            # pack existing loose tiles
+        for b in args[1:] or list(BODIES):
+            pack(b)
+        write_index()
+        return
     if args[:1] == ["hires"]:           # only the regional levels (Earth, Moon), keeping the rest
         for b in args[1:] or list(elevation_hires.HI):
             write_fixture(b, elevation_hires.build(b))
+            pack(b)
         write_index()
         return
     for b in args or list(BODIES):
@@ -583,6 +638,7 @@ def main() -> None:
         if b in elevation_hires.HI:
             man = elevation_hires.build(b)
         write_fixture(b, man)
+        pack(b)
     write_index()
 
 
