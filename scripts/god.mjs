@@ -237,6 +237,15 @@ if (!skipVr) {
     const pressed = await press('v:reverse');
     const s1 = await page.evaluate(() => ({ active: window.app.god.active, hEcl: (() => { const a = window.app, b = a.system.byId.get(399), s = a.system.sun; const h = b.pos.clone().sub(s.pos).cross(b.vel.clone().sub(s.vel)).normalize(); return h.y * -0.3977771559 + h.z * 0.9174820621; })() }));
     check('VR: Reverse orbit from the God tab', pressed && s1.active && s1.hEcl < -0.99, JSON.stringify(s1));
+    // the editor in the headset: mass x1.1 with a nudge, and a derived value's working
+    const gm0 = await page.evaluate(() => window.app.system.byId.get(399).gm);
+    const nud = await press('mass:3');
+    const m1 = await page.evaluate(() => window.app.system.byId.get(399).gm);
+    check('VR: mass nudge x1.1', nud && Math.abs(m1 / gm0 - 1.1) < 1e-6, `${(m1 / gm0).toFixed(4)}`);
+    const shown = await press('math:P');
+    check('VR: tap a derived value to show its math', shown, '');
+    await frames(4);
+    await page.screenshot({ path: path.join(outDir, 'god6-vr-math.png'), timeout: 180000 });
     await press('spawn:hole');
     const s2 = await page.evaluate(() => window.app.blackHoles.filter((h) => h.key.startsWith('god:')).length);
     check('VR: create a black hole from the God tab', s2 === 1, `${s2}`);
