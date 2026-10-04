@@ -300,7 +300,7 @@ export class VRSupport {
       if (ui.id) {
         ui.panel.regionAt(ui.uv)?.onClick?.();
         ui.panel.dirty = true;
-        this.pulse(src, 0.4, 25);
+        this.pulseSrc(src, 0.4, 25);
       }
       return;
     }
@@ -317,10 +317,15 @@ export class VRSupport {
     }
     this.app.select(hit);
     this.showCard(hit, dir);
-    this.pulse(src, 0.3, 20);
+    this.pulseSrc(src, 0.3, 20);
   }
 
-  private pulse(src: XRInputSource | null, intensity: number, ms: number): void {
+  /** Buzz both controllers (walking: a jump, a landing). */
+  pulse(intensity: number, ms: number): void {
+    for (const h of this.hands) this.pulseSrc(h.source, intensity, ms);
+  }
+
+  private pulseSrc(src: XRInputSource | null, intensity: number, ms: number): void {
     const act = (src?.gamepad as (Gamepad & { hapticActuators?: { pulse(v: number, d: number): Promise<boolean> }[] }) | undefined)?.hapticActuators?.[0];
     act?.pulse(intensity, ms).catch(() => undefined);
   }
@@ -505,7 +510,7 @@ export class VRSupport {
           h.ray.scale.z = 4;
           h.cursor.visible = false;
           const obj = this.travel ? null : app.pickRayFast(origin, dir);
-          if (obj && obj !== h.hoverObj) this.pulse(src, 0.15, 12);
+          if (obj && obj !== h.hoverObj) this.pulseSrc(src, 0.15, 12);
           h.hoverObj = obj;
         }
       }

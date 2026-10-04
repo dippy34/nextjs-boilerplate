@@ -29,7 +29,7 @@ async function openPage(vr) {
     });
   }
   await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load', timeout: 180000 });
-  await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
+  await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 600000 });
   await page.evaluate(() => { window.app.terrain.budgetMs = 60; window.app.terrain.budgetVrMs = 60; });
   return page;
 }
@@ -135,10 +135,13 @@ async function desktopSite(page, id, landmark, world, gExpect) {
   await page.keyboard.up('ShiftLeft');
   const top = Math.max(...run.map((s) => s.speed));
   check(`${id}: Shift runs (2.5-4 m/s)${gExpect < 5 ? ' in low-gravity bounds' : ''}`, top > 2.5 && top < 4 && (gExpect > 5 || run.some((s) => !s.onGround)), `top ${top.toFixed(2)} m/s, airborne frames ${run.filter((s) => !s.onGround).length}`);
-  await page.waitForFunction(() => window.app.walk.body.onGround && window.app.walk.body.groundSpeed < 0.05, null, { timeout: 120000 });
+  await page.waitForFunction(() => window.app.walk.body.onGround && window.app.walk.body.groundSpeed < 0.1, null, { timeout: 600000 });
 
   // jump and land
-  await page.keyboard.press('Space');
+    // hold Space until the walker leaves the ground (a press can fall between frames at 2 fps)
+  await page.keyboard.down('Space');
+  await page.waitForFunction(() => !window.app.walk.body.onGround, null, { timeout: 900000 });
+  await page.keyboard.up('Space');
   const jump = [];
   for (let i = 0; i < 40 && !(jump.length > 3 && jump[jump.length - 1].onGround); i++) jump.push(...await sample(page, 5));
   const air = jump.filter((s) => !s.onGround);
@@ -233,7 +236,7 @@ if (which !== 'desktop') {
   await page.waitForSelector('#vr-button', { state: 'visible', timeout: 10000 });
   await page.click('#vr-button');
   await page.waitForFunction(() => window.app.vr.active && window.app.renderer.presenting, null, { timeout: 30000 });
-  await page.waitForFunction(() => window.app.vr.menu.isOpen, null, { timeout: 120000 });
+  await page.waitForFunction(() => window.app.vr.menu.isOpen, null, { timeout: 600000 });
   await page.evaluate(() => window.app.vr.toggleMenu());
   await goToSite(page, 'Apollo 17 landing site', 25);
   // the wrist panel's WALK button
@@ -292,7 +295,7 @@ if (which !== 'desktop') {
   check('v3: right stick snap-turns 30° and stays upright', Math.abs(ang - 30) < 2 && Math.abs(st.roll) < 1e-3, `${ang.toFixed(1)}°`);
 
   // A jumps
-  await page.waitForFunction(() => window.app.walk.body.onGround && window.app.walk.body.groundSpeed < 0.05, null, { timeout: 120000 });
+  await page.waitForFunction(() => window.app.walk.body.onGround && window.app.walk.body.groundSpeed < 0.1, null, { timeout: 600000 });
   await page.evaluate(() => window.__xrDevice.controllers.right.updateButtonValue('a-button', 1));
   await frames(2);
   await page.evaluate(() => window.__xrDevice.controllers.right.updateButtonValue('a-button', 0));
