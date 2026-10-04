@@ -63,7 +63,7 @@ export function ellipsoidRadius(radii: readonly number[], x: number, y: number, 
 /**
  * Shared index buffer of a tile: two triangles per cell (diagonal from (i, j) to (i+1, j+1),
  * the morph targets depend on it) and skirts, wound both ways, on the edges set in `skirts` (bit e:
- * edge e of `edgeLists`; a skirt is only needed against a coarser neighbour).
+ * edge e of `edgeLists`; a skirt is only needed against a neighbour of another level).
  */
 export function tileIndices(skirts = 15): Uint16Array | Uint32Array {
   const idx: number[] = [];
@@ -250,11 +250,12 @@ export function buildTile(req: TileRequest, height: HeightFn): TileData {
   }
   // relief shadows
   if (req.sun) shadeTile(req, height, P, E, C, sun, spacing, hMax);
-  // skirts: the edge vertices again, hanging down (hide cracks against coarser neighbours). A crack
-  // is the step between this tile's edge and a coarser neighbour's straight segments: the parent's
-  // shape along the edge (the morph start) measures it for one level; neighbours up to two levels
-  // coarser and the morph in between are covered by a few times that. (Deep skirts are not free:
-  // a software rasteriser shades every hidden fragment.)
+  // skirts: the edge vertices again, hanging down (hide cracks against neighbours of another
+  // level). A crack is the step between this tile's edge and a coarser neighbour's straight
+  // segments: the parent's shape along the edge (the morph start) measures it for one level;
+  // neighbours up to two levels coarser and the morph in between are covered by a few times that.
+  // Against a finer neighbour, whose edge dips below this one's by its own (smaller) step, the same
+  // depth does. (Deep skirts are not free: a software rasteriser shades every hidden fragment.)
   const edges = edgeLists();
   let edgeStep = 0;
   if (par) {

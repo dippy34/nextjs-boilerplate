@@ -241,6 +241,18 @@ export class Renderer {
     return { quat: this.viewQuat, fovY: this.camera.fov, aspect: this.camera.aspect, width: this.width / this.pixelRatio,
       height: this.height / this.pixelRatio, pixelAngle: this.pixelAngle(), pixelRatio: this.pixelRatio, far: Infinity, xr: false };
   }
+  /**
+   * Run `fn` (shader compilation ahead of time) with the scene's render target bound: three builds
+   * a program per output target (the linear HDR target or the page canvas), so compiling while the
+   * canvas is bound would leave the variant actually drawn to compile on first use.
+   */
+  withSceneTarget<T>(fn: () => T): T {
+    if (this.presenting) return fn();
+    const was = this.gl.getRenderTarget();
+    this.gl.setRenderTarget(this.hdr);
+    try { return fn(); } finally { this.gl.setRenderTarget(was); }
+  }
+
   private warnedXrTarget = false;
   private _p = new Vector3();
   private _s = new Vector3();
