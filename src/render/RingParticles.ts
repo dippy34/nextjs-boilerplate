@@ -228,9 +228,11 @@ void main() {
   float tauV = 0.0;
   float L = 0.0;
   float jit = sh(vec3(gl_FragCoord.xy, 7.0));
+  float tg = ta0;
   for (int i = 1; i <= 30; i++) {
     if (i > N) break;
-    float tn = (i == N) ? t1 : ta0 * pow(k, float(i));
+    tg *= k;
+    float tn = (i == N) ? t1 : tg;
     float tm = mix(tPrev, tn, 0.25 + 0.5 * jit);
     vec3 q = d * tm;
     vec3 p = uCamR + q;
