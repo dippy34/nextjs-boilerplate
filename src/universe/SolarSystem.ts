@@ -223,6 +223,8 @@ export class SolarSystem {
 
     // 2) Moons relative to their planet (mean elements); fall back for the Moon outside DE.
     const moonRel = new Map<Body, Vector3>();
+    // (velocities relative to the planet, kept for the planet's own velocity below)
+    const moonRelVel = new Map<Body, Vector3>();
     for (const b of this.bodies) {
       const e = this.ephemOf.get(b)!;
       if (e.kind !== 'satellite') continue;
@@ -234,6 +236,7 @@ export class SolarSystem {
         rel.sub(v).multiplyScalar(1e3);
         b.vel.copy(rv.sub(v2).multiplyScalar(1e3 / DAY));
         moonRel.set(b, rel);
+        moonRelVel.set(b, b.vel.clone());
         continue;
       }
       const s = this.satelliteElements(b, jd);
@@ -244,6 +247,7 @@ export class SolarSystem {
       rel.applyMatrix3(s.frame);
       vel.applyMatrix3(s.frame);
       moonRel.set(b, rel);
+      moonRelVel.set(b, vel);
       b.vel.copy(vel);
     }
 
@@ -254,6 +258,11 @@ export class SolarSystem {
       for (const m of p.children) {
         const r = moonRel.get(m);
         if (r && m.gm > 0) p.pos.addScaledVector(r, -m.gm / p.systemGm);
+        // the planet's velocity likewise (the moons' momentum about the barycentre): God mode's
+        // N-body sandbox starts from these states, and a planet moving with its barycentre's
+        // velocity would leave its moons behind
+        const rv = moonRelVel.get(m);
+        if (rv && m.gm > 0) p.vel.addScaledVector(rv, -m.gm / p.systemGm);
       }
     }
     if (!de) {
@@ -262,6 +271,8 @@ export class SolarSystem {
       const moon = this.byId.get(301)!;
       const r = moonRel.get(moon);
       if (r) earth.pos.addScaledVector(r, -moon.gm / (earth.gm + moon.gm));
+      const rv = moonRelVel.get(moon);
+      if (rv) earth.vel.addScaledVector(rv, -moon.gm / (earth.gm + moon.gm));
     }
     for (const [m, r] of moonRel) {
       const p = m.parent!;
