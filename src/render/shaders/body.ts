@@ -626,6 +626,7 @@ uniform float uRotRate;
 uniform float uGravDark;
 uniform vec3 uAxis;
 uniform float uFlares;
+uniform float uFlat;       // polar flattening of the drawn ellipsoid (fast rotators)
 `;
 
 /**
@@ -766,13 +767,13 @@ void main() {
   float r = length(vec2(dot(p, vec2(-uAxis2.y, uAxis2.x)), dot(p, uAxis2) / uMinor));
   // (drawn in front of the star: leave its disk alone; the glow starts a little inside the true edge,
   // under the faceted sphere's outline, so no dark sliver shows between the two)
-  if (r < 0.985) discard;
+  if (r < 0.96) discard;
   float a = atan(vXY.y, vXY.x);
   // streamers: angular structure that widens outwards (periodic in angle)
   float st = n2(vec2(cos(a) * 3.0 + uSeed, sin(a) * 3.0 + uTime * 0.01)) * 0.7 + n2(vec2(cos(a) * 9.0, sin(a) * 9.0 + uSeed)) * 0.3;
   float glow = uCorona * (0.55 * exp(-max(r - 1.0, 0.0) * 7.0) + (0.05 + 0.12 * st) / (r * r));
   // (starts right at the disk's edge, faded in over about a pixel only: no dark gap around the disk)
-  glow *= (1.0 - smoothstep(0.7, 1.0, length(vXY))) * smoothstep(0.985, 1.0, r);
+  glow *= (1.0 - smoothstep(0.7, 1.0, length(vXY))) * smoothstep(0.96, 1.0, r);
   // prominences: bright loops just above the limb
   float pn = n2(vec2(cos(a) * 14.0 + uSeed, sin(a) * 14.0 + r * 9.0 - uTime * 0.02));
   float prom = uProm * pow(pn, 7.0) * 6.0 * smoothstep(1.16, 1.0, r);
