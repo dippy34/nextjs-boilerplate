@@ -42,7 +42,7 @@ export function heightSpec(g: Ground, source: TerrainSource | null): HeightSpec 
   const patches = key ? [...(s.patches.get(key) ?? [])] : [];
   // elevation pyramid: body name lower-cased, at <terrain-source base>/elevation (absolute for the worker)
   let elevation: { base: string; bodyKey: string } | null = null;
-  if (typeof location !== 'undefined') {
+  if (typeof location !== 'undefined' && source.elevationBodies?.has(body.name.toLowerCase())) {
     try {
       elevation = { base: new URL(`${s.base}/elevation`, location.href).href, bodyKey: body.name.toLowerCase() };
     } catch { elevation = null; }

@@ -57,10 +57,22 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     (display-referred `litMaterial`), `WarpFx.ts`, `Traffic.ts` + `Station.ts`, `Missions.ts`, `Audio.ts`
     (Web Audio synthesis). CameraRig got `inertia`, `braking`, `thrust`, `stop()`, `gotoRemaining`.
   - VR quality tier: `LITE.uLite` (1 while presenting) trims the heavy procedural shaders.
-  - Landing terrain: `pipeline/build_terrain.py` -> `public/data/terrain/` (Moon/Mars/Mercury/Earth heights
-    as 16-bit-in-RGB PNG), `src/universe/Terrain.ts` (heights: elevation model + generated hills and
-    craters), `src/render/TerrainPatch.ts` (polar grid under the explorer, built a few rings per
-    frame, drawn with the body's material; the sphere gets a hole via `uHoleDir`/`uHoleCos`).
+  - Planet terrain (replaces the old single landing patch): `src/render/PlanetTerrain.ts` — a
+    quadtree on the 6 faces of an equi-angular cube on every solid world within 2 radii
+    (`PlanetTerrain.reach`), tiles of 64x64 cells (`universe/TerrainTiles.ts`: heights with a border
+    for continuous normals, skirts, the parent's shape for geomorphing, relief shadows), split by
+    screen-space error (`pixPerCell`), horizon-culled, at most `drawCap` drawn, built in Web Workers
+    (`workers/terrainTiles.worker.ts`, `inFlight` jobs a frame; the tile holding the explorer comes
+    with its whole column down to the detail wanted, `chain`). The worker rebuilds the same height
+    function from plain data (`universe/TerrainHeights.ts`: `TerrainSource`/`ExoGround` state) and
+    samples the elevation pyramids (`TerrainSource.elevSample`, below). Tiles morph in from their
+    parent's shape and a rebuilt drawn tile morphs from its old shape, so `below()`/`groundRadius()`
+    (the drawn triangles, exactly) never jump. The world's sphere is cut away entirely (`uHoleCos`
+    -2) while the terrain covers it; the surface shader reads the close-up weight per vertex
+    (`tileFragment`: `uHScale` -> `vHScale`, fading out with distance), so far tiles shade like the
+    globe. `TerrainPatch.ts` is now an alias kept for importers. Heights: `pipeline/build_terrain.py`
+    -> `public/data/terrain/` (coarse global maps), `src/universe/Terrain.ts` (map or pyramid +
+    generated hills and craters below their resolution). Shot script: `scripts/shots/terrain-lod.mjs`.
     `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`. Shadows: `aSun`
     is the Sun's clearance over the relief in penumbra widths (ray-marched per vertex, signed),
     and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`. Earth: the map's `"sea": 0` makes
@@ -163,8 +175,8 @@ Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/ele
   `faceToDir`, `dirToFace`, `tileOf`, `decodePng16` (own PNG decoder over `DecompressionStream`,
   so heights stay exact 16-bit). LRU cache, 96 MB default, levels 0-1 never evicted.
 * Regenerate: `cd pipeline && python3 build_elevation.py [body ...]` (downloads ~14 GB once).
-* Known: Mercury in the older `public/data/terrain/mercury.png` is twice too tall (the GeoTIFF's 0.5 m
-  scale was not applied there); the pyramids are right. Mars/Earth heights are relative to the
+* Mercury's older `public/data/terrain/mercury.png` was twice too tall: `terrain.json` now applies
+  the GeoTIFF's 0.5 m scale (and `build_terrain.py` bakes it in on a rebuild). Mars/Earth heights are relative to the
   areoid/geoid but the engine adds them to the ellipsoid (as before: the difference is a smooth,
   very long-wavelength undulation, kilometre-scale on Mars, ~100 m on Earth). Earth land below sea level (Dead Sea, Caspian) is stored as ocean in the fine levels.
 
