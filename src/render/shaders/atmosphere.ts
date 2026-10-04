@@ -78,7 +78,11 @@ void main() {
   vec2 tp = hitSphere(uO, d, min(uRp, length(uO) - 20.0));
   bool ground = tp.x <= tp.y && tp.y > 0.0;
   if (ground) t1 = min(t1, max(tp.x, 0.0));
-  float ds = (t1 - t0) / float(uSteps);
+  // over the disk of a world whose map already shows its atmosphere (giants, Venus, Titan), seen
+  // from above the shell, it adds a faint haze along a short path: half the steps
+  float nSteps = ground && uGroundMix < 0.5 && dot(uO, uO) > uRt * uRt ? max(floor(float(uSteps) * 0.5), 5.0) : float(uSteps);
+  float ds = (t1 - t0) / nSteps;
+  bool mie = dot(uBetaMe, vec3(1.0)) > 0.0;
   float mu = dot(d, uSun);
   float pR = 0.0596831 * (1.0 + mu * mu);
   vec3 g2 = uG * uG;
@@ -86,17 +90,17 @@ void main() {
   float odR = 0.0, odM = 0.0;
   vec3 sum = vec3(0.0);
   for (int i = 0; i < 32; i++) {
-    if (i >= uSteps) break;
+    if (float(i) >= nSteps) break;
     vec3 p = uO + d * (t0 + (float(i) + 0.5) * ds);
     float r = length(p);
     float h = r - uRp;
     float rR = exp(-h / uHR) * ds;
-    float rM = exp(-h / uHM) * ds;
+    float rM = mie ? exp(-h / uHM) * ds : 0.0;
     odR += 0.5 * rR; odM += 0.5 * rM;
     float muS = dot(p, uSun) / r;
     float cR = sunColumn(r, muS, uHR, uRp);
     if (cR < 1.0e11) {
-      float cM = sunColumn(r, muS, uHM, uRp);
+      float cM = mie ? sunColumn(r, muS, uHM, uRp) : 0.0;
       vec3 T = exp(-(uBetaR * (odR + cR) + uBetaMe * (odM + cM)));
       sum += T * (uBetaR * rR * pR + uBetaMs * rM * pM);
     }

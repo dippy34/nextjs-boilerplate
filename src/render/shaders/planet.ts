@@ -95,6 +95,8 @@ uniform float uHScale;      // terrain relief scale (fades in on descent)
 uniform float uCamAlt;      // the explorer's altitude over the sphere (m): below the clouds they are not painted on the ground
 uniform vec3 uHoleDir;      // sphere only: body-fixed centre of the terrain patch
 uniform float uHoleCos;     // ... and the cosine of its angular radius (2 = no hole)
+uniform samplerCube uTerrCube;  // headset: terrainX() baked per body-fixed direction (r: height, g: low; EXO_BAKE_FRAG)
+uniform float uBaked;       // 1 = use uTerrCube instead of evaluating terrainX() on the sphere
 varying vec3 vTerrN;
 varying float vSun;
 varying vec3 vNormalBF;
@@ -509,8 +511,10 @@ void main() {
     for (int k = 0; k < 3; k++) {
       if (k >= nFD) break;
       vec3 nk = k == 0 ? nB : normalize(nB + (k == 1 ? t1 : t2) * eps);
-      float lk;
-      float tk = terrainX(nk, lk);
+      float lk, tk;
+      // (the baked field only on the sphere: the landing terrain's colours follow the CPU's ground exactly)
+      if (k == 0 && uBaked > 0.5 && uTerrain < 0.5) { vec2 bt = textureCube(uTerrCube, nk).rg; tk = bt.x; lk = bt.y; }
+      else tk = terrainX(nk, lk);
       if (k == 0) {
         h = tk; low = lk;
         hn = (h - uHMid) / uHSpan;      // dry worlds: height by quantile (about -0.5 .. 0.5 for 10 .. 90 %)
@@ -743,4 +747,24 @@ void main() {
   gl_FragColor = vec4(min(radiance * uExposure, vec3(6.0e4)), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
+}`;
+
+
+/**
+ * Bakes the headset variant of terrainX() into one face (uFace, GL cube-map order) of a cube map of
+ * uSize texels: r = height, g = 'low'. Its finest octaves are ~18 cycles per radian, so a few hundred
+ * texels a face hold it closely, and the planet's sphere then reads one texel instead of ~11 noises.
+ */
+export const EXO_BAKE_FRAG = EXO_FRAG.slice(0, EXO_FRAG.indexOf('void main() {')) + /* glsl */ `
+uniform float uFace;
+uniform float uSize;
+void main() {
+  vec2 st = gl_FragCoord.xy / uSize * 2.0 - 1.0;
+  float s = st.x, t = st.y;
+  int f = int(uFace + 0.5);
+  vec3 d = f == 0 ? vec3(1.0, -t, -s) : f == 1 ? vec3(-1.0, -t, s) : f == 2 ? vec3(s, 1.0, t)
+         : f == 3 ? vec3(s, -1.0, -t) : f == 4 ? vec3(s, -t, 1.0) : vec3(-s, -t, -1.0);
+  float low;
+  float h = terrainX(normalize(d), low);
+  gl_FragColor = vec4(h, low, 0.0, 1.0);
 }`;

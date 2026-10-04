@@ -22,6 +22,12 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   EXT_clip_control, else log depth; the console says which): `Renderer.reverseXrProjections`
   rebuilds the runtime's eye projections as reversed-Z each frame (three has no reversed-Z path for
   XR cameras), and the far-geometry pull-in is off in that mode. For an A/B on the device.
+* Adaptive quality (`src/render/Quality.ts`): a governor in Renderer.render steps `QUALITY.level`
+  (0 full .. 3) down when frames miss the budget (60 Hz desktop, the session's rate in a headset)
+  and back up after a clean run (with back-off). Desktop: internal render resolution 1/0.85/0.72/0.6
+  (the composite upscales; view.pixelRatio reports render pixels per CSS pixel). Headset: the
+  volume pass and the terrain's split threshold coarsen. Off under automation (navigator.webdriver)
+  unless ?governor=1; ?governor=0 turns it off. Other layers may read QUALITY.level.
 * Volume pass (`Renderer.ts`, `VOLUMES`): ray-marched volumes are drawn at reduced resolution
   (desktop 0.75, headset 0.5) into their own target, then added to the frame by a full-screen quad
   in the scene at the far plane with the volumes' old draw order (after everything opaque, sky
