@@ -1,9 +1,11 @@
-import { AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, Group, IcosahedronGeometry, Matrix3, Matrix4, Mesh, Quaternion, ShaderMaterial, Vector3 } from 'three';
+import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, DoubleSide, Group, IcosahedronGeometry, Matrix3, Matrix4, Mesh, Quaternion, ShaderMaterial, Vector3 } from 'three';
+import { keplerState, type OrbitalElements } from '../astro/kepler';
 import { magToIrradiance } from '../astro/photometry';
-import { AU } from '../core/units';
+import { eclToEqu } from '../core/frames';
+import { AU, GM_SUN } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { Comet } from './SmallBodies';
-import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const VERT = /* glsl */ `
 #include <common>
@@ -25,32 +27,109 @@ void main() {
 ${FIX_LOGDEPTH}
 }`;
 
-const FRAG = /* glsl */ `
+/** Tails as a volume in the comet's own frame (x: away from the Sun, y: in the orbit plane behind the motion, z: orbit normal), in coma radii. */
+const TAIL_VERT = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_vertex>
+${PROJECT_PARS}
+uniform vec3 uBoxC;      // box centre in the comet frame (coma radii)
+uniform vec3 uBoxE;      // box half extents (coma radii)
+varying vec3 vP;         // point on the box, comet frame (coma radii)
+void main() {
+  vP = uBoxC + position * uBoxE;
+  gl_Position = projectView(modelViewMatrix * vec4(position, 1.0));
+  #include <logdepthbuf_vertex>
+${FIX_LOGDEPTH}
+}`;
+
+/**
+ * The coma (integrated analytically along the ray) and the two tails ray-marched through the
+ * volume: the ion tail a narrow tube straight away from the Sun, streaked by plasma rays; the
+ * dust tail a broad, thin fan in the orbit plane, curving back along the orbit and striated
+ * along the directions dust released at different times flies off in. Seen edge-on the fan is a
+ * bright line; face-on a wide, faint wing. Densities are normalised so the columns through the
+ * middle give the old picture's profiles (and so the catalogue brightness).
+ */
+const TAIL_FRAG = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
-uniform float uRc;       // coma radius (m)
-uniform float uLi;       // ion tail length scale (m)
-uniform float uLd;       // dust tail length scale (m)
-uniform float uBend;     // dust tail curvature across (-1..1)
-uniform float uL0;       // peak coma brightness relative to the Milky Way's typical surface brightness
-uniform float uGain;     // display gain of the sky (dark-adapted = 1), shared with the Milky Way
-varying vec2 vST;
+uniform vec3 uCam;       // camera in the comet frame (coma radii)
+uniform vec3 uBoxC;
+uniform vec3 uBoxE;
+uniform float uLi;       // ion tail length scale (coma radii)
+uniform float uLd;       // dust tail length scale (coma radii)
+uniform float uBend;     // dust tail curvature
+uniform float uL0;
+uniform float uGain;
+uniform float uSeed;
+uniform float uLite;
+varying vec3 vP;
+float th(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+float tn(vec3 p) {
+  vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(th(i), th(i + vec3(1,0,0)), f.x), mix(th(i + vec3(0,1,0)), th(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(th(i + vec3(0,0,1)), th(i + vec3(1,0,1)), f.x), mix(th(i + vec3(0,1,1)), th(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
 void main() {
-  float s = vST.x, t = vST.y;
-  float rho = length(vST);
-  // coma: a broad glow and a bright inner part
-  float coma = 0.7 * exp(-rho * rho / (2.0 * uRc * uRc)) + 0.3 * exp(-rho / (0.25 * uRc));
-  // ion (plasma) tail: narrow, straight away from the Sun, bluish
-  float wi = 0.12 * uRc + 0.012 * max(s, 0.0);
-  float ion = s > 0.0 ? exp(-t * t / (2.0 * wi * wi)) * exp(-s / uLi) * smoothstep(0.0, uRc, s) : 0.0;
-  // dust tail: broader, curving back along the orbit, yellowish
-  float tc = uBend * s * s / uLd;
-  float wd = 0.35 * uRc + 0.1 * max(s, 0.0);
-  float dust = exp(-(t - tc) * (t - tc) / (2.0 * wd * wd)) * exp(-max(s, 0.0) / uLd) * smoothstep(-uRc, uRc, s);
-  vec3 c = coma * vec3(1.0, 0.98, 0.92) + ion * 0.35 * vec3(0.45, 0.7, 1.4) + dust * 0.4 * vec3(1.1, 0.95, 0.75);
+  vec3 d = normalize(vP - uCam);
+  // coma: column through the glow at the ray's closest approach to the nucleus
+  float tc = max(-dot(uCam, d), 0.0);
+  float b = length(uCam + d * tc);
+  // a 1/r^2 cloud of gas and dust seen in projection: brightness ~ 1/b with a bright central
+  // condensation, fading out beyond the coma radius (same total light as before)
+  float coma = 0.791 * exp(-b) / (b + 0.03);
+  // tails: march through the box, with steps that shrink near the ion tail's axis and the dust fan's plane
+  vec3 inv = 1.0 / (sign(d) * max(abs(d), vec3(1e-6)));
+  vec3 lo = uBoxC - uBoxE, hi = uBoxC + uBoxE;
+  vec3 ta = (lo - uCam) * inv, tb = (hi - uCam) * inv;
+  vec3 tl = min(ta, tb), tu = max(ta, tb);
+  float t0 = max(max(tl.x, tl.y), max(tl.z, 0.0)), t1 = min(min(tu.x, tu.y), tu.z);
+  float ion = 0.0, dust = 0.0;
+  if (t1 > t0) {
+    int N = uLite > 0.5 ? 32 : 96;
+    float dsMax = (t1 - t0) / (uLite > 0.5 ? 12.0 : 28.0);
+    float dyz = max(length(d.yz), 0.02), dz = max(abs(d.z), 0.02);
+    float jit = th(vec3(gl_FragCoord.xy, uSeed));
+    float t = t0;
+    for (int i = 0; i < 96; i++) {
+      if (i >= N || t >= t1) break;
+      vec3 p0 = uCam + d * t;
+      float x0 = max(p0.x, 0.0);
+      float hI = max(length(p0.yz) - 0.12 - 0.012 * x0, 0.5 * (0.12 + 0.012 * x0)) / dyz;
+      float hD = max(abs(p0.z) - 0.08 - 0.025 * x0, 0.5 * (0.08 + 0.025 * x0)) / dz;
+      float ds = min(hI, hD);
+      // inside the fan, also resolve its width (seen edge-on the ray runs along it)
+      if (abs(p0.z) < 3.0 * (0.08 + 0.025 * x0)) ds = min(ds, 0.5 * (0.35 + 0.1 * x0) / max(abs(d.y), 0.05));
+      ds = clamp(ds, 0.03, dsMax);
+      ds = min(ds, t1 - t);
+      vec3 p = uCam + d * (t + ds * jit);
+      t += ds;
+      float x = p.x;
+      // ion tail: a tube along +x, streaked by plasma rays that run along the tail and kink
+      if (x > 0.0) {
+        float wi = 0.12 + 0.012 * x;
+        float rr = length(p.yz);
+        vec2 u = p.yz / max(rr, 1e-4);
+        float rays = 0.35 + 1.4 * pow(tn(vec3(u * 3.0, x * 0.012 + uSeed)), 2.0);
+        ion += ds * exp(-rr * rr / (2.0 * wi * wi)) / (2.5066 * wi) * exp(-x / uLi) * smoothstep(0.0, 1.0, x) * rays;
+      }
+      // dust tail: a thin fan in the orbit plane (z = 0), curving back along the orbit, striated along
+      // lines from the nucleus (dust let go at one time drifts out along one line)
+      float xd = max(x, 0.0);
+      float yc = uBend * xd * xd / uLd;
+      float wy = 0.35 + 0.1 * xd;
+      float wz = 0.08 + 0.025 * xd;
+      float fan = exp(-(p.y - yc) * (p.y - yc) / (2.0 * wy * wy)) * exp(-p.z * p.z / (2.0 * wz * wz)) / (2.5066 * wz);
+      float stri = 0.6 + 0.8 * tn(vec3(atan(p.y, max(x, 0.5)) * 45.0, xd * 0.003, uSeed + 3.0));
+      dust += ds * fan * exp(-xd / uLd) * smoothstep(-1.0, 1.0, x) * stri;
+    }
+  }
+  // tails: a few to tens of times the Milky Way's surface brightness near the head (Hale-Bopp's
+  // dust tail ~19 mag per square arcsecond)
+  vec3 c = coma * vec3(1.0, 0.98, 0.92) + ion * 1.4 * vec3(0.45, 0.7, 1.4) + dust * 1.8 * vec3(1.1, 0.95, 0.75);
   // glow, not a wall of white: soft ceiling on the displayed level (like the eye's response to the sky)
-  vec3 x = c * uL0 * 0.1 * uGain;
-  gl_FragColor = vec4(1.2 * (1.0 - exp(-x / 1.2)), 1.0);
+  vec3 xx = c * uL0 * 0.1 * uGain;
+  gl_FragColor = vec4(1.2 * (1.0 - exp(-xx / 1.2)), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
@@ -161,7 +240,20 @@ const MW_RADIANCE = magToIrradiance(21.5) / 2.3504e-11;
 export class CometTails {
   readonly group = new Group();
   private meshes: Mesh[] = [];
-  private last = new Map<Comet, { p: Vector3; jd: number; v: Vector3 | null }>();
+  private elements = new WeakMap<Comet, OrbitalElements>();
+
+  /** The comet's direction of motion (ICRF unit vector) at `jd`, from its orbital elements. */
+  private motion(c: Comet, jd: number): Vector3 {
+    let el = this.elements.get(c);
+    if (!el) {
+      const r = c.row;
+      el = { q: r[3] * AU, e: r[2], i: r[4], node: r[5], peri: r[6], tp: r[7], mu: GM_SUN };
+      this.elements.set(c, el);
+    }
+    const vel = new Vector3();
+    keplerState(el, jd, new Vector3(), vel);
+    return eclToEqu(vel).normalize();
+  }
 
   /** display gain of the sky (xStar / xDark): comets are shown on the same scale as the Milky Way */
   readonly gain = { value: 1 };
@@ -186,16 +278,18 @@ export class CometTails {
     g.setAttribute('position', new BufferAttribute(new Float32Array(12), 3));
     g.setAttribute('aST', new BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
     g.setIndex([0, 1, 2, 0, 2, 3]);
+    const box = new BoxGeometry(2, 2, 2);
     for (let i = 0; i < MAX; i++) {
-      const m = new Mesh(g, new ShaderMaterial({
-        name: 'comet-tail', vertexShader: VERT, fragmentShader: FRAG,
+      const m = new Mesh(box, new ShaderMaterial({
+        name: 'comet-tail', vertexShader: TAIL_VERT, fragmentShader: TAIL_FRAG,
         uniforms: {
-          uNucleus: { value: new Vector3() }, uAxis: { value: new Vector3(1, 0, 0) }, uAcross: { value: new Vector3(0, 1, 0) },
-          uExtent: { value: [0, 1, 1, 0] }, uRc: { value: 1 }, uLi: { value: 1 }, uLd: { value: 1 }, uBend: { value: 0 }, uL0: { value: 0 },
-          uGain: this.gain, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+          uCam: { value: new Vector3() }, uBoxC: { value: new Vector3() }, uBoxE: { value: new Vector3(1, 1, 1) },
+          uLi: { value: 1 }, uLd: { value: 1 }, uBend: { value: 0 }, uL0: { value: 0 }, uSeed: { value: i * 7.3 },
+          uGain: this.gain, uLite: LITE.uLite, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
         },
-        transparent: true, depthWrite: false, blending: AdditiveBlending, side: DoubleSide,
+        transparent: true, depthWrite: false, blending: AdditiveBlending, side: BackSide,
       }));
+      m.matrixAutoUpdate = false;
       m.frustumCulled = false;
       m.visible = false;
       m.renderOrder = 8;
@@ -307,28 +401,43 @@ export class CometTails {
       const across = new Vector3().crossVectors(axis, viewDir);
       if (across.lengthSq() < 1e-10) across.set(0, 0, 1).cross(axis);
       across.normalize();
-      // motion: from the change of position over time (dust lags behind the nucleus)
-      const pos = c.upos.sub(sun, new Vector3());
-      const prev = this.last.get(c);
-      let v = prev?.v ?? null;
-      if (prev && jd !== prev.jd) v = pos.clone().sub(prev.p).divideScalar(jd - prev.jd).normalize();
-      this.last.set(c, { p: pos, jd, v });
-      const bend = v ? -0.25 * v.dot(across) : 0;
+      // motion along the orbit (the dust lags behind the nucleus, in the orbit plane)
+      const v = this.motion(c, jd);
       const Li = Rc * 60 / Math.sqrt(Math.max(r, 0.1));
       const Ld = Rc * 30;
       // radiance: the catalogue magnitude's flux spread over the coma (intrinsic: E x distance^2),
       // relative to the Milky Way's typical surface brightness (~21.5 mag per square arcsecond)
       const E = magToIrradiance(c.apparentMag);
       const L0 = (0.6 * E * dist * dist) / (2 * Math.PI * Rc * Rc) / MW_RADIANCE;
+      // the comet's frame: x away from the Sun, y in the orbit plane behind the motion, z the orbit normal
+      const X = axis.clone();
+      const Y = v.clone().addScaledVector(X, -v.dot(X)).negate();
+      if (Y.lengthSq() < 1e-8) Y.copy(across);
+      Y.normalize();
+      const Z = new Vector3().crossVectors(X, Y);
+      const bendV = 0.25;
+      const li = Li / Rc, ld = Ld / Rc;
+      const L = 3 * Math.max(li, ld);
+      // the box (coma radii): the coma to 5, the ion tail along x to L, the dust fan to 4 lengths
+      const xd = Math.min(L, 4 * ld);
+      const wiL = 0.12 + 0.012 * L, wyD = 0.35 + 0.1 * xd, wzD = 0.08 + 0.025 * xd;
+      const yLo = Math.max(5, 3 * wiL, 3 * wyD), yHi = Math.max(5, 3 * wiL, bendV * xd * xd / ld + 3 * wyD);
+      const zMax = Math.max(5, 3 * wiL, 3 * wzD);
+      const boxC = new Vector3((L - 5) / 2, (yHi - yLo) / 2, 0);
+      const boxE = new Vector3((L + 5) / 2, (yHi + yLo) / 2, zMax);
       const u = (m.material as ShaderMaterial).uniforms;
-      (u.uNucleus.value as Vector3).copy(nucleus);
-      (u.uAxis.value as Vector3).copy(axis);
-      (u.uAcross.value as Vector3).copy(across);
-      u.uExtent.value = [-3 * Rc, Math.max(Li, Ld) * 3, Math.max(3 * Rc, 0.4 * Ld * 3), 0];
-      u.uRc.value = Rc; u.uLi.value = Li; u.uLd.value = Ld; u.uBend.value = bend; u.uL0.value = L0;
+      (u.uBoxC.value as Vector3).copy(boxC);
+      (u.uBoxE.value as Vector3).copy(boxE);
+      // camera in the comet frame (coma radii)
+      const camL = nucleus.clone().negate().divideScalar(Rc);
+      (u.uCam.value as Vector3).set(camL.dot(X), camL.dot(Y), camL.dot(Z));
+      // mesh: unit box -> comet frame (metres, camera-relative)
+      m.matrix.makeBasis(X.clone().multiplyScalar(boxE.x * Rc), Y.clone().multiplyScalar(boxE.y * Rc), Z.clone().multiplyScalar(boxE.z * Rc));
+      m.matrix.setPosition(nucleus.clone().addScaledVector(X, boxC.x * Rc).addScaledVector(Y, boxC.y * Rc));
+      m.matrixWorldNeedsUpdate = true;
+      u.uLi.value = li; u.uLd.value = ld; u.uBend.value = bendV; u.uL0.value = L0;
       m.visible = L0 > 0;
     }
-    if (this.last.size > 400) this.last.clear();
     // the nucleus of the nearest drawn comet
     let nearest: { c: Comet; r: number; score: number } | null = null;
     let nd = Infinity;

@@ -32,7 +32,8 @@ export class RingSpot implements SpaceObject {
     const inv = f.clone().invert();
     const s = sunWorld.clone().sub(new Vector3()).applyMatrix4(inv);
     const a0 = Math.atan2(s.y, s.x) + Math.PI / 3;
-    this.local = new Vector3(Math.cos(a0) * ringRadius, Math.sin(a0) * ringRadius, 40);
+    // above the face the Sun lights (the other face of the dense B ring is dark)
+    this.local = new Vector3(Math.cos(a0) * ringRadius, Math.sin(a0) * ringRadius, s.z < 0 ? -40 : 40);
   }
 
   get parentObject(): SpaceObject { return this.planet; }
@@ -42,7 +43,7 @@ export class RingSpot implements SpaceObject {
     const f = ringFrame(this.planet.orientation);
     const out = this.local.clone().setZ(0).normalize().applyMatrix4(f);
     const pole = new Vector3().setFromMatrixColumn(f, 2);
-    return out.addScaledVector(pole, 0.15).normalize();
+    return out.addScaledVector(pole, this.local.z < 0 ? -0.15 : 0.15).normalize();
   }
 
   get upos(): UPos {

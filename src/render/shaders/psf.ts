@@ -72,7 +72,10 @@ vec3 psfShade(vec2 pointCoord, float radius, float energy, vec3 color) {
     spikes = (s1 + s2) * 0.28 * smoothstep(8.0, 13.0, g) * uGlare * uHalo;
   }
   float edge = 1.0 - smoothstep(0.8, 1.0, sqrt(r2) / radius);
-  float lum = (core + halo + spikes) * edge;
+  // the faintest stars drawn fade in over the last ~1.3 magnitudes above the cut-off instead of all
+  // showing as equal specks (which read as a photograph's grain); the eye barely sees stars near
+  // its limit, and their combined light is in the sky's glow already
+  float lum = (core + halo + spikes) * edge * smoothstep(0.0, 1.8, g);
   vec3 c = max(mix(vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), color, uSat), 0.0);
   return c * lum;
 }

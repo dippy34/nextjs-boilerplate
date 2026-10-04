@@ -17,7 +17,7 @@ const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${detail}`); };
 const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 120000 }); };
 
-await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Saturn&dist=4`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Saturn&dist=4`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 
 // 0. the tour (T) lists places that all resolve
@@ -119,7 +119,7 @@ if (st) {
 }
 
 // 6. eclipses: the total lunar eclipse of 2026-03-03 (greatest 11:33 UTC): the Moon inside Earth's shadow
-await page.goto(`${base}?time=2026-03-03T11:33:00Z&paused=1&target=Moon&dist=4`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-03-03T11:33:00Z&paused=1&target=Moon&dist=4`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 await frames(20);
 st = await page.evaluate(() => {
@@ -132,7 +132,7 @@ check('the Moon is in Earth\'s shadow on 2026-03-03', st.occluders >= 1 && st.re
 await page.screenshot({ path: path.join(outDir, 'p4-lunar-eclipse.png') });
 
 // 7. a shadow of a Galilean moon on Jupiter (searched for in the next two days)
-await page.goto(`${base}?time=2026-10-01T00:00:00Z&paused=1&target=Jupiter&dist=3`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-10-01T00:00:00Z&paused=1&target=Jupiter&dist=3`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 st = await page.evaluate(() => {
   const a = window.app;
@@ -175,7 +175,7 @@ if (st) {
 
 // 8. landmarks: Valles Marineris and the Apollo 11 site, seen from where "go to" arrives
 for (const [id, name, body] of [['p6-valles-marineris', 'Valles Marineris', 'Mars'], ['p7-apollo-11', 'Apollo 11 landing site', 'Moon']]) {
-  await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=${body}&dist=3`, { waitUntil: 'load' });
+  await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=${body}&dist=3`, { waitUntil: 'load', timeout: 180000 });
   await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
   await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
   // the hour when the Sun stands about 30 degrees over the place (the clock is paused)
@@ -241,7 +241,7 @@ await page.evaluate(() => {
   const a = window.app;
   const o = a.findByName('Orion Nebula');
   const d = o.upos.sub(a.rig.upos).normalize();
-  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 6);
+  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 12);
 });
 await frames(5);
 st = await volume();

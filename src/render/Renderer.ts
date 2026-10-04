@@ -1,8 +1,9 @@
 import {
-  ACESFilmicToneMapping, DepthTexture, FloatType, Group, HalfFloatType, LinearFilter, Mesh, NoBlending, NoToneMapping,
+  CustomToneMapping, DepthTexture, FloatType, Group, HalfFloatType, LinearFilter, Mesh, NoBlending, NoToneMapping,
   OrthographicCamera, PerspectiveCamera, PlaneGeometry, Quaternion, RGBAFormat, Scene, ShaderMaterial, Vector2,
   Vector3, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
+import { installToneMapping, TONE_GLSL } from './shaders/tone';
 
 /**
  * HDR renderer.
@@ -68,6 +69,7 @@ export class Renderer {
   readonly rig = new Group();
 
   constructor(readonly canvas: HTMLCanvasElement, readonly xrCapable = false) {
+    installToneMapping();
     const reversed = !xrCapable && Renderer.supportsClipControl();
     this.depthMode = reversed ? 'reversed-z' : 'logarithmic';
     this.gl = new WebGLRenderer({
@@ -134,16 +136,12 @@ export class Renderer {
       vertexShader: FULLSCREEN_VERT,
       fragmentShader: /* glsl */ `
         uniform sampler2D tScene; uniform sampler2D tBloom; uniform float uExposure; uniform float uBloom; varying vec2 vUv;
-        // ACES fitted curve (Stephen Hill, BakingLab, MIT licence)
-        const mat3 ACESIn = mat3(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);
-        const mat3 ACESOut = mat3(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);
-        vec3 RRTAndODTFit(vec3 v) { vec3 a = v * (v + 0.0245786) - 0.000090537; vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081; return a / b; }
-        vec3 aces(vec3 c) { c = ACESIn * c; c = RRTAndODTFit(c); return clamp(ACESOut * c, 0.0, 1.0); }
+        ${TONE_GLSL}
         vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
         float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main() {
           vec3 hdr = texture2D(tScene, vUv).rgb + uBloom * texture2D(tBloom, vUv).rgb;
-          vec3 c = toSRGB(aces(hdr * uExposure));
+          vec3 c = toSRGB(spTone(hdr * uExposure));
           c += (hash(gl_FragCoord.xy) - 0.5) / 255.0; // dither
           gl_FragColor = vec4(c, 1.0);
         }`,
@@ -217,9 +215,8 @@ export class Renderer {
 
   /** Tone mapping inside materials while presenting to a headset. */
   setXrMode(on: boolean): void {
-    this.gl.toneMapping = on ? ACESFilmicToneMapping : NoToneMapping;
-    // three's ACES multiplies by exposure / 0.6; 0.6 makes it the same curve as the desktop composite
-    this.gl.toneMappingExposure = on ? 0.6 : 1;
+    this.gl.toneMapping = on ? CustomToneMapping : NoToneMapping;
+    this.gl.toneMappingExposure = 1;
   }
 
   private viewQuat = new Quaternion();

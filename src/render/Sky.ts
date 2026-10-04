@@ -1,4 +1,5 @@
 import { BackSide, type CubeTexture, LinearFilter, LinearMipmapLinearFilter, Mesh, RepeatWrapping, ShaderMaterial, SphereGeometry, SRGBColorSpace, TextureLoader, type Vector3 } from 'three';
+import { MilkyWayVolume } from './MilkyWayVolume';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 /**
@@ -68,6 +69,9 @@ export class SkyLayer {
   readonly gain = { value: 0 };
   /** user brightness multiplier (settings) */
   brightness = 1;
+  /** current display mapping of the galaxy model (for MilkyWayVolume) */
+  modelK = 0;
+  modelExp = 1.65;
   /** at full dark adaptation, the display-linear value of a map pixel of value 1 */
   static readonly GAIN = 0.45;
   /**
@@ -124,6 +128,10 @@ export class SkyLayer {
       const o = smoothstep(500, 6000, outside);
       u.uModelExp.value = 1.65 + (0.6 - 1.65) * o;
       u.uModelK.value = base * SkyLayer.MAP_AT_REF * (1 + 5 * o);
+      this.modelK = u.uModelK.value as number;
+      this.modelExp = u.uModelExp.value as number;
+      // further out the galaxy is drawn per pixel (render/MilkyWayVolume.ts): the cube gives way
+      u.uModelK.value = this.modelK * (1 - MilkyWayVolume.weight(camGal));
     }
     this.mesh.visible = base > 1e-5;
   }

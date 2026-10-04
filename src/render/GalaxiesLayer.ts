@@ -1,31 +1,83 @@
-import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, Group, Matrix4, Mesh, Points, Quaternion, ShaderMaterial, Vector3 } from 'three';
+import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, Points, Quaternion, ShaderMaterial, Vector2, Vector3, Vector4 } from 'three';
 import type { UPos } from '../core/upos';
-import type { Galaxy, GalaxyShape } from '../universe/Galaxies';
+import { discFrame, type Galaxy } from '../universe/Galaxies';
+import { noise3D, sampleNoise } from './Noise3D';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, POINT_CLIP, PROJECT_PARS } from './shaders/xr';
 
-/** Shared GLSL: a galaxy's light and dust in its own frame (units: the catalogued radius; disc in xy). */
+/**
+ * Shared GLSL: a galaxy's light and dust in its own frame (units: the catalogued radius). Two
+ * parts: a spheroid (bulge, or all of an elliptical: a Sérsic profile) in the galaxy frame, and a
+ * disc in its own frame (`uDiscRot`; the identity except for discs tilted against their galaxy,
+ * like Centaurus A's dusty disc). The disc is an exponential disc of old stars (flaring), a thick
+ * disc, a thinner young disc in spiral arms, star-forming knots, a bar, and a still thinner dust
+ * layer. The arms are logarithmic spirals whose phase is bent by large-scale noise, and the young
+ * stars and dust are modulated by noise sampled in spiral coordinates (streaks along the arms: the
+ * feathers and spurs of real spirals). Emission coefficients already carry each part's share of the
+ * galaxy's light (normalised on the CPU) times its catalogued brightness. Mirrored in TypeScript by
+ * `GalaxyModel` (keep the two in step).
+ */
 const GAL_MODEL = /* glsl */ `
+uniform sampler3D uNoise;
 uniform float uSeed;
-uniform float uArms;      // number of arms (0 = none)
-uniform float uPitch;     // arm pitch angle (rad)
-uniform float uBar;       // bar strength
-uniform float uBulge;     // bulge weight
-uniform float uBulgeR;    // bulge scale (radii)
-uniform float uClumpy;    // irregular: patchy star-forming regions instead of arms
-uniform float uDust;
-const vec3 C_OLD = vec3(1.0, 0.86, 0.68);
-const vec3 C_YOUNG = vec3(0.6, 0.73, 1.0);
-const vec3 C_HII = vec3(1.0, 0.42, 0.58);
-const vec3 C_BULGE = vec3(1.0, 0.82, 0.58);
+uniform vec4 uArmP;    // arms, 1/tan(pitch), irregularity, phase
+uniform vec4 uDiscW;   // emission coefficients: old disc, thick disc, young disc, knots
+uniform vec4 uDiscS;   // scale length, scale height, clumpiness, bar coefficient
+uniform vec4 uRing;    // ring radius, width, young boost, dust boost
+uniform vec4 uBulgeW;  // coefficient, 1/Re, b_n, 1/n
+uniform vec3 uBulgeAx; // 1 / spheroid axes (galaxy frame)
+uniform vec4 uDustP;   // face-on optical depth, 1/dust scale length, extraplanar dust, disc truncation radius
+uniform vec4 uBarP;    // bar half-length, warp, scale of the spiral-coordinate noise along the arms, giant region's blueness
+uniform vec4 uSpot;    // a giant star-forming region (disc frame xyz, coefficient)
+uniform float uSpotW;  // its radius (radii)
+uniform mat3 uDiscRot; // galaxy frame -> disc frame
+const vec3 C_OLD = vec3(1.0, 0.84, 0.67);
+const vec3 C_BULGE = vec3(1.0, 0.79, 0.57);
+const vec3 C_YOUNG = vec3(0.58, 0.73, 1.0);
+const vec3 C_HII = vec3(1.0, 0.38, 0.55);
 // extinction relative to V at the red, green and blue primaries
 const vec3 EXT = vec3(0.83, 1.0, 1.25);
-float armPhase(vec3 p, float r) { return atan(p.y, p.x) - log(max(r, 0.02)) / tan(uPitch) + uSeed * 6.2832; }
-// smooth dust (no clumps): radial and arm factor of the dust layer, and its scale height
-float dustPlane(vec3 p, float r) {
-  float lane = uArms > 0.5 ? pow(0.5 + 0.5 * cos(uArms * (armPhase(p, r) + 0.32)), 6.0) * smoothstep(0.06, 0.25, r) : 0.3;
-  return uDust * 1.3 * exp(-r / 0.3) * (0.2 + 1.8 * lane) * smoothstep(0.02, 0.1, r);
+float sq(float x) { return x * x; }
+// smoothstep(a, b, n) of noise read at mip level l: as the noise blurs (towards 0.5) the threshold
+// eases to its mean over sharp noise, so thresholded features keep their light at any distance
+float thr(float n, float a, float b, float l) { return mix(smoothstep(a, b, n), 1.0 - b + 0.5 * (b - a), clamp(l * 0.5, 0.0, 1.0)); }
+vec4 nz(vec3 p, float lod) { return textureLod(uNoise, p, max(lod, 0.0)); }
+float armMaskF(float r) { return smoothstep(0.04, 0.16, r) * (1.0 - smoothstep(1.0, 1.3, r)); }
+// warp of the disc plane (Centaurus A)
+vec3 warpD(vec3 p) {
+  if (uBarP.y == 0.0) return p;
+  float r = length(p.xy);
+  return vec3(p.xy, p.z - uBarP.y * r * r * sin(atan(p.y, p.x) + uSeed * 6.2832));
 }
-float dustH(float r) { return 0.005 + 0.005 * r; }
+// disc-frame point: large-scale noise, the spiral phase (bent by that noise) and the noise sampled
+// in spiral coordinates; lod: mip level of the noise for the pixel footprint at a frequency of 1
+float gr, gpsi, glodS, gwid;
+vec4 gA, gS, gI;
+vec3 gsc;
+void discNoise(vec3 p, float lod) {
+  gr = length(p.xy);
+  gA = nz(p * 0.9 + uSeed * 0.71, lod - 0.15);
+  vec4 nB = nz(p * 0.3 + uSeed * 0.53, lod - 1.7);
+  gwid = nB.g;
+  float lr = log(max(gr, 0.03));
+  gpsi = atan(p.y, p.x) - lr * uArmP.y + uArmP.w + uArmP.z * ((nB.r - 0.5) * 2.0 + (gA.r - 0.5) * 0.25);
+  gsc = vec3(cos(gpsi) * 0.45, sin(gpsi) * 0.45, lr * uBarP.z + p.z * 1.2) + uSeed * 0.37;
+  glodS = lod + log2(0.45 * (1.0 + uArmP.y) / max(gr, 0.05));
+  // in the middle, where the spiral winds ever tighter, plain 3D noise instead of spiral streaks
+  float sw = smoothstep(0.08, 0.25, gr);
+  gI = nz(p * 2.6 + uSeed * 0.29, lod + 1.38);
+  gS = sw > 0.0 ? mix(gI, nz(gsc, glodS), sw) : gI;
+}
+// width of the arms: varies slowly along them (exponent of the arm profile)
+float armPow(float k) { return k * mix(0.5, 1.6, gwid); }
+// horizontal factor of the dust layer (its face-on optical depth / uDustP.x), after discNoise()
+float dustSheet(float fil) {
+  float m = uArmP.x;
+  float lane = m > 0.5 ? pow(0.5 + 0.5 * cos(m * gpsi + 0.5), armPow(6.0)) * smoothstep(0.1, 0.3, gr) * (1.0 - smoothstep(1.0, 1.3, gr)) : 0.0;
+  float ring = exp(-sq((gr - uRing.x) / uRing.y));
+  return exp(-gr * uDustP.y) * smoothstep(0.02, 0.1, gr) * (0.3 + 4.5 * lane + uRing.w * ring) * (0.2 + 1.6 * fil)
+    * (1.0 - smoothstep(uDustP.w * 0.8, uDustP.w, gr));
+}
+float hzF(float r) { return uDiscS.y * (1.0 + 0.8 * r); }
 `;
 
 const VOL_VERT = /* glsl */ `
@@ -45,34 +97,23 @@ ${FIX_LOGDEPTH}
 }`;
 
 /**
- * A galaxy as a volume, ray-marched in its own frame: an exponential disc of old stars with a
- * flaring thickness, a thinner young disc concentrated in clumpy spiral arms with H II knots, a
- * bulge and bar, and a still thinner dust layer that absorbs (more in blue), strongest on the
- * inner edges of the arms. Seen edge-on the dust is a dark lane between bright starlight; face-on it
- * is a lacework. Ellipticals and dwarf spheroidals are smooth Sérsic spheroids. The step length
- * follows the height above the mid-plane, so thin discs are resolved at any viewing angle.
+ * A galaxy as a volume, ray-marched in its own frame. Steps are short near the disc plane and the
+ * centre and long elsewhere (always reaching the far side of the box), so thin discs and bright
+ * cusps are resolved from any angle; light emitted in a step is absorbed within it. The noise is
+ * read at the mip level of the pixel's footprint: no sparkle when far, full detail up close.
  */
 const VOL_FRAG = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
 uniform vec3 uCam;        // camera in the galaxy frame (radii)
 uniform vec3 uExt;        // half extents of the box (radii)
-uniform float uType;      // 0 disc galaxy, 1 spheroid
-uniform float uSersic;
-uniform float uAe;        // spheroid normalisation (same light as the old picture)
-uniform float uRatio;
-uniform vec3 uTint;
 uniform float uGain;
 uniform float uWeight;
+uniform float uYoungW;    // share of the young stars' light left to the volume (the cloud has the rest)
 uniform float uLite;
+uniform float uPixAng;    // radians per pixel
 varying vec3 vBox;
 ${GAL_MODEL}
-float gh(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
-float gn(vec3 p) {
-  vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(gh(i), gh(i + vec3(1,0,0)), f.x), mix(gh(i + vec3(0,1,0)), gh(i + vec3(1,1,0)), f.x), f.y),
-             mix(mix(gh(i + vec3(0,0,1)), gh(i + vec3(1,0,1)), f.x), mix(gh(i + vec3(0,1,1)), gh(i + vec3(1,1,1)), f.x), f.y), f.z);
-}
 void main() {
   vec3 pf = vBox * uExt;
   vec3 dir = normalize(pf - uCam);
@@ -82,70 +123,87 @@ void main() {
   float t0 = max(max(tlo.x, tlo.y), max(tlo.z, 0.0));
   float t1 = min(min(thi.x, thi.y), thi.z);
   if (t1 <= t0) discard;
-  float jit = gh(vec3(gl_FragCoord.xy, uSeed * 7.0));
+  // interleaved gradient noise: a fine, even jitter of the samples (no banding, no blotches)
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  bool hi = uLite < 0.5;
+  bool disc = uDiscW.x + uDiscW.y + uDiscW.z + uDustP.x + uSpot.w > 0.0;
+  vec3 dirD = uDiscRot * dir, camD = uDiscRot * uCam;
+  float adz = max(abs(dirD.z), 0.015);
+  int N = hi ? 96 : 40;
+  float dsMax = hi ? 0.05 : 0.1;
   vec3 L = vec3(0.0);
   vec3 T = vec3(1.0);
-  if (uType > 0.5) {
-    // spheroid: emission only
-    int N = uLite > 0.5 ? 14 : 28;
-    float ds = (t1 - t0) / float(N);
-    for (int i = 0; i < 28; i++) {
-      if (i >= N) break;
-      vec3 p = uCam + dir * (t0 + (float(i) + jit) * ds);
-      float rr = length(vec3(p.x, p.y / uRatio, p.z / uRatio));
-      L += uTint * uAe / uRatio * exp(-7.0 * pow(rr / 0.35, uSersic)) * ds;
+  float t = t0;
+  for (int i = 0; i < 96; i++) {
+    if (i >= N || t >= t1 || T.g < 0.004) break;
+    vec3 pg0 = uCam + dir * t;
+    vec3 pd0 = camD + dirD * t;
+    // near the disc plane: a fraction of the height (at most dsMax); elsewhere the smooth spheroid
+    // sets it (a fraction of the distance from the centre)
+    float ds = disc ? max(abs(pd0.z) * 0.5, 0.0035) / adz : 1.0;
+    if (disc && abs(pd0.z) < 0.15) ds = min(ds, dsMax);
+    if (uBulgeW.x > 0.0) ds = min(ds, 0.3 * length(pg0 * uBulgeAx) + 0.003);
+    ds = clamp(ds, 0.002, 0.3);
+    ds = min(max(ds, (t1 - t) / float(N - i)), t1 - t);
+    float tt = t + ds * jit;
+    vec3 pg = uCam + dir * tt;
+    float lod = log2(max(tt * uPixAng * 64.0, 1e-6));
+    vec3 j = vec3(0.0);
+    float k = 0.0;
+    vec3 pe = pg / uExt;
+    if (uBulgeW.x > 0.0) {
+      float s = length(pg * uBulgeAx) * uBulgeW.y;
+      j += C_BULGE * uBulgeW.x * exp(-uBulgeW.z * (pow(max(s, 1e-5), uBulgeW.w) - 1.0)) * (1.0 - smoothstep(0.7, 1.0, length(pe)));
     }
-  } else {
-    int N = uLite > 0.5 ? 40 : 90;
-    float dsMax = uLite > 0.5 ? 0.09 : 0.045;
-    float adz = max(abs(dir.z), 0.02);
-    float t = t0;
-    float first = 1.0;
-    for (int i = 0; i < 90; i++) {
-      if (i >= N || t >= t1 || T.g < 0.01) break;
-      vec3 p0 = uCam + dir * t;
-      float ds = clamp(max(abs(p0.z) * 0.55, 0.004) / adz, 0.004, dsMax);
-      ds = min(ds, t1 - t);
-      float tt = t + ds * (first > 0.5 ? jit : 0.5);
-      first = 0.0;
-      vec3 p = uCam + dir * tt;
-      float r = length(p.xy);
-      float az = abs(p.z);
-      // clumps (star clouds) and fine structure for the dust and the knots
-      float nc = gn(p * 11.0 + uSeed * 13.0);
-      float nd = uLite > 0.5 ? nc : gn(p * 26.0 + uSeed * 5.0 + 3.0);
-      float arm = 0.0;
-      if (uArms > 0.5) arm = pow(0.5 + 0.5 * cos(uArms * (armPhase(p, r) + (nc - 0.5) * 0.9)), 4.0) * smoothstep(0.05, 0.2, r);
-      // old disc (flaring), young disc in the arms, bulge, bar
-      float hz = 0.016 + 0.012 * r;
-      float old = exp(-r / 0.24) * exp(-az / hz) / (2.0 * hz) * 0.55 * (0.75 + 0.5 * nc);
-      float hy = 0.007 + 0.005 * r;
-      float ey = exp(-r / 0.32) * exp(-az / hy) / (2.0 * hy);
-      float young = ey * (arm * 1.7 * (0.3 + 1.4 * nc) + uClumpy * smoothstep(0.45, 0.8, nc) * 1.4);
-      float knot = smoothstep(0.78, 0.95, nd) * (arm + uClumpy) * ey * 2.0;
-      float rb = length(vec3(p.xy, p.z / 0.6)) / uBulgeR;
-      float bulge = uBulge * 8.42 * exp(-2.0 * pow(rb, 0.55));
-      float bar = uBar * 10.16 * exp(-pow(p.x / 0.3, 2.0) - pow(p.y / 0.07, 2.0) - pow(p.z / 0.05, 2.0));
-      vec3 j = C_OLD * (old + bar) + C_BULGE * bulge + C_YOUNG * young + C_HII * knot;
-      // dust, clumpy, thinner than the stars
-      float hd = dustH(r);
-      float k = uDust > 0.0 ? dustPlane(p, r) * exp(-az / hd) / (2.0 * hd) * (0.3 + 1.4 * nd) * (1.0 + 0.8 * arm) : 0.0;
-      vec3 a = exp(-k * EXT * ds);
-      // light emitted along the step, absorbed within it
-      L += T * j * ds * (k > 1e-4 ? (1.0 - a) / max(k * EXT * ds, 1e-6) : vec3(1.0));
-      T *= a;
-      t += ds;
+    if (disc) {
+      vec3 pd = warpD(camD + dirD * tt);
+      discNoise(pd, lod);
+      float r = gr, az = abs(pd.z);
+      float win = (1.0 - smoothstep(uDustP.w * 0.8, uDustP.w, r)) * (1.0 - smoothstep(0.75, 1.0, az / uExt.z));
+      float hz = hzF(r), hr = uDiscS.x, m = uArmP.x;
+      float wave = m > 0.5 ? 0.5 + 0.5 * cos(m * gpsi) : 0.5;
+      float am = armMaskF(r);
+      float ring = exp(-sq((r - uRing.x) / uRing.y));
+      float old = exp(-r / hr) * exp(-az / hz) / (2.0 * hz) * (1.0 + 0.5 * (wave - 0.5) * am) * (0.8 + 0.4 * gA.g);
+      float thick = exp(-r / (1.3 * hr) - az / 0.05) * 10.0;
+      float hy = 0.45 * hz;
+      float yv = exp(-r / (1.5 * hr) - az / hy) / (2.0 * hy);
+      float armY = m > 0.5 ? pow(wave, armPow(4.0)) * 3.66 * am * (0.2 + 2.4 * gS.g * gS.g) : am;
+      float ym = mix(armY, thr(gA.b, 0.35, 0.85, lod - 0.15) * 2.8 * (0.5 + gI.g), uDiscS.z) + uRing.z * ring;
+      float knots = (hi ? thr(nz(pd * 7.0 + uSeed * 5.3, lod + 2.8).a, 0.75, 0.95, lod + 2.8) : thr(gS.a, 0.75, 0.95, glodS)) * 10.0;
+      float bar = uDiscS.w > 0.0 ? exp(-sq(pd.x / uBarP.x) - sq(pd.y / (0.25 * uBarP.x)) - sq(pd.z / 0.04)) : 0.0;
+      j += win * (C_OLD * (uDiscW.x * old + uDiscW.y * thick + uDiscS.w * bar) + yv * ym * (C_YOUNG * uDiscW.z + C_HII * uDiscW.w * knots) * uYoungW);
+      if (uSpot.w > 0.0) {
+        vec3 dq = (pd - uSpot.xyz) * vec3(1.0, 1.0, 3.3);   // flattened into the disc
+        j += mix(C_HII, C_YOUNG, uBarP.w) * uSpot.w * exp(-dot(dq, dq) / (uSpotW * uSpotW)) * (0.4 + 1.2 * gS.a) * uYoungW;
+      }
+      if (uDustP.x > 0.0) {
+        // dust texture: isotropic clumps and filaments mixed with the streaks along the arms
+        float fil = hi ? smoothstep(0.15, 0.85, 0.5 * gI.b + 0.5 * gS.b) : 0.5 * (gI.b + gS.b);
+        float hd = 0.4 * hz;
+        k = uDustP.x * dustSheet(fil) * (exp(-az / hd) / (2.0 * hd) + uDustP.z * exp(-az / 0.03) * 16.7 * smoothstep(0.55, 0.85, gA.a) * 3.0) * win;
+      }
     }
+    vec3 a = exp(-k * EXT * ds);
+    L += T * j * ds * (k > 1e-4 ? (1.0 - a) / max(k * EXT * ds, 1e-6) : vec3(1.0));
+    T *= a;
+    t += ds;
   }
-  gl_FragColor = vec4(L * uGain * uWeight, 1.0);
+  // highlights roll off logarithmically (like a photograph's stretch): a bright core keeps its
+  // gradient instead of a flat white disc; faint light is unchanged
+  vec3 c = L * uGain * uWeight;
+  float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c *= Y > 1e-5 ? 0.25 * log(1.0 + Y / 0.25) / Y : 1.0;
+  gl_FragColor = vec4(c, 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
 /**
  * The nearest galaxy as a 3D cloud: star clouds (soft sprites of a fixed size in space, so their
- * surface brightness stays the same from any distance) and single stars, laid out like the disc
- * picture (exponential disc with thickness, arms, bar, bulge). Flying in, they spread apart with parallax.
+ * surface brightness stays the same from any distance) and single stars, drawn from the same model
+ * as the volume. Flying in, they spread apart with parallax. Each is dimmed by the dust layer
+ * between the eye and it (its column taken where the sight line crosses the disc plane).
  */
 const CLOUD_VERT = /* glsl */ `
 #include <common>
@@ -157,23 +215,25 @@ uniform float uRadius;    // galaxy radius (m)
 uniform float uPixelSA;   // solid angle of one CSS pixel
 uniform float uDpr;
 uniform float uGain;
-uniform float uWeight;
+uniform vec2 uWeight;      // weights of the star clouds and of the single stars
 uniform float uMaxPx;
 uniform float uClipScale;
 uniform vec3 uCamG;       // camera in the galaxy frame (radii)
 varying vec3 vCol;
 ${GAL_MODEL}
-// optical depth (V) of the smooth dust layer between the eye and p: the layer's vertical profile
-// integrated exactly along the segment, its radial and arm factor taken where it crosses the plane
-float dustTau(vec3 a, vec3 b) {
+// optical depth (V) of the dust layer between the eye and p: its vertical profile integrated
+// exactly along the segment, its horizontal factor taken where the segment crosses the plane
+float dustTau(vec3 ag, vec3 bg) {
+  if (uDustP.x <= 0.0) return 0.0;
+  vec3 a = warpD(uDiscRot * ag), b = warpD(uDiscRot * bg);
   float L = length(b - a);
-  if (uDust <= 0.0 || L <= 0.0) return 0.0;
+  if (L <= 0.0) return 0.0;
   float dz = b.z - a.z;
   float f = abs(dz) > 1e-6 ? clamp(-a.z / dz, 0.0, 1.0) : 0.5;
   vec3 c = mix(a, b, f);
-  float r = length(c.xy);
-  float h = dustH(r);
-  float K = dustPlane(c, r);
+  discNoise(vec3(c.xy, 0.0), 0.0);
+  float h = 0.4 * hzF(gr);
+  float K = uDustP.x * dustSheet(smoothstep(0.15, 0.85, 0.5 * gI.b + 0.5 * gS.b));
   // Laplace cumulative distribution of the layer between the two heights
   float Fa = a.z < 0.0 ? 0.5 * exp(a.z / h) : 1.0 - 0.5 * exp(-a.z / h);
   float Fb = b.z < 0.0 ? 0.5 * exp(b.z / h) : 1.0 - 0.5 * exp(-b.z / h);
@@ -189,8 +249,10 @@ void main() {
   float sb = 1.0 / (0.77 * aStar.w * aStar.w) * (px / pxd) * (px / pxd);
   // the largest sprites (clouds right around the explorer) fade out: their light is the background glow
   float big = 1.0 - smoothstep(uMaxPx * 0.4, uMaxPx, px);
-  vCol = aFlux * sb * uGain * uWeight * big * exp(-dustTau(uCamG, aStar.xyz) * EXT);
-  if (big <= 0.0 || mv.z > 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0; return; }
+  if (big <= 0.0 || mv.z > 0.0) { vCol = vec3(0.0); gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0; return; }
+  float w = aStar.w < 1e-4 ? uWeight.y : uWeight.x;
+  if (w <= 0.0) { vCol = vec3(0.0); gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 1.0; return; }
+  vCol = aFlux * sb * uGain * w * big * exp(-dustTau(uCamG, aStar.xyz) * EXT);
   gl_Position = projectView(mv);
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
@@ -221,190 +283,464 @@ function mulberry(seed: number): () => number {
   };
 }
 
-/** Fills `star` (x, y, z, size) and `flux` (rgb) for a galaxy; returns the count used. */
-function fillCloud(g: Galaxy, look: Look, star: Float32Array, flux: Float32Array, nClouds: number, nStars: number): number {
-  const r = mulberry(g.seed + 0.123);
-  const gauss = () => Math.sqrt(-2 * Math.log(r() + 1e-9)) * Math.cos(6.2832 * r());
-  const lap = () => (r() < 0.5 ? 1 : -1) * Math.log(r() + 1e-9);
-  const old = [1.0, 0.86, 0.68], young = [0.6, 0.73, 1.0], hii = [1.0, 0.42, 0.58], red = [1.0, 0.7, 0.45];
-  const disc = look.arms > 0 || look.bar > 0 || look.clumpy > 0 || g.shape === 'lenticular';
-  const tanP = Math.tan((look.pitchDeg * Math.PI) / 180) || 1;
-  let n = 0;
-  const put = (x: number, y: number, z: number, size: number, c: number[], f: number) => {
-    star[n * 4] = x; star[n * 4 + 1] = y; star[n * 4 + 2] = z; star[n * 4 + 3] = size;
-    flux[n * 3] = c[0] * f; flux[n * 3 + 1] = c[1] * f; flux[n * 3 + 2] = c[2] * f;
-    n++;
-  };
-  const total = nClouds + nStars;
-  // light shares, roughly as in the disc picture (its integrated brightness)
-  const fDisc = disc ? 0.11 : 0, fArms = look.arms > 0 ? 0.1 : look.clumpy > 0 ? 0.07 : 0;
-  const fBulge = (disc ? 0.02 + 0.05 * look.bulge + 0.03 * look.bar : 0.25 * (g.shape === 'dwarf' ? 0.3 : 1)) * 0.5;
-  const wDisc = disc ? 0.45 : 0, wArms = fArms > 0 ? 0.35 : 0;
-  const nD = Math.round(nClouds * wDisc), nA = Math.round(nClouds * wArms), nB = nClouds - nD - nA;
-  const armAngle = (rad: number) => {
-    const k = Math.floor(r() * Math.max(look.arms, 1));
-    return (6.2832 * k + gauss() * 0.55) / Math.max(look.arms, 1) + Math.log(Math.max(rad, 0.02)) / tanP - g.seed * 6.2832;
-  };
-  const lane = (x: number, y: number, rad: number) => {
-    if (look.arms <= 0 || look.dust <= 0) return 1;
-    const ph = Math.atan2(y, x) - Math.log(Math.max(rad, 0.02)) / tanP + g.seed * 6.2832;
-    const l = Math.pow(0.5 + 0.5 * Math.cos(look.arms * (ph + 0.32)), 6) * Math.min(1, Math.max(0, (rad - 0.08) / 0.2));
-    return 1 - look.dust * 0.65 * l;
-  };
-  // the smooth disc of older stars, a few hundredths of a radius thick
-  for (let i = 0; i < nD; i++) {
-    const rad = -0.24 * Math.log(r() * r() + 1e-9);
-    if (rad > 1.3) { i--; continue; }
-    const th = r() * 6.2832, x = rad * Math.cos(th), y = rad * Math.sin(th);
-    put(x, y, lap() * 0.02 * (0.6 + rad), 0.012 + 0.03 * r(), old, (fDisc / nD) * lane(x, y, rad));
-  }
-  // arms (or an irregular's knots): younger, bluer, thinner, with pink star-forming regions
-  for (let i = 0; i < nA; i++) {
-    const rad = Math.min(1.25, 0.06 + -0.3 * Math.log(r() * r() + 1e-9) * 0.75);
-    let x: number, y: number;
-    if (look.arms > 0) {
-      // star-cloud complexes strung along the arms like beads
-      const c = Math.floor(r() * 1200), cr = mulberry(g.seed + c * 0.000731);
-      const crad = Math.min(1.25, 0.08 - 0.22 * Math.log(cr() * cr() + 1e-9));
-      const k = Math.floor(cr() * look.arms);
-      const th = (6.2832 * k + (cr() - 0.5) * 1.2) / look.arms + Math.log(crad) / tanP - g.seed * 6.2832;
-      const spread = 0.012 + 0.03 * cr();
-      x = crad * Math.cos(th) + gauss() * spread; y = crad * Math.sin(th) + gauss() * spread;
-      if (r() < 0.35) { const t2 = armAngle(rad); x = rad * Math.cos(t2); y = rad * Math.sin(t2); }
-    } else {
-      // knots: clumps around a few dozen centres
-      const c = Math.floor(r() * 40), cr = mulberry(g.seed + c * 0.0137);
-      const cx = (cr() - 0.5) * 1.4, cy = (cr() - 0.5) * 1.4;
-      x = cx + gauss() * 0.06; y = cy + gauss() * 0.06;
-    }
-    const knot = r() < 0.08;
-    put(x, y, lap() * 0.008, knot ? 0.004 + 0.008 * r() : 0.008 + 0.02 * r(), knot ? hii : young, (fArms / nA) * (knot ? 2.5 : 0.9) * lane(x, y, rad));
-  }
-  // bulge and bar (or the whole of an elliptical): a spheroid of old stars
-  const ratio = disc ? 0.7 : Math.max(g.ratio, 0.3);
-  const sers = disc ? 0.35 : look.sersic;
-  const scale = disc ? 0.06 + 0.05 * look.bulge : 0.35;
-  for (let i = 0; i < nB; i++) {
-    const G = -Math.log(r() * r() * r() + 1e-12);
-    let rad = scale * Math.pow(G / 7, 1 / Math.max(sers, 0.25)) * (disc ? 1.6 : 1);
-    if (rad > 1) rad = r();
-    const u = r() * 2 - 1, ph = r() * 6.2832, s = Math.sqrt(1 - u * u);
-    let x = rad * s * Math.cos(ph), y = rad * s * Math.sin(ph) * ratio, z = rad * u * (disc ? 0.6 : ratio);
-    if (disc && look.bar > 0 && r() < 0.4) { x = gauss() * 0.3; y = gauss() * 0.06; z = gauss() * 0.04; }
-    put(x, y, z, 0.006 + 0.02 * r() * (0.3 + rad), old, fBulge / nB);
-  }
-  // single stars: supergiants along the arms, giants everywhere; points with parallax
-  const fStars = 0.06;
-  for (let i = 0; i < nStars && n < total; i++) {
-    let x: number, y: number, z: number, c: number[];
-    if (disc && r() < 0.75) {
-      const rad = -0.28 * Math.log(r() * r() + 1e-9);
-      if (rad > 1.3) { i--; continue; }
-      const th = look.arms > 0 && r() < 0.6 ? armAngle(rad) : r() * 6.2832;
-      x = rad * Math.cos(th); y = rad * Math.sin(th); z = lap() * 0.012;
-      c = r() < 0.5 ? young : r() < 0.6 ? red : old;
-    } else {
-      const rad = scale * 1.5 * -Math.log(r() * r() + 1e-9);
-      if (rad > 1.2) { i--; continue; }
-      const u = r() * 2 - 1, ph = r() * 6.2832, s = Math.sqrt(1 - u * u);
-      x = rad * s * Math.cos(ph); y = rad * s * Math.sin(ph) * ratio; z = rad * u * (disc ? 0.6 : ratio);
-      c = r() < 0.6 ? red : old;
-    }
-    // a steep luminosity function: most faint, a few brilliant
-    const L = Math.pow(r(), 6) * 40 + 0.2;
-    put(x, y, z, 2e-5, c, (fStars / nStars) * L / 6.9);
-  }
-  return n;
+/** How a galaxy is built: light shares of its parts (any scale; normalised) and their shapes. */
+interface Look {
+  arms: number; pitchDeg: number; irreg: number;
+  bulge: number; bulgeRe: number; bulgeN: number; bulgeQ: number;
+  old: number; thick: number; young: number; knots: number; bar: number; barLen: number;
+  hr: number; hz: number; clumpy: number;
+  dust: number; dustHr: number; extra: number; trunc: number; warp: number;
+  /** ring: radius, width, young boost, dust boost */
+  ring: [number, number, number, number];
+  /** spheroid axes (galaxy frame), when not a round-ish bulge */
+  axes?: [number, number, number];
+  /** a dusty disc in its own orientation (sky position angle, inclination; degrees) */
+  disc?: { pa: number; incl: number };
+  /** the giant region is a blue star cloud (1) rather than a pink H II region (0) */
+  spotBlue?: number;
+  /** its radius (radii; default 0.04) */
+  spotW?: number;
+  /** share of the young light carried by star-cloud sprites up close (default CLOUD_SHARE) */
+  cloudShare?: number;
+  /** phase of the arms (rad; default from the seed) */
+  armPhase?: number;
+  /** a giant star-forming region (disc frame) and its share of the light */
+  spot?: [number, number, number, number];
 }
 
-interface Look { arms: number; pitchDeg: number; bar: number; bulge: number; clumpy: number; dust: number; blob: number; sersic: number; bulgeR?: number }
+const C_OLD = [1.0, 0.84, 0.67], C_BULGE = [1.0, 0.79, 0.57], C_YOUNG = [0.58, 0.73, 1.0], C_HII = [1.0, 0.38, 0.55];
 
-function lookFor(g: Galaxy): Look {
+function lookFor(g: Galaxy, all: Galaxy[] = []): Look {
   const m = g.data.morph;
   const stage = /S[AB_()s]*[ab]?([abcdm])/.exec(m)?.[1] ?? (g.shape === 'spiral' || g.shape === 'barred' ? 'b' : '');
-  const pitch = { a: 9, b: 14, c: 20, d: 25, m: 28 }[stage] ?? 14;
-  const bulge = { a: 1.0, b: 0.6, c: 0.3, d: 0.15, m: 0.1 }[stage] ?? 0.5;
-  const looks: Record<GalaxyShape, Look> = {
-    spiral: { arms: 2, pitchDeg: pitch, bar: 0, bulge, clumpy: 0.25, dust: 0.8, blob: 0.25 + 0.2 * bulge, sersic: 0.35 },
-    barred: { arms: 2, pitchDeg: pitch, bar: 0.9, bulge, clumpy: 0.25, dust: 0.8, blob: 0.22 + 0.2 * bulge, sersic: 0.35 },
-    lenticular: { arms: 0, pitchDeg: 14, bar: 0, bulge: 1.2, clumpy: 0, dust: 0, blob: 0.45, sersic: 0.3 },
-    irregular: { arms: 0, pitchDeg: 14, bar: 0.25, bulge: 0.1, clumpy: 1, dust: 0.3, blob: 0, sersic: 1 },
-    elliptical: { arms: 0, pitchDeg: 0, bar: 0, bulge: 0, clumpy: 0, dust: 0, blob: 1, sersic: 0.28 },
-    dwarf: { arms: 0, pitchDeg: 0, bar: 0, bulge: 0, clumpy: 0, dust: 0, blob: 1, sersic: 0.9 },
+  const base: Look = {
+    arms: 2, pitchDeg: 14, irreg: 0.5, bulge: 0.25, bulgeRe: 0.06, bulgeN: 2.5, bulgeQ: 0.7,
+    old: 0.5, thick: 0.08, young: 0.13, knots: 0.03, bar: 0, barLen: 0.25, hr: 0.24, hz: 0.012, clumpy: 0,
+    dust: 1.0, dustHr: 0.4, extra: 0, trunc: 1.35, warp: 0, ring: [0.5, 0.1, 0, 0],
   };
-  const l = looks[g.shape];
-  // Magellanic types (Sm, SBm): a bar and one stubby arm, patchy
-  if (stage === 'm' && l.arms > 0) return { ...l, arms: 1, clumpy: 0.6, dust: 0.3 };
-  // Sombrero-like: a big bulge and a dark lane
-  if (/Sombrero/.test(g.name)) return { ...l, bulge: 1.0, bulgeR: 0.13, blob: 0.7, dust: 1.4 };
-  // Centaurus A: a giant elliptical crossed by a dusty disc
-  if (/Centaurus A/.test(g.name)) return { ...l, arms: 0, bulge: 1.2, bulgeR: 0.16, dust: 1.6 };
-  return l;
+  const st: Record<string, Partial<Look>> = {
+    a: { bulge: 0.4, old: 0.45, thick: 0.07, young: 0.06, knots: 0.01, pitchDeg: 9, hr: 0.22, dust: 0.8, bulgeRe: 0.08, bulgeN: 3.5 },
+    b: {},
+    c: { bulge: 0.1, old: 0.52, young: 0.24, knots: 0.05, pitchDeg: 20, hr: 0.26, dust: 0.9, bulgeRe: 0.04, bulgeN: 1.5, irreg: 0.7 },
+    d: { bulge: 0.04, old: 0.5, young: 0.3, knots: 0.07, pitchDeg: 25, hr: 0.28, dust: 0.6, bulgeRe: 0.03, bulgeN: 1.2, irreg: 0.9, clumpy: 0.3 },
+    m: { arms: 1, bulge: 0.02, old: 0.45, thick: 0.1, young: 0.33, knots: 0.09, pitchDeg: 25, hr: 0.3, hz: 0.025, dust: 0.3, bulgeRe: 0.04, bulgeN: 1, irreg: 1.1, clumpy: 0.6, bar: 0.08, barLen: 0.3 },
+  };
+  let l: Look;
+  switch (g.shape) {
+    case 'spiral': case 'barred':
+      l = { ...base, ...(st[stage] ?? {}) };
+      if (g.shape === 'barred') l.bar = Math.max(l.bar, 0.08);
+      break;
+    case 'lenticular':
+      l = { ...base, arms: 0, bulge: 0.5, old: 0.42, thick: 0.08, young: 0, knots: 0, dust: 0.15, bulgeRe: 0.07, bulgeN: 3.5 };
+      break;
+    case 'irregular':
+      l = { ...base, arms: 0, bulge: 0.03, old: 0.4, thick: 0.12, young: 0.33, knots: 0.08, clumpy: 1, bar: 0.04, barLen: 0.35, hz: 0.04, dust: 0.3, bulgeRe: 0.05, bulgeN: 1, hr: 0.3 };
+      break;
+    case 'elliptical':
+      l = { ...base, arms: 0, bulge: 1, old: 0, thick: 0, young: 0, knots: 0, dust: 0, bulgeRe: 0.3, bulgeN: 4, axes: [1, g.ratio, g.ratio] };
+      break;
+    default: // dwarf spheroidal / elliptical
+      l = { ...base, arms: 0, bulge: 1, old: 0, thick: 0, young: 0, knots: 0, dust: 0, bulgeRe: 0.35, bulgeN: 0.9, axes: [1, Math.max(g.ratio, 0.4), Math.max(g.ratio, 0.4)] };
+  }
+  const named: Record<string, Partial<Look>> = {
+    // a tightly wound, ring-like spiral: the 10 kpc ring of young stars and dust dominates
+    'Andromeda Galaxy': { pitchDeg: 13, irreg: 0.35, ring: [0.47, 0.09, 1.0, 0.6], dust: 1.4, dustHr: 0.6, bulge: 0.28, bulgeRe: 0.05, bulgeN: 2.2, bulgeQ: 0.75, young: 0.17, knots: 0.03, spot: [-0.42, -0.05, 0, 0.006], spotBlue: 0.85, spotW: 0.07 },
+    // flocculent, patchy, with the giant H II region NGC 604
+    'Triangulum Galaxy': { pitchDeg: 28, irreg: 1.3, clumpy: 0.35, spot: [0.28, 0.33, 0, 0.012] },
+    // the grand-design spiral
+    'Whirlpool Galaxy': { pitchDeg: 19, irreg: 0.25, young: 0.25, knots: 0.07, dust: 1.4, bulge: 0.12, bulgeRe: 0.04 },
+    // edge-on discs: a dark lane, with dust filaments rising out of NGC 891's plane
+    'NGC 891': { dust: 2.2, extra: 0.6, hz: 0.014 },
+    'Needle Galaxy': { dust: 1.6, extra: 0.2, bulge: 0.22, bulgeRe: 0.05, bulgeQ: 0.6 },
+    // a giant bulge girdled by a ring of dust
+    'Sombrero Galaxy': { arms: 0, bulge: 0.8, bulgeRe: 0.12, bulgeN: 4, bulgeQ: 0.72, old: 0.14, thick: 0.02, young: 0.03, knots: 0.004, hr: 0.45, trunc: 0.85, ring: [0.62, 0.05, 3, 8], dust: 1.0, dustHr: 1.5 },
+    // a giant elliptical crossed by a warped dusty disc with young stars
+    'Centaurus A': { arms: 0, bulge: 0.94, bulgeRe: 0.22, bulgeN: 4, axes: [1, 0.78, 0.78], old: 0, thick: 0, young: 0.035, knots: 0.025, hr: 0.2, clumpy: 0.6, dust: 2.4, dustHr: 0.6, trunc: 0.4, warp: 0.35, disc: { pa: 115, incl: 73 }, ring: [0.2, 0.08, 0.5, 0.5] },
+    M87: { bulgeRe: 0.33, bulgeN: 4, axes: [1, 0.93, 0.93] },
+    // the Black Eye: a dense dusty ring across the inner disc, smooth tightly wound arms
+    'Black Eye Galaxy': { pitchDeg: 10, irreg: 0.2, ring: [0.24, 0.07, 0.2, 9], dust: 1.2, dustHr: 0.35 },
+    // the Whirlpool's companion: amorphous, crossed by dust
+    'NGC 5195': { dust: 0.9, dustHr: 0.5, bulge: 0.6, bulgeRe: 0.1, old: 0.35, irreg: 1.5, clumpy: 0.5 },
+    // the LMC: a bar, one arm, patchy star formation (the Tarantula is drawn by the nebulae layer)
+    'Large Magellanic Cloud': { bar: 0.12, barLen: 0.2, knots: 0.08, young: 0.25, clumpy: 0.45, cloudShare: 0.15 },
+    'Small Magellanic Cloud': { bar: 0.1, barLen: 0.35, hz: 0.08, clumpy: 1, cloudShare: 0.15 },
+  };
+  const look: Look = { ...l, ...(named[g.name] ?? {}) };
+  // the Whirlpool's arm reaches out to its companion: an arm crest at r = 1 in its direction
+  const companion = g.name === 'Whirlpool Galaxy' ? all.find((o) => o.name === 'NGC 5195') : undefined;
+  if (companion) {
+    const rel = companion.upos.sub(g.upos);
+    look.armPhase = -Math.atan2(rel.dot(g.minor), rel.dot(g.major)) + 0.35;
+  }
+  return look;
+}
+
+/** Mean surface brightness (V mag/arcsec²) within the catalogued ellipse; a typical one if unknown. */
+function meanSB(g: Galaxy): number {
+  const a = g.data.majArcmin * 30, b = g.data.minArcmin * 30;   // semi-axes, arcsec
+  const sb = g.data.vmag !== null ? g.data.vmag + 2.5 * Math.log10(Math.PI * a * b) : g.shape === 'dwarf' ? 25 : 23;
+  return Math.min(25, Math.max(20, sb));
+}
+
+const sersicB = (n: number) => 2 * n - 1 / 3 + 0.009876 / n;
+
+/** Uniforms + CPU mirror of one galaxy's model. */
+class GalaxyModel {
+  readonly u: Record<string, { value: unknown }>;
+  readonly ext: Vector3;
+  /** light shares (sum 1) of bulge, old, thick, young, knots, bar, spot */
+  readonly frac: number[];
+  /** galaxy frame <-> disc frame */
+  readonly rot = new Matrix3();
+  readonly rotT = new Matrix3();
+  private readonly coef: { bulge: number; old: number; thick: number; young: number; knots: number; bar: number; spot: number };
+  private readonly bulgeCdf: Float64Array;
+  private readonly bulgeSMax: number;
+  private readonly nzv = new Float32Array(4);
+  private readonly noise: Uint8Array;
+
+  constructor(readonly g: Galaxy, readonly look: Look, noise: Uint8Array) {
+    const l = look;
+    this.noise = noise;
+    const axes = l.axes ?? [1, 1, l.bulgeQ];
+    const hasDisc = l.old + l.thick + l.young + l.knots + l.bar > 0 || l.dust > 0;
+    const rx = Math.max(axes[0], hasDisc ? Math.min(1.35, l.trunc * 1.05) : 0);
+    // spheroids reach beyond the catalogued radius (their outer halo fades into the window)
+    const sph = l.bulge > 0.5 ? 1.8 : 1;
+    this.ext = new Vector3(rx * sph, Math.max(axes[1] * sph, hasDisc ? rx : 0), Math.max(axes[2] * (l.bulge > 0.5 ? sph : 1) * (l.bulge > 0.3 ? 1 : 0.6), hasDisc ? 0.3 : 0));
+    if (hasDisc && l.bulge > 0.3) this.ext.z = Math.max(this.ext.z, l.bulgeRe * 6);
+    // disc frame
+    if (l.disc) {
+      const f = discFrame(g.data.ra, g.data.dec, l.disc.pa, l.disc.incl);
+      const gm = [g.major, g.minor, g.normal], dm = [f.major, f.minor, f.normal];
+      const e: number[] = [];
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) e.push(dm[i].dot(gm[j]));
+      this.rot.set(e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8]);
+    }
+    this.rotT.copy(this.rot).transpose();
+    // light shares, and each part's integral to turn them into emission coefficients
+    const sum = l.bulge + l.old + l.thick + l.young + l.knots + l.bar + (l.spot?.[3] ?? 0);
+    this.frac = [l.bulge, l.old, l.thick, l.young, l.knots, l.bar, l.spot?.[3] ?? 0].map((v) => v / sum);
+    const trunc = (r: number) => 1 - smooth(l.trunc * 0.8, l.trunc, r);
+    const radial = (f: (r: number) => number) => { let s = 0; const n = 600, R = 1.6; for (let i = 0; i < n; i++) { const r = ((i + 0.5) / n) * R; s += f(r) * trunc(r) * 2 * Math.PI * r * (R / n); } return s; };
+    const am = (r: number) => smooth(0.04, 0.16, r) * (1 - smooth(1.0, 1.3, r));
+    const ring = (r: number) => Math.exp(-(((r - l.ring[0]) / l.ring[1]) ** 2));
+    const iOld = radial((r) => Math.exp(-r / l.hr));
+    const iThick = radial((r) => Math.exp(-r / (1.3 * l.hr))) ;
+    const ymMean = (r: number) => (l.arms > 0 ? am(r) : am(r)) * (1 - l.clumpy) + 1.12 * l.clumpy + l.ring[2] * ring(r);
+    const iYoung = radial((r) => Math.exp(-r / (1.5 * l.hr)) * ymMean(r));
+    const iKnots = iYoung * 1.5;
+    const iBar = Math.PI ** 1.5 * l.barLen * 0.25 * l.barLen * 0.04;
+    const iSpot = Math.PI ** 1.5 * (l.spotW ?? 0.04) ** 3 / 3.3;
+    // Sérsic spheroid: tabulated radial distribution (also for sampling)
+    const bn = sersicB(l.bulgeN), Re = l.bulgeRe;
+    const sMax = Math.min(3, Math.max(this.ext.x, this.ext.y, this.ext.z) / Math.min(...axes));
+    const nB = 2048, cdf = new Float64Array(nB + 1);
+    for (let i = 0; i < nB; i++) {
+      const s = ((i + 0.5) / nB) * sMax;
+      cdf[i + 1] = cdf[i] + Math.exp(-bn * (Math.pow(s / Re, 1 / l.bulgeN) - 1)) * 4 * Math.PI * s * s * (sMax / nB);
+    }
+    const iBulge = cdf[nB] * axes[0] * axes[1] * axes[2];
+    this.bulgeCdf = cdf; this.bulgeSMax = sMax;
+    // overall brightness from the catalogue: the model's mean over the catalogued ellipse matches
+    // the galaxy's mean surface brightness (M31, 22.4 mag/arcsec², as the reference look)
+    const bright = 0.4 * Math.pow(10, -0.4 * (meanSB(g) - 22.4)) * Math.PI * g.ratio / 0.85;
+    const [fB, fO, fT, fY, fK, fBar, fS] = this.frac;
+    // (the thick disc is exp(-r/1.3hr - |z|/0.05) * 10 in the shader: unit vertical integral)
+    this.coef = {
+      bulge: (fB * bright) / iBulge, old: (fO * bright) / iOld, thick: (fT * bright) / iThick, young: fY > 0 ? (fY * bright) / iYoung : 0,
+      knots: fK > 0 ? (fK * bright) / iKnots : 0, bar: (fBar * bright) / iBar, spot: (fS * bright) / iSpot,
+    };
+    this.bright = bright;
+    const c = this.coef;
+    this.phase = l.armPhase ?? g.seed * 6.2832;
+    const tanP = Math.tan(((l.pitchDeg || 14) * Math.PI) / 180);
+    this.tanP = tanP;
+    // spiral-coordinate noise: cells about 2.5 times longer along the arms than across them
+    const P = Math.atan(tanP);
+    this.alongScale = 0.45 / (Math.sin(P) * Math.cos(P) * 2.5);
+    this.u = {
+      uNoise: { value: noise3D().tex }, uSeed: { value: g.seed },
+      uArmP: { value: new Vector4(l.arms, 1 / tanP, l.irreg, this.phase) },
+      uDiscW: { value: new Vector4(c.old, c.thick, c.young, c.knots) },
+      uDiscS: { value: new Vector4(l.hr, l.hz, l.clumpy, c.bar) },
+      uRing: { value: new Vector4(...l.ring) },
+      uBulgeW: { value: new Vector4(c.bulge, 1 / Re, bn, 1 / l.bulgeN) },
+      uBulgeAx: { value: new Vector3(1 / axes[0], 1 / axes[1], 1 / axes[2]) },
+      uDustP: { value: new Vector4(l.dust, 1 / l.dustHr, l.extra, l.trunc) },
+      uBarP: { value: new Vector4(l.barLen, l.warp, this.alongScale, l.spotBlue ?? 0) },
+      uSpot: { value: new Vector4(...(l.spot ? [l.spot[0], l.spot[1], l.spot[2], c.spot] : [0, 0, 0, 0])) },
+      uSpotW: { value: l.spotW ?? 0.04 },
+      uDiscRot: { value: this.rot },
+    };
+  }
+  readonly bright: number;
+  readonly alongScale: number;
+  readonly phase: number;
+  private readonly tanP: number;
+
+  /**
+   * Smooth radiance (the model without its noise and dust, in its emission units) along a ray from
+   * `o` in direction `d` (galaxy frame, radii): the spheroid marched, the disc as its surface density
+   * where the ray crosses the plane, over the cosine of the crossing angle.
+   */
+  radiance(o: Vector3, d: Vector3): number {
+    const e = this.ext, c = this.coef, l = this.look;
+    let t0 = 0, t1 = Infinity;
+    for (const k of ['x', 'y', 'z'] as const) {
+      const inv = 1 / (Math.abs(d[k]) > 1e-9 ? d[k] : 1e-9);
+      let a = (-e[k] - o[k]) * inv, b = (e[k] - o[k]) * inv;
+      if (a > b) [a, b] = [b, a];
+      t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+    }
+    if (t1 <= t0) return 0;
+    let L = 0;
+    if (c.bulge > 0) {
+      const ax = l.axes ?? [1, 1, l.bulgeQ], bn = sersicB(l.bulgeN), N = 48;
+      // samples spaced evenly in the angle seen from the centre's closest approach (dense near the cusp)
+      const tc = Math.min(Math.max(-o.dot(d), t0), t1);
+      const pc = o.clone().addScaledVector(d, tc);
+      const b = Math.max(Math.hypot(pc.x / ax[0], pc.y / ax[1], pc.z / ax[2]), 0.2 * l.bulgeRe);
+      const a0 = Math.atan((t0 - tc) / b), a1 = Math.atan((t1 - tc) / b);
+      for (let i = 0; i < N; i++) {
+        const an = a0 + ((i + 0.5) / N) * (a1 - a0);
+        const t = tc + b * Math.tan(an), dt = (b / Math.cos(an) ** 2) * ((a1 - a0) / N);
+        const x = o.x + d.x * t, y = o.y + d.y * t, z = o.z + d.z * t;
+        const s = Math.hypot(x / ax[0], y / ax[1], z / ax[2]);
+        L += c.bulge * Math.exp(-bn * (Math.pow(Math.max(s / l.bulgeRe, 1e-5), 1 / l.bulgeN) - 1)) * dt;
+      }
+    }
+    const od = o.clone().applyMatrix3(this.rot), dd = d.clone().applyMatrix3(this.rot);
+    if (Math.abs(dd.z) > 1e-6) {
+      const t = -od.z / dd.z;
+      if (t > t0 && t < t1) {
+        const r = Math.hypot(od.x + dd.x * t, od.y + dd.y * t);
+        const sig = (c.old * Math.exp(-r / l.hr) + c.thick * Math.exp(-r / (1.3 * l.hr)) + (c.young + 1.5 * c.knots) * Math.exp(-r / (1.5 * l.hr))) * (1 - smooth(l.trunc * 0.8, l.trunc, r));
+        // seen at a grazing angle the dust hides all but a column of about one optical depth
+        const tau = l.dust * Math.exp(-r / l.dustHr) * smooth(0.02, 0.1, r) * 0.8;
+        const slant = 1 / Math.max(Math.abs(dd.z), 0.01);
+        L += tau > 1e-3 ? (sig * (1 - Math.exp(-tau * slant))) / tau : sig * Math.min(slant, 25);
+      }
+    }
+    return L;
+  }
+
+  /** the noise at texture coordinates */
+  private nz(x: number, y: number, z: number): Float32Array { return sampleNoise(this.noise, x, y, z, this.nzv); }
+
+  private dA = new Float32Array(4);
+  private dS = new Float32Array(4);
+  private dI = new Float32Array(4);
+  /**
+   * Disc-frame quantities at p (as discNoise() in GAL_MODEL): radius, spiral phase, arm-width noise
+   * and the big-scale noise (into `dA`); `streaks()` adds the isotropic (`dI`) and spiral-coordinate
+   * (`dS`) noise. Arrays are reused: copy what must survive the next call.
+   */
+  disc(px: number, py: number, pz: number): { r: number; psi: number; wid: number } {
+    const l = this.look, s = this.g.seed;
+    const r = Math.hypot(px, py);
+    this.dA.set(this.nz(px * 0.9 + s * 0.71, py * 0.9 + s * 0.71, pz * 0.9 + s * 0.71));
+    const B = this.nz(px * 0.3 + s * 0.53, py * 0.3 + s * 0.53, pz * 0.3 + s * 0.53);
+    const lr = Math.log(Math.max(r, 0.03));
+    const psi = Math.atan2(py, px) - lr / this.tanP + this.phase + l.irreg * ((B[0] - 0.5) * 2 + (this.dA[0] - 0.5) * 0.25);
+    return { r, psi, wid: B[1] };
+  }
+
+  streaks(px: number, py: number, pz: number, r: number, psi: number): void {
+    const s = this.g.seed;
+    const sw = smooth(0.08, 0.25, r);
+    this.dI.set(this.nz(px * 2.6 + s * 0.29, py * 2.6 + s * 0.29, pz * 2.6 + s * 0.29));
+    this.dS.set(this.dI);
+    if (sw > 0) {
+      const lr = Math.log(Math.max(r, 0.03));
+      const Sp = this.nz(Math.cos(psi) * 0.45 + s * 0.37, Math.sin(psi) * 0.45 + s * 0.37, lr * this.alongScale + pz * 1.2 + s * 0.37);
+      for (let i = 0; i < 4; i++) this.dS[i] += (Sp[i] - this.dS[i]) * sw;
+    }
+  }
+
+  /**
+   * Draws `n` points from the model's light (component chosen by its share, position from its smooth
+   * profile, kept with the probability of the model's modulation there). Calls `put` with the
+   * galaxy-frame position, the component index (0 bulge, 1 old, 2 thick, 3 young, 4 knots, 5 bar,
+   * 6 spot) and the local disc scale height. A generator: yields every few hundred tries, so the
+   * work can be spread over frames.
+   */
+  *sample(n: number, rnd: () => number, put: (x: number, y: number, z: number, comp: number, hz: number) => void, only?: number[]): Generator<void> {
+    const l = this.look;
+    const cum: number[] = [];
+    let acc = 0;
+    this.frac.forEach((f, i) => { acc += !only || only.includes(i) ? f : 0; cum.push(acc); });
+    if (acc <= 0) return;
+    const lap = () => (rnd() < 0.5 ? 1 : -1) * Math.log(rnd() + 1e-12);
+    const gauss = () => Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(6.2832 * rnd());
+    const v = new Vector3();
+    const hzF = (r: number) => l.hz * (1 + 0.8 * r);
+    const am = (r: number) => smooth(0.04, 0.16, r) * (1 - smooth(1.0, 1.3, r));
+    const ymMax = (l.arms > 0 ? 3.66 * 2.6 : 1) * (1 - l.clumpy) + 4.2 * l.clumpy + l.ring[2];
+    const ext = this.ext;
+    let tries = 0;
+    for (let i = 0; i < n && tries < n * 200; tries++) {
+      if ((tries & 255) === 255) yield;
+      const u = rnd() * acc;
+      let comp = 0;
+      while (comp < cum.length - 1 && u >= cum[comp]) comp++;
+      if (comp === 0) {
+        // spheroid: radius from the table, direction uniform, stretched by the axes
+        const target = rnd() * this.bulgeCdf[this.bulgeCdf.length - 1];
+        let lo = 0, hi = this.bulgeCdf.length - 1;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (this.bulgeCdf[mid] < target) lo = mid; else hi = mid; }
+        const s = ((lo + rnd()) / (this.bulgeCdf.length - 1)) * this.bulgeSMax;
+        const z = rnd() * 2 - 1, ph = rnd() * 6.2832, q = Math.sqrt(1 - z * z);
+        const ax = l.axes ?? [1, 1, l.bulgeQ];
+        v.set(s * q * Math.cos(ph) * ax[0], s * q * Math.sin(ph) * ax[1], s * z * ax[2]);
+        const w = 1 - smooth(0.7, 1.0, Math.hypot(v.x / ext.x, v.y / ext.y, v.z / ext.z));
+        if (rnd() > w) continue;
+        put(v.x, v.y, v.z, 0, 0.05);
+        i++;
+        continue;
+      }
+      // disc parts: radius from a gamma(2) distribution, height from a Laplace one
+      let px: number, py: number, pz: number;
+      if (comp === 5) { px = gauss() * l.barLen / Math.SQRT2; py = gauss() * 0.25 * l.barLen / Math.SQRT2; pz = gauss() * 0.04 / Math.SQRT2; }
+      else if (comp === 6 && l.spot) { const w = (l.spotW ?? 0.04) / Math.SQRT2; px = l.spot[0] + gauss() * w; py = l.spot[1] + gauss() * w; pz = l.spot[2] + gauss() * w * 0.3; }
+      else {
+        const hr = comp === 2 ? 1.3 * l.hr : comp >= 3 ? 1.5 * l.hr : l.hr;
+        const r = -hr * Math.log(rnd() * rnd() + 1e-12);
+        if (r > 1.4) continue;
+        const th = rnd() * 6.2832;
+        px = r * Math.cos(th); py = r * Math.sin(th);
+        pz = lap() * (comp === 2 ? 0.05 : comp >= 3 ? 0.45 * hzF(r) : hzF(r));
+      }
+      const r = Math.hypot(px, py);
+      const win = (1 - smooth(l.trunc * 0.8, l.trunc, r)) * (1 - smooth(0.75, 1.0, Math.abs(pz) / ext.z));
+      if (rnd() > win) continue;
+      if (comp === 1) {
+        const d = this.disc(px, py, pz);
+        const wave = l.arms > 0 ? 0.5 + 0.5 * Math.cos(l.arms * d.psi) : 0.5;
+        if (rnd() > (1 + 0.5 * (wave - 0.5) * am(r)) * (0.8 + 0.4 * this.dA[1]) / 1.5) continue;
+      } else if (comp === 3 || comp === 4) {
+        // two stages: a bound from the cheap terms first, then the streak noise
+        const d = this.disc(px, py, pz);
+        const wave = l.arms > 0 ? 0.5 + 0.5 * Math.cos(l.arms * d.psi) : 0.5;
+        const armPk = l.arms > 0 ? Math.pow(wave, 4 * (0.5 + 1.1 * d.wid)) * 3.66 * am(r) : am(r);
+        const ringY = l.ring[2] * Math.exp(-(((r - l.ring[0]) / l.ring[1]) ** 2));
+        const clumpPk = smooth(0.35, 0.85, this.dA[2]) * 2.8 * l.clumpy;
+        const bound = armPk * (l.arms > 0 ? 2.6 : 1) * (1 - l.clumpy) + clumpPk * 1.5 + ringY;
+        if (rnd() * ymMax > bound) continue;
+        this.streaks(px, py, pz, r, d.psi);
+        const ym = armPk * (l.arms > 0 ? 0.2 + 2.4 * this.dS[1] * this.dS[1] : 1) * (1 - l.clumpy) + clumpPk * (0.5 + this.dI[1]) + ringY;
+        if (rnd() * bound > ym) continue;
+        if (comp === 4) {
+          const s = this.g.seed * 5.3;
+          const kn = this.nz(px * 7 + s, py * 7 + s, pz * 7 + s)[3];
+          if (rnd() > smooth(0.75, 0.95, kn)) continue;
+        }
+      }
+      v.set(px, py, pz).applyMatrix3(this.rotT);
+      put(v.x, v.y, v.z, comp, comp === 2 ? 0.05 : comp >= 3 ? 0.45 * hzF(r) : hzF(r));
+      i++;
+    }
+  }
+}
+
+function smooth(a: number, b: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Share of a galaxy's light carried by the cloud up close: star clouds (of the young, clumpy parts
+ * only: the old disc and the bulge are smooth and stay in the volume), single stars (of all of it).
+ */
+const CLOUD_SHARE = 0.4, STAR_SHARE = 0.04;
+
+/**
+ * Fills `star` (x, y, z, size) and `flux` (rgb) for a galaxy from its model: single stars first,
+ * then star clouds. A generator (spread over frames): `state` reports the count written and the
+ * fractions of the stars and clouds done.
+ */
+function* fillCloud(model: GalaxyModel, star: Float32Array, flux: Float32Array, nClouds: number, nStars: number,
+  state: { n: number; stars: number; clouds: number }): Generator<void> {
+  const r = mulberry(model.g.seed + 0.123);
+  const red = [1.0, 0.66, 0.42];
+  const sb = model.look.spotBlue ?? 0;
+  const cols = [C_BULGE, C_OLD, C_OLD, C_YOUNG, C_HII, C_OLD, C_HII.map((v, i) => v + (C_YOUNG[i] - v) * sb)];
+  const B = model.bright;
+  state.n = 0; state.stars = 0; state.clouds = 0;
+  // single stars: blue supergiants where stars are young, red giants everywhere; a steep
+  // luminosity function (most faint, a few brilliant)
+  let k = 0;
+  yield* model.sample(nStars, r, (x, y, z, comp) => {
+    const young = comp >= 3 && comp !== 5;
+    const c = young ? (r() < 0.75 ? C_YOUNG : red) : r() < 0.6 ? red : C_OLD;
+    const L = (Math.pow(r(), 6) * 40 + 0.2) / 6.9;
+    const f = ((STAR_SHARE * B) / nStars) * L;
+    const n = state.n++;
+    star[n * 4] = x; star[n * 4 + 1] = y; star[n * 4 + 2] = z; star[n * 4 + 3] = 2e-5;
+    flux[n * 3] = c[0] * f; flux[n * 3 + 1] = c[1] * f; flux[n * 3 + 2] = c[2] * f;
+    state.stars = ++k / nStars;
+  });
+  state.stars = 1;
+  const fy = model.frac[3] + model.frac[4] + model.frac[6];
+  k = 0;
+  if (fy > 0) yield* model.sample(nClouds, r, (x, y, z, comp, hz) => {
+    // young star clouds, a few thousandths to a hundredth of a radius, and smaller H II knots
+    const size = comp === 4 || comp === 6 ? 0.002 + 0.005 * r() : Math.min(0.004 + 0.012 * r(), 2 * hz + 0.002);
+    const c = cols[comp];
+    const f = ((model.look.cloudShare ?? CLOUD_SHARE) * fy * B) / nClouds;
+    const n = state.n++;
+    star[n * 4] = x; star[n * 4 + 1] = y; star[n * 4 + 2] = z; star[n * 4 + 3] = size;
+    flux[n * 3] = c[0] * f; flux[n * 3 + 1] = c[1] * f; flux[n * 3 + 2] = c[2] * f;
+    state.clouds = ++k / nClouds;
+  }, [3, 4, 6]);
+  state.clouds = 1;
 }
 
 export interface GalaxyView { galaxy: Galaxy; rel: Vector3; dist: number; pixelRadius: number }
 
 /**
- * Other galaxies: a procedural disc (spiral arms, bar, dust, star-forming knots) in each catalogued
- * disc plane plus a bulge, or a spheroid glow for ellipticals and dwarfs. Brightness follows the
- * eye's adaptation like the Milky Way's glow; near the Sun they are hidden (the sky photo has them).
- */
-/** ∫ exp(-7 (r/0.35)^n) 2πr dr ÷ ∫ exp(-7 (r/0.35)^n) 4πr² dr: the spheroid volume emits the old picture's light. */
-function sersicNorm(n: number): number {
-  let a = 0, b = 0;
-  for (let i = 0; i < 4000; i++) {
-    const r = (i + 0.5) / 4000 * 2, f = Math.exp(-7 * Math.pow(r / 0.35, n));
-    a += f * 2 * Math.PI * r; b += f * 4 * Math.PI * r * r;
-  }
-  return a / b;
-}
-
-const isDisc = (g: Galaxy, look: Look) => look.arms > 0 || look.bar > 0 || look.clumpy > 0 || g.shape === 'lenticular' || !!look.bulgeR;
-
-/** Uniform values of a galaxy's model (GAL_MODEL). */
-function modelUniforms(g: Galaxy, look: Look): Record<string, { value: number }> {
-  return {
-    uSeed: { value: g.seed }, uArms: { value: look.arms }, uPitch: { value: ((look.pitchDeg || 14) * Math.PI) / 180 },
-    uBar: { value: look.bar }, uBulge: { value: isDisc(g, look) ? look.bulge : 0 }, uBulgeR: { value: look.bulgeR ?? 0.05 },
-    uClumpy: { value: look.clumpy }, uDust: { value: isDisc(g, look) ? look.dust : 0 },
-  };
-}
-
-/**
  * Other galaxies as 3D volumes (VOL_FRAG): a box around each galaxy in its catalogued orientation,
  * ray-marched per pixel, so a galaxy has thickness and dust lanes from every side and can be flown
- * into. The nearest one also becomes a cloud of star clouds and single stars (parallax, resolved
- * stars), dimmed by the dust between the eye and each of them. Brightness follows the eye's
- * adaptation like the Milky Way's glow; near the Sun they are hidden (the sky photo has them).
+ * into. Each is as bright as its catalogued magnitude and size say (mean surface brightness). The
+ * nearest one also becomes a cloud of star clouds and single stars (parallax, resolved stars),
+ * dimmed by the dust between the eye and each of them. Brightness follows the eye's adaptation like
+ * the Milky Way's glow; near the Sun they are hidden (the sky photo has them).
  */
 export class GalaxiesLayer {
   readonly group = new Group();
   views: GalaxyView[] = [];
   private volumes = new Map<Galaxy, Mesh>();
+  private models = new Map<Galaxy, GalaxyModel>();
   private box = new BoxGeometry(2, 2, 2);
   readonly gain = { value: 0 };
   /** the nearest galaxy as a 3D cloud of star clouds and stars */
   private cloud: Points;
   private cloudOf: Galaxy | null = null;
-  private looks = new Map<Galaxy, Look>();
+  private filling: Generator<void> | null = null;
+  private fill = { n: 0, stars: 0, clouds: 0 };
   private nClouds: number;
   private nStars: number;
+  private pixAng = { value: 1e-3 };
 
   constructor(readonly galaxies: Galaxy[], psf?: Record<string, { value: number }>, vr = false) {
     this.group.name = 'galaxies';
     this.nClouds = vr ? 30000 : 90000;
     this.nStars = vr ? 15000 : 50000;
     const n = this.nClouds + this.nStars;
+    const noise = noise3D();
     const cg = new BufferGeometry();
     cg.setAttribute('aStar', new BufferAttribute(new Float32Array(n * 4), 4));
     cg.setAttribute('aFlux', new BufferAttribute(new Float32Array(n * 3), 3));
     cg.setAttribute('position', new BufferAttribute(new Float32Array(n * 3), 3));
     cg.setDrawRange(0, 0);
+    for (const g of galaxies) this.models.set(g, new GalaxyModel(g, lookFor(g, galaxies), noise.data));
+    const first = this.models.values().next().value as GalaxyModel | undefined;
+    const modelU = () => first ? Object.fromEntries(Object.entries(first.u).map(([k, v]) => [k, { value: v.value instanceof Vector4 || v.value instanceof Vector3 || v.value instanceof Matrix3 ? v.value.clone() : v.value }])) : {};
     this.cloud = new Points(cg, new ShaderMaterial({
       name: 'galaxy-cloud', vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
-      uniforms: { uRadius: { value: 1 }, uPixelSA: psf?.uPixelSA ?? { value: 1e-6 }, uDpr: psf?.uDpr ?? { value: 1 }, uGain: this.gain, uWeight: { value: 0 },
+      uniforms: { ...modelU(), uRadius: { value: 1 }, uPixelSA: psf?.uPixelSA ?? { value: 1e-6 }, uDpr: psf?.uDpr ?? { value: 1 }, uGain: this.gain, uWeight: { value: new Vector2() },
         uMaxPx: { value: vr ? 48 : 160 }, uClipScale: { value: 1 }, uCamG: { value: new Vector3() },
-        uSeed: { value: 0 }, uArms: { value: 0 }, uPitch: { value: 0.25 }, uBar: { value: 0 }, uBulge: { value: 0 }, uBulgeR: { value: 0.05 }, uClumpy: { value: 0 }, uDust: { value: 0 },
         uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     }));
@@ -415,18 +751,12 @@ export class GalaxiesLayer {
     this.cloud.name = 'galaxy cloud';
     this.group.add(this.cloud);
     for (const g of galaxies) {
-      const look = lookFor(g);
-      this.looks.set(g, look);
-      const disc = isDisc(g, look);
-      const ratio = Math.max(g.ratio, 0.3);
-      const tint = g.shape === 'dwarf' ? new Vector3(0.95, 0.9, 0.85).multiplyScalar(0.35) : new Vector3(1.0, 0.86, 0.68).multiplyScalar(1.2);
-      const ext = disc ? new Vector3(1.35, 1.35, look.bulgeR ? 0.6 : 0.4) : new Vector3(1.05, 1.05 * ratio, 1.05 * ratio);
+      const model = this.models.get(g)!;
       const m = new Mesh(this.box, new ShaderMaterial({
         name: 'galaxy-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG, side: BackSide,
         uniforms: {
-          ...modelUniforms(g, look), uCam: { value: new Vector3() }, uExt: { value: ext }, uType: { value: disc ? 0 : 1 },
-          uSersic: { value: look.sersic }, uAe: { value: sersicNorm(look.sersic) }, uRatio: { value: ratio }, uTint: { value: tint },
-          uGain: this.gain, uWeight: { value: 1 }, uLite: LITE.uLite, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+          ...model.u, uCam: { value: new Vector3() }, uExt: { value: model.ext }, uPixAng: this.pixAng,
+          uGain: this.gain, uWeight: { value: 1 }, uYoungW: { value: 1 }, uLite: LITE.uLite, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
         },
         transparent: true, depthWrite: false, blending: AdditiveBlending,
       }));
@@ -434,10 +764,54 @@ export class GalaxiesLayer {
       m.frustumCulled = false;
       m.renderOrder = -1;
       m.name = g.name;
-      m.userData.ext = ext;
       this.group.add(m);
       this.volumes.set(g, m);
     }
+  }
+
+  private expo = 1;
+  /** the last metered radiance (diagnostics) */
+  metered = 0;
+  /**
+   * The eye adapting to a galaxy that fills the view: the log-mean of the galaxies' radiance over a
+   * cone of 25° around the view direction (centre-weighted, like a camera's metering) sets an
+   * exposure factor (at most 1: faint galaxies are not brightened), eased over a few frames.
+   */
+  private adaptGalaxy(cam: UPos, q?: Quaternion): number {
+    if (!q) return this.expo;
+    const fwd = new Vector3(0, 0, -1).applyQuaternion(q), up = new Vector3(0, 1, 0).applyQuaternion(q);
+    const right = new Vector3().crossVectors(fwd, up);
+    const rel = new Vector3(), o = new Vector3(), d = new Vector3(), dir = new Vector3();
+    // the galaxies large on the sky
+    const big: Galaxy[] = [];
+    for (const g of this.galaxies) {
+      const k = g.upos.sub(cam, rel).length() / g.radius;
+      if (k < 25) big.push(g);
+    }
+    let target = 1;
+    if (big.length) {
+      let sumW = 0, sumLog = 0;
+      const rings = [[0, 1, 2], [0.12, 6, 1], [0.25, 8, 0.7], [0.42, 8, 0.4]];
+      for (const [ang, cnt, wt] of rings) for (let i = 0; i < cnt; i++) {
+        const ph = (i / cnt) * Math.PI * 2 + ang * 3;
+        dir.copy(fwd).addScaledVector(right, Math.tan(ang) * Math.cos(ph)).addScaledVector(up, Math.tan(ang) * Math.sin(ph)).normalize();
+        let Lr = 0;
+        for (const g of big) {
+          g.upos.sub(cam, rel);
+          const R = g.radius;
+          o.set(-rel.dot(g.major) / R, -rel.dot(g.minor) / R, -rel.dot(g.normal) / R);
+          d.set(dir.dot(g.major), dir.dot(g.minor), dir.dot(g.normal));
+          Lr += this.models.get(g)!.radiance(o, d);
+        }
+        sumLog += wt * Math.log(Lr * 0.9 + 0.02);
+        sumW += wt;
+      }
+      const La = Math.exp(sumLog / sumW);
+      this.metered = La;
+      target = Math.min(1, Math.pow(La / 0.3, -0.85));
+    }
+    this.expo += (target - this.expo) * 0.3;
+    return this.expo;
   }
 
   /** The galaxy cloud and one volume, for compiling their shaders ahead of time. */
@@ -450,9 +824,10 @@ export class GalaxiesLayer {
    * `adapt`: the eye's dark adaptation (1 = dark-adapted); `fade`: 0 near the Sun (the sky photo
    * shows these galaxies), 1 once the photo has faded out.
    */
-  update(cam: UPos, pixelAngle: number, adapt: number, fade: number, _viewQuat?: Quaternion): void {
+  update(cam: UPos, pixelAngle: number, adapt: number, fade: number, viewQuat?: Quaternion): void {
     this.views = [];
-    this.gain.value = 0.9 * Math.pow(Math.max(adapt, 0), 0.55) * fade;
+    this.gain.value = 0.9 * Math.pow(Math.max(adapt, 0), 0.55) * fade * this.adaptGalaxy(cam, viewQuat);
+    this.pixAng.value = pixelAngle;
     this.group.visible = fade > 0.001;
     const rel = new Vector3();
     const m = new Matrix4();
@@ -462,26 +837,41 @@ export class GalaxiesLayer {
       const k = g.upos.sub(cam, rel).length() / g.radius;
       if (k < nearK) { nearK = k; near = g; }
     }
-    const wCloud = fade > 0.001 && near ? Math.min(1, Math.max(0, (40 - nearK) / 15)) : 0;
-    this.cloud.visible = wCloud > 0.001;
+    // single stars from 30 radii in; the young star clouds only up close (from 5 radii), where the
+    // volume's noise runs out of detail
+    const wStars = fade > 0.001 && near ? smooth(30, 12, nearK) : 0;
+    const wClouds = fade > 0.001 && near ? smooth(5, 2, nearK) : 0;
+    this.cloud.visible = wStars > 0.001;
     if (near && this.cloud.visible) {
       const u = (this.cloud.material as ShaderMaterial).uniforms;
+      const model = this.models.get(near)!;
+      const geo = this.cloud.geometry;
       if (this.cloudOf !== near) {
-        const geo = this.cloud.geometry;
-        const look = this.looks.get(near)!;
-        const cnt = fillCloud(near, look, geo.attributes.aStar.array as Float32Array, geo.attributes.aFlux.array as Float32Array, this.nClouds, this.nStars);
-        geo.setDrawRange(0, cnt);
-        geo.attributes.aStar.needsUpdate = true;
-        geo.attributes.aFlux.needsUpdate = true;
-        for (const [k, v] of Object.entries(modelUniforms(near, look))) u[k].value = v.value;
+        this.filling = fillCloud(model, geo.attributes.aStar.array as Float32Array, geo.attributes.aFlux.array as Float32Array, this.nClouds, this.nStars, this.fill);
+        geo.setDrawRange(0, 0);
+        for (const [k, v] of Object.entries(model.u)) {
+          const dst = u[k];
+          if (v.value instanceof Vector4 || v.value instanceof Vector3 || v.value instanceof Matrix3) (dst.value as Vector4).copy(v.value as Vector4);
+          else dst.value = v.value;
+        }
         this.cloudOf = near;
+      }
+      if (this.filling) {
+        // a few milliseconds of sampling per frame
+        const t0 = performance.now(), from = this.fill.n;
+        while (performance.now() - t0 < 4) if (this.filling.next().done) { this.filling = null; break; }
+        const a = geo.attributes.aStar as BufferAttribute, f = geo.attributes.aFlux as BufferAttribute;
+        a.clearUpdateRanges(); f.clearUpdateRanges();
+        a.addUpdateRange(from * 4, (this.fill.n - from) * 4); f.addUpdateRange(from * 3, (this.fill.n - from) * 3);
+        a.needsUpdate = true; f.needsUpdate = true;
+        geo.setDrawRange(0, this.fill.n);
       }
       near.upos.sub(cam, rel);
       const R = near.radius;
       this.cloud.matrix.makeBasis(near.major.clone().multiplyScalar(R), near.minor.clone().multiplyScalar(R), near.normal.clone().multiplyScalar(R)).setPosition(rel);
       this.cloud.matrixWorldNeedsUpdate = true;
       u.uRadius.value = R;
-      u.uWeight.value = wCloud;
+      (u.uWeight.value as Vector2).set(wClouds, wStars);
       u.uClipScale.value = 1 / Math.max(rel.length(), R);
       (u.uCamG.value as Vector3).set(-rel.dot(near.major) / R, -rel.dot(near.minor) / R, -rel.dot(near.normal) / R);
     }
@@ -494,15 +884,19 @@ export class GalaxiesLayer {
       vol.visible = fade > 0.001 && pr > 0.5;
       if (!vol.visible) continue;
       const R = g.radius;
-      const ext = vol.userData.ext as Vector3;
+      const ext = this.models.get(g)!.ext;
       m.makeBasis(g.major.clone().multiplyScalar(R * ext.x), g.minor.clone().multiplyScalar(R * ext.y), g.normal.clone().multiplyScalar(R * ext.z)).setPosition(rel);
       vol.matrix.copy(m);
       vol.matrixWorldNeedsUpdate = true;
       const u = (vol.material as ShaderMaterial).uniforms;
       u.uClipScale.value = 1 / Math.max(dist, R);
       (u.uCam.value as Vector3).set(-rel.dot(g.major) / R, -rel.dot(g.minor) / R, -rel.dot(g.normal) / R);
-      // up close the cloud carries half of the light (as star clouds and single stars)
-      u.uWeight.value = g === near ? 1 - 0.5 * wCloud : 1;
+      // up close the cloud carries part of the light (as star clouds and single stars)
+      // (as far as the cloud is filled yet)
+      const ws = g === near && g === this.cloudOf ? wStars * this.fill.stars : 0, wc = g === near && g === this.cloudOf ? wClouds * this.fill.clouds : 0;
+      u.uWeight.value = 1 - STAR_SHARE * ws;
+      u.uYoungW.value = (1 - STAR_SHARE * ws - (this.models.get(g)!.look.cloudShare ?? CLOUD_SHARE) * wc) / (1 - STAR_SHARE * ws);
     }
   }
 }
+

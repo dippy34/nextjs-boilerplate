@@ -9,6 +9,7 @@ const VERT = /* glsl */ `
 #include <logdepthbuf_pars_vertex>
 ${PROJECT_PARS}
 attribute float aAlong;
+uniform float uClipScale;
 varying float vAlong;
 varying vec3 vNormalW;
 varying vec3 vPosView;
@@ -20,6 +21,8 @@ void main() {
   gl_Position = projectView(viewMatrix * wp);
   #include <logdepthbuf_vertex>
 ${FIX_LOGDEPTH}
+  // clip coordinates of a kiloparsec jet overflow 32-bit floats in clipping: one factor per mesh
+  gl_Position *= uClipScale;
 }`;
 
 const FRAG = /* glsl */ `
@@ -113,7 +116,7 @@ export class JetsLayer {
           uniforms: {
             uColor: { value: optical ? new Vector3(0.62, 0.8, 1.0) : new Vector3(0.75, 0.6, 1.0) },
             uIntensity: { value: (optical ? 1.0 : 0.35) * (towards ? 1 : 0.06) },
-            uTime: { value: 0 }, uSeed: { value: sign * 13.7 + bh.diskLook.seed },
+            uTime: { value: 0 }, uClipScale: { value: 1 }, uSeed: { value: sign * 13.7 + bh.diskLook.seed },
             uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
           },
           transparent: true, depthWrite: false, blending: AdditiveBlending, side: DoubleSide,
@@ -148,6 +151,7 @@ export class JetsLayer {
         m.matrix.compose(rel, q, new Vector3(k, k, k));
         m.matrixWorldNeedsUpdate = true;
         (m.material as ShaderMaterial).uniforms.uTime.value = time;
+        (m.material as ShaderMaterial).uniforms.uClipScale.value = 1 / Math.max(rel.length(), p.length);
       }
     }
   }

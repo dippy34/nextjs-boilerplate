@@ -15,11 +15,13 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(String(e)));
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${detail}`); };
-// (software rendering of the close-up ground runs at ~3 s per frame here: generous timeouts)
-const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 240000 }); };
-page.setDefaultTimeout(120000);
+// software GL (SwiftShader) renders planet-wide terrain at a few frames per second close to the
+// ground; allow it the time, as the screenshot calls already do (a real GPU is far faster).
+// software GL (SwiftShader) renders planet-wide terrain at a few frames per second close to the
+// ground, so a batch of frames can take minutes; allow it the time (a real GPU / Quest is far faster).
+const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 480000 }); };
 
-await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 // software rendering runs at a few frames per second: let the terrain build in fewer frames
 await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
@@ -94,7 +96,7 @@ async function terrainScene(id, name, opts, expectDem) {
   });
   check(`${id}: terrain under the explorer on ${name}`, st.body === name && st.hScale > 0.99, `${JSON.stringify(st)} after ${ms} ms`);
   if (expectDem) check(`${id}: ${name} uses its elevation model`, st.dem);
-  await page.screenshot({ path: path.join(outDir, `${id}.png`) });
+  await page.screenshot({ path: path.join(outDir, `${id}.png`), timeout: 180000 });
   return st;
 }
 
@@ -121,7 +123,7 @@ let st = await page.evaluate(() => {
   return { body: b?.name ?? null, alt: a.rig.altitude, aboveRef: d - (b?.radius ?? 0) };
 });
 check('t2: flying down stops above the ground', st.body === 'Moon' && st.alt > 1.4 && st.alt < 60, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 't2-moon-ground.png') });
+await page.screenshot({ path: path.join(outDir, 't2-moon-ground.png'), timeout: 180000 });
 // 3. Olympus Mons from 30 km (MOLA heights; the summit is 21 km up)
 await terrainScene('t3-olympus-mons', 'Mars', { lat: 18.65, lon: -133.8 - 2.5, sunEl: 25, alt: 30000, pitch: 25, yaw: 0 }, true);
 // 4. a world without an elevation model: generated craters and hills
@@ -153,7 +155,7 @@ await page.waitForFunction(() => window.app.terrain.owner === window.app.selecti
 await frames(8);
 st = await page.evaluate(() => ({ owner: window.app.terrain.owner?.name ?? null, alt: window.app.rig.altitude, hScale: window.app.terrain.hScale }));
 check('t5: terrain on a planet of another star', st.owner === 'Proxima Cen b' && st.hScale > 0.99, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 't5-exoplanet.png') });
+await page.screenshot({ path: path.join(outDir, 't5-exoplanet.png'), timeout: 180000 });
 
 // 6. a temperate (or ocean) world of another star: land, sea and a blue sky
 st = await page.evaluate(() => {
@@ -193,7 +195,7 @@ if (st) {
     sky: window.app.atmospheres.group.children.some((m) => m.visible && m.name === `${n} atmosphere`),
   }), pname);
   check('t6: a temperate planet of another star has ground and a sky', t6.owner === pname && t6.sky, JSON.stringify(t6));
-  await page.screenshot({ path: path.join(outDir, 't6-temperate.png') });
+  await page.screenshot({ path: path.join(outDir, 't6-temperate.png'), timeout: 180000 });
 }
 
 st = await page.evaluate(() => ({ fps: window.app.fps }));
@@ -201,7 +203,7 @@ console.log('fps', JSON.stringify(st));
 
 // 7, 8. landmarks with sharper regional elevation patches (LOLA 128 px/deg, MOLA 463 m), from where
 // "go to" arrives, at a time when the Sun is 20 degrees up there
-await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
 for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8-olympus-patch', 'Olympus Mons', 'Mars', 'mars'], ['t9-everest', 'Mount Everest', 'Earth', 'earth']]) {
@@ -232,7 +234,8 @@ for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8
   await page.waitForFunction((b) => window.app.terrain.owner?.name === b, body, { timeout: 120000 }).catch(() => undefined);
   await frames(30);
   st = await page.evaluate((k) => ({ version: window.app.bodies.terrainSource.versions.get(k) ?? 0, owner: window.app.terrain.owner?.name ?? null,
-    haze: window.app.terrain.group.children.find((m) => m.name === 'terrain haze')?.visible ?? false }), key);
+    // per-tile haze meshes (planet-wide terrain): any of them drawn
+    haze: window.app.terrain.group.children.some((m) => m.name === 'terrain haze' && m.visible) }), key);
   check(`${id}: sharper elevation patch loaded and drawn`, st.version > 0 && st.owner === body, JSON.stringify(st));
   if (body !== 'Moon') check(`${id}: the atmosphere is drawn over the terrain`, st.haze);
   await page.screenshot({ path: path.join(outDir, `${id}.png`), timeout: 180000 });
