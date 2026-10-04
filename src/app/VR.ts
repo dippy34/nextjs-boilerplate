@@ -560,7 +560,10 @@ export class VRSupport {
       const pressed = gp.buttons.map((b) => b.pressed);
       const edge = (i: number) => !!pressed[i] && !h.prev[i];
       const squeeze = (gp.buttons[1]?.value ?? 0) > 0.5;
+      const flying = app.game.flight.on && !this.travel;
       if (h.handedness === 'left') {
+        // in the ship: the grip is the throttle (analog), the stick the RCS thrusters
+        if (flying) rig.ext.throttle = Math.max(0, Math.min(1, ((gp.buttons[1]?.value ?? 0) - 0.08) / 0.84));
         if (app.walk.walking) app.walk.vrMove(x, y, squeeze); // walking: stick moves along the ground, grip runs
         else if ((x || y) && !this.travel) {
           const ctrlQ = h.obj.getWorldQuaternion(new Quaternion());
@@ -575,11 +578,14 @@ export class VRSupport {
         if (edge(4) && app.walk.walking) app.walk.jump();
         else if (edge(4)) { app.togglePause(); this.flash(app.clock.paused ? 'Time paused' : `Time: ${app.rateText()}`); }
         if (edge(5)) this.toggleMenu();
-        if (edge(3)) app.realTime();
+        if (edge(3)) { if (flying) app.game.flight.cycleSas(); else app.realTime(); }
       } else if (h.handedness === 'right') {
-        // God mode: the grip grabs, drags and throws the body under the laser
-        const godRay = this.handRay(h);
-        if (!this.travel && app.god.vr.grip(squeeze, godRay.origin, godRay.dir, h.hoverObj)) {
+        if (flying) {
+          // reaction wheels: stick pitches and yaws, with the grip held it rolls
+          if (squeeze) rig.ext.rot.set(0, 0, -x);
+          else rig.ext.rot.set(y, -x, 0);
+        } else if (!this.travel && app.god.vr.grip(squeeze, this.handRay(h).origin, this.handRay(h).dir, h.hoverObj)) {
+          // God mode: the grip grabs, drags and throws the body under the laser
           // (the grip is God mode's)
         } else if (squeeze) {
           rig.ext.orbitX = x;

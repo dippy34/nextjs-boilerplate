@@ -246,6 +246,7 @@ export class App {
     await system.ephemeris.request(app.clock.jdTdb);
     app.vr = new VRSupport(app, xrCapable, DATA);
     app.game = new Game(app);
+    app.game.flight.setAtmospheres(atmoData);
     app.walk = new Walk(app); // walking hook
     app.god = new God(app);
     renderer.scene.add(app.god.layer.group);
@@ -391,6 +392,8 @@ export class App {
         case 'KeyJ': this.game.warp(); break;
         case 'KeyN': this.game.audio.setEnabled(!this.game.audio.enabled); this.hud.toast(`Sound ${this.game.audio.enabled ? 'on' : 'off'}`); break;
         case 'KeyK': this.showMissions(); break;
+        case 'KeyY': if (this.game.flight.on) this.game.flight.cycleSas(e.shiftKey); break;
+        case 'KeyI': if (this.game.flight.on) this.game.flight.toggleBoost(); break;
         default:
           if (/^Digit\d$/.test(e.code)) {
             const ids = [10, 199, 299, 399, 499, 599, 699, 799, 899, 999];
@@ -418,6 +421,15 @@ export class App {
     this.rateSign *= -1;
     this.clock.rate = this.rateSign * RATE_STEPS[this.rateIndex];
     this.hud.toast(this.rateSign < 0 ? 'Time reversed' : 'Time forward');
+  }
+  /** Boarding the ship: time runs, at 1x (the date is kept). */
+  flightClock(): void {
+    if (this.clock.paused || this.clock.rate !== 1) {
+      this.rateIndex = 0;
+      this.rateSign = 1;
+      this.clock.rate = 1;
+      this.clock.paused = false;
+    }
   }
   realTime(): void {
     this.clock.setUtcNow();
@@ -1665,10 +1677,18 @@ export class App {
     this.frameCount++;
 
     // 1. time and ephemerides
-    this.clock.advance(Math.min(rawDt, 1));
+    // (in the ship, physics picks the universe step: time warp limits, dilation; the ship moves first)
+    const flight = this.game.flight;
+    const jd0 = this.clock.jdTdb;
+    if (flight.on) this.clock.jdTdb += flight.before(rawDt, dt) / DAY;
+    else this.clock.advance(Math.min(rawDt, 1));
     // God mode: once something was changed, the N-body sandbox moves the bodies instead of the
     // ephemeris (and holds the clock back if the simulation can't keep up)
     if (this.god.active) this.clock.jdTdb = this.god.frameTime(this.clock.jdTdb, Math.min(rawDt, 1));
+    if (flight.on) {
+      flight.simDt = Math.max(0, (this.clock.jdTdb - jd0) * DAY);
+      flight.step();
+    }
     const jd = this.clock.jdTdb;
     if (!this.god.active) {
       this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
@@ -1695,7 +1715,9 @@ export class App {
     if (this.vr.active) this.vr.updateInput(dt);
     this.rig.braking = this.input.keys.has('KeyX');
     // walking (src/app/Walk.ts) owns the camera while on foot; otherwise free flight
-    if (!this.walk.update(dt)) {
+    if (this.walk.update(dt)) { /* on foot */ }
+    else if (flight.on) flight.after(dt);
+    else {
       this.rig.update(dt, this.input);
       this.keepOutsideHorizons();
       this.keepAboveGround(dt);

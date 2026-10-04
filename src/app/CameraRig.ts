@@ -137,12 +137,19 @@ export class CameraRig {
    * direction with length 0..1; orbit/zoom are in "drag pixels" / "wheel ticks" per second.
    * Cleared after every update.
    */
-  readonly ext = { move: new Vector3(), boost: 1, orbitX: 0, orbitY: 0, zoom: 0 };
+  readonly ext = { move: new Vector3(), boost: 1, orbitX: 0, orbitY: 0, zoom: 0, throttle: -1, rot: new Vector3() };
 
   private clearExt(): void {
     this.ext.move.set(0, 0, 0);
     this.ext.boost = 1;
     this.ext.orbitX = this.ext.orbitY = this.ext.zoom = 0;
+    this.ext.throttle = -1;
+    this.ext.rot.set(0, 0, 0);
+  }
+
+  /** Physics flight drives the camera itself (src/game/Flight.ts): it only clears the controller inputs. */
+  updateExternal(): void {
+    this.clearExt();
   }
 
   /** Rotate the view about its own vertical axis (VR snap turn). */

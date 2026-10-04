@@ -349,8 +349,11 @@ void main() {
   float t0 = max(-b - sq_, 0.0), t1 = -b + sq_;
   if (t1 <= t0) discard;
   hi = uLite < 0.5;
-  // (thin shells and filaments of planetary nebulae and remnants get more steps)
-  int N = hi ? (uType > 0.5 ? 96 : 64) : 24;
+  // steps of a fixed length: NMAX across the whole diameter (thin shells and filaments of planetary
+  // nebulae and remnants get more), so a shorter ray (from inside the nebula, or near its edge)
+  // takes fewer steps of the same length, not more of finer ones
+  float NMAX = hi ? (uType > 0.5 ? 96.0 : 64.0) : 24.0;
+  int N = int(clamp(ceil((t1 - t0) * 0.5 * NMAX), 6.0, NMAX));
   float dt = (t1 - t0) / float(N);
   // interleaved gradient noise: an even jitter of the samples (no banding, no blotches)
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));

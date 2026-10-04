@@ -1,3 +1,5 @@
+import { QUALITY_LEVEL } from './shaders/xr';
+
 /**
  * Adaptive quality: a governor that keeps the frame rate by stepping a global quality level down
  * when frames are missed and back up after a long run without misses.
@@ -16,6 +18,12 @@
  * screenshots must not change), unless the page has ?governor=1; ?governor=0 turns it off.
  */
 export const QUALITY = { level: 0, levels: 4, enabled: true };
+
+/** keep the shader-side copy (shaders/xr.ts QUALITY_LEVEL) in step */
+function setLevel(l: number): void {
+  QUALITY.level = l;
+  QUALITY_LEVEL.uQuality.value = l;
+}
 
 /** internal render resolution per level (desktop) */
 export const RENDER_SCALE = [1, 0.85, 0.72, 0.6];
@@ -58,14 +66,14 @@ export class Governor {
     // (still missing now: a window holding the misses of a load that has passed steps no further)
     if (this.misses.length >= 30 && missed > this.misses.length * 0.2 && this.misses[this.misses.length - 1] && this.sinceChange > 1000
       && QUALITY.level < QUALITY.levels - 1) {
-      QUALITY.level++;
+      setLevel(QUALITY.level + 1);
       if (now - this.lastUpAt < 3000) this.upWait = Math.min(60000, this.upWait * 2);
       this.sinceChange = 0;
       this.misses = [];
       return true;
     }
     if (missed === 0 && this.sinceChange > this.upWait && QUALITY.level > 0) {
-      QUALITY.level--;
+      setLevel(QUALITY.level - 1);
       this.lastUpAt = now;
       this.sinceChange = 0;
       return true;
