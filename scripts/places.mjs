@@ -241,11 +241,13 @@ await page.evaluate(() => {
   const a = window.app;
   const o = a.findByName('Orion Nebula');
   const d = o.upos.sub(a.rig.upos).normalize();
-  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 12);
+  a.rig.upos.copy(o.upos).addVec(d, -o.radius * 1000);
 });
 await frames(5);
+// under a few pixels across the volume hands over to a glow that keeps the nebula's light
 st = await volume();
-check('far from the nebula, no volume is drawn', !st);
+const farGlow = await page.evaluate(() => window.app.deepSky.group.children.some((m) => m.material?.name === 'nebula-far' && m.visible));
+check('far from the nebula, the volume gives way to its glow', !st && farGlow, `volume ${st}, glow ${farGlow}`);
 
 check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 const failed = results.filter((r) => !r.ok).length;
