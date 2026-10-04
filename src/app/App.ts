@@ -113,7 +113,8 @@ export class App {
   craft!: SpacecraftLayer;
   /** close-up map tiles for the body being approached */
   tiles!: TileDetail;
-  private photoMode = false;
+  /** photo mode (U): panels and labels hidden (read by Walk for its own HUD line) */
+  photoMode = false;
   private labelsBeforePhoto = true;
   /** real 3D ground under the explorer near solid worlds */
   readonly terrain = new PlanetTerrain();
@@ -859,8 +860,17 @@ export class App {
       cs.exact = true;
       const shift = cs.upos.sub(before, new Vector3());
       const away = before.sub(this.rig.upos, new Vector3()).length();
-      // (an anchored explorer already follows its anchor: rig.followAnchor)
-      if (this.rig.anchor !== cs && shift.lengthSq() > 0 && away < Math.max(1000 * cs.radius, 50 * shift.length())) this.rig.upos.addVec(shift, 1);
+      // (an explorer anchored to the star, or to anything that moves with it — its planets and
+      // their moons — already follows its anchor: rig.followAnchor; shifting again moved it twice)
+      const movesWithStar = (o: unknown): boolean => {
+        let x = o as { system?: { host?: unknown }; parentObject?: unknown } | null;
+        for (let i = 0; x && i < 6; i++) {
+          if (x === cs) return true;
+          x = (x.system?.host ?? x.parentObject ?? null) as typeof x;
+        }
+        return false;
+      };
+      if (!movesWithStar(this.rig.anchor) && shift.lengthSq() > 0 && away < Math.max(1000 * cs.radius, 50 * shift.length())) this.rig.upos.addVec(shift, 1);
     }
     return cs;
   }

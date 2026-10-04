@@ -28,7 +28,7 @@ async function openPage(vr) {
       window.__xrDevice = d;
     });
   }
-  await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
+  await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load', timeout: 180000 });
   await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
   await page.evaluate(() => { window.app.terrain.budgetMs = 60; window.app.terrain.budgetVrMs = 60; });
   return page;
@@ -178,8 +178,8 @@ if (which !== 'vr') {
   await frames(4);
   await page.keyboard.press('KeyB');
   await frames(2);
-  st = await page.evaluate(() => ({ state: window.app.walk.state, toast: document.querySelector('.hud-toast')?.textContent ?? '' }));
-  check('w4: no walking on Jupiter, with the reason', st.state === 'off' && /no solid surface/.test(st.toast), st.toast);
+  st = await page.evaluate(() => ({ state: window.app.walk.state, said: window.app.walk.said }));
+  check('w4: no walking on Jupiter, with the reason', st.state === 'off' && /no solid surface/.test(st.said), st.said);
 
   // the ship: walking takes you out of it
   await page.evaluate(() => window.app.game.setMode('cockpit'));

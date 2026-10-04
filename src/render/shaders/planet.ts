@@ -105,18 +105,11 @@ ${MATERIAL_GLSL}
 ${RING_GLSL}
 
 float ph(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
-// value noise on an integer lattice hash (exact on the CPU too, unlike a float hash)
-float lh(ivec3 c) {
-  uint h = (uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(c.z) * 83492791u);
-  h = (h ^ (h >> 16u)) * 73244475u;
-  h = (h ^ (h >> 16u)) * 73244475u;
-  return float(h ^ (h >> 16u)) * (1.0 / 4294967296.0);
-}
+// value noise (cheap float hash) for everything the CPU doesn't need
 float pn(vec3 p) {
-  vec3 fl = floor(p); vec3 f = p - fl; f = f * f * (3.0 - 2.0 * f);
-  ivec3 i = ivec3(fl);
-  return mix(mix(mix(lh(i), lh(i + ivec3(1,0,0)), f.x), mix(lh(i + ivec3(0,1,0)), lh(i + ivec3(1,1,0)), f.x), f.y),
-             mix(mix(lh(i + ivec3(0,0,1)), lh(i + ivec3(1,0,1)), f.x), mix(lh(i + ivec3(0,1,1)), lh(i + ivec3(1,1,1)), f.x), f.y), f.z);
+  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(ph(i), ph(i + vec3(1,0,0)), f.x), mix(ph(i + vec3(0,1,0)), ph(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(ph(i + vec3(0,0,1)), ph(i + vec3(1,0,1)), f.x), mix(ph(i + vec3(0,1,1)), ph(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
 float fbmN(vec3 p, int n) { float s = 0.0, a = 0.5; for (int i = 0; i < 7; i++) { if (i >= n) break; s += a * pn(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
 // ridged multifractal: each octave weighted by the ridge below it, so detail gathers on the crests
@@ -132,21 +125,48 @@ float ridgedN(vec3 p, int n) {
   }
   return s;
 }
+// the height field's noise: an integer lattice hash, exact on the CPU too (a float hash differs
+// between float32 and float64 wherever its fract() wraps)
+float lh(ivec3 c) {
+  uint h = (uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(c.z) * 83492791u);
+  h = (h ^ (h >> 16u)) * 73244475u;
+  h = (h ^ (h >> 16u)) * 73244475u;
+  return float(h ^ (h >> 16u)) * (1.0 / 4294967296.0);
+}
+float pnT(vec3 p) {
+  vec3 fl = floor(p); vec3 f = p - fl; f = f * f * (3.0 - 2.0 * f);
+  ivec3 i = ivec3(fl);
+  return mix(mix(mix(lh(i), lh(i + ivec3(1,0,0)), f.x), mix(lh(i + ivec3(0,1,0)), lh(i + ivec3(1,1,0)), f.x), f.y),
+             mix(mix(lh(i + ivec3(0,0,1)), lh(i + ivec3(1,0,1)), f.x), mix(lh(i + ivec3(0,1,1)), lh(i + ivec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbmT(vec3 p, int n) { float s = 0.0, a = 0.5; for (int i = 0; i < 7; i++) { if (i >= n) break; s += a * pnT(p); p = p * 2.03 + 1.7; a *= 0.5; } return s; }
+float ridgedT(vec3 p, int n) {
+  float s = 0.0, a = 0.5, w = 1.0;
+  for (int i = 0; i < 6; i++) {
+    if (i >= n) break;
+    float r = 1.0 - abs(pnT(p) * 2.0 - 1.0);
+    r *= r;
+    s += a * r * w;
+    w = clamp(r * 1.6, 0.0, 1.0);
+    p = p * 2.1 + 3.1; a *= 0.5;
+  }
+  return s;
+}
 // the height field (0..~1), shared with the CPU (universe/ExoTerrain.ts); 'low' = the continents'
 // two broadest octaves (inland vs coast)
 float terrainX(vec3 n, out float low) {
   bool lite = uLite > 0.5;
   vec3 q = n * 2.2 + uSeed;
-  vec3 w = lite ? vec3(pn(q * 0.5 + 1.3), pn(q * 0.5 + 7.9), pn(q * 0.5 + 4.1)) - 0.5
-                : vec3(fbmN(q * 0.5 + 1.3, 4), fbmN(q * 0.5 + 7.9, 4), fbmN(q * 0.5 + 4.1, 4)) - 0.5;
+  vec3 w = lite ? vec3(pnT(q * 0.5 + 1.3), pnT(q * 0.5 + 7.9), pnT(q * 0.5 + 4.1)) - 0.5
+                : vec3(fbmT(q * 0.5 + 1.3, 4), fbmT(q * 0.5 + 7.9, 4), fbmT(q * 0.5 + 4.1, 4)) - 0.5;
   vec3 cp = q * 0.7 + w * 2.0;
-  low = fbmN(cp, 2);
-  float cont = low + 0.25 * fbmN(cp * 4.1209 + 5.151, lite ? 2 : 4);   // = fbmN(cp, 6)
+  low = fbmT(cp, 2);
+  float cont = low + 0.25 * fbmT(cp * 4.1209 + 5.151, lite ? 2 : 4);   // = fbmT(cp, 6)
   // finer octaves (fractal coasts, islands), a little rougher than the continents' own spectrum
-  if (!lite) cont += 0.045 * (fbmN(cp * 41.0 + w * 3.0 + 5.3, 3) - 0.4375);
-  float plate = pn(q * 0.55 + w * 1.4 + 11.0);
+  if (!lite) cont += 0.045 * (fbmT(cp * 41.0 + w * 3.0 + 5.3, 3) - 0.4375);
+  float plate = pnT(q * 0.55 + w * 1.4 + 11.0);
   float belt = 1.0 - smoothstep(0.0, 0.14, abs(plate - 0.5));
-  float mount = ridgedN(q * 2.0 + w, lite ? 3 : 5);
+  float mount = ridgedT(q * 2.0 + w, lite ? 3 : 5);
   float land = smoothstep(0.38, 0.6, cont);
   return 0.7 * cont + 0.3 * mount * (0.3 + 0.7 * belt) * (0.35 + 0.65 * land);
 }
@@ -169,7 +189,7 @@ float detail(vec3 n, float fp) {
 float hills(vec3 n, float fp, float fmin, float rough) {
   float s = 0.0, f = 300.0;
   float amp = (0.008 + 0.03 * rough * rough) * 2.0;
-  for (int i = 0; i < 9; i++) {
+  for (int i = 0; i < 8; i++) {
     if (f * fp > 0.35) break;
     if (f > fmin * 0.7) {
       float v = pn(n * f + uSeed * 5.3 + float(i) * 7.1);
@@ -275,7 +295,7 @@ float clouds(vec3 nB, float t, float fp) {
     cyc = max(cyc, (tropical ? 1.2 : 0.6) * exp(-d * d / (r * r)) * (tropical ? smoothstep(0.08, 0.2, d / r) : 1.0));
   }
   // stretched along the latitude circles at mid-latitudes (fronts, jet-stream bands)
-  vec3 q = p * vec3(3.2, 3.2, 3.2 + 3.0 * smoothstep(0.3, 0.9, al)) + uSeed * 1.7 + vec3(0.0, 0.0, t * 0.0003);
+  vec3 q = p * vec3(3.2, 3.2, 3.2 + 1.8 * smoothstep(0.3, 0.9, al)) + uSeed * 1.7 + vec3(0.0, 0.0, t * 0.0003);
   vec3 w = lite ? vec3(pn(q * 0.6 + 3.1), pn(q * 0.6 + 8.3), pn(q * 0.6 + 1.7)) - 0.5
                 : vec3(fbmN(q * 0.6 + 3.1, 3), fbmN(q * 0.6 + 8.3, 3), fbmN(q * 0.6 + 1.7, 3)) - 0.5;
   float c = fbmN(q + w * 2.2, lite ? 4 : 6);
@@ -353,8 +373,9 @@ vec3 biome(float h, float sea, float low, float lat, float slope, vec3 nB, float
   return mix(c, vec3(0.82, 0.85, 0.9), snow);
 }
 
-// giants: belts and zones, vortices, filaments; returns albedo (and 'storm' for the glow)
-vec3 giant(vec3 nB, out float streakOut) {
+// giants: belts and zones, vortices, filaments; returns the albedo ('streakOut' modulates a hot
+// Jupiter's glow)
+vec3 giant(vec3 nB, float fp, out float streakOut) {
   bool lite = uLite > 0.5;
   float la0 = asin(clamp(nB.z, -1.0, 1.0));
   // differential rotation: each latitude drifts at its own rate
@@ -408,6 +429,14 @@ vec3 giant(vec3 nB, out float streakOut) {
   col = mix(col, uC3, smoothstep(0.64, 0.82, streak) * 0.35 * b);
   col *= 1.0 - 0.3 * smoothstep(0.58, 0.78, 1.0 - streak) * (1.0 - b) * uTurb;
   col *= 0.86 + 0.28 * fine * (0.4 + uTurb);
+  // finer turbulence down to the pixel when close (stretched along the flow)
+  float fa = 0.14, ff = 60.0;
+  for (int i = 0; i < 6; i++) {
+    if (lite || ff * fp > 0.5) break;
+    float nz = pn(vec3(ring * ff * 0.3 + eddy * 2.0, lw * ff * 1.4) + uSeed * 4.0 + float(i) * 3.1) - 0.5;
+    col *= 1.0 + fa * nz * (0.5 + uTurb) * smoothstep(0.5, 0.25, ff * fp);
+    ff *= 2.1; fa *= 0.8;
+  }
   // small bright plumes and dark barges inside the belts
   if (!lite && uType >= 8) {
     vec2 u = vec2(lon, lw) * (48.0 / 6.2832) + vec2(eddy * 0.6, 0.0);
@@ -458,38 +487,55 @@ void main() {
   vec3 hillTilt = vec3(0.0);
   if (uType >= 6) {
     float streak;
-    albedo = giant(nB, streak);
+    albedo = giant(nB, fp, streak);
     // limb darkening (high haze over the clouds)
     limb = pow(max(dot(nW, V), 0.0), 0.2);
     if (uType == 9) emit = uGlow * (0.55 + 0.45 * streak);
     emitColor = vec3(1.0, 0.3, 0.1);
   } else {
-    float low;
-    float h = terrainX(nB, low);
     float sea = uSeaLevel;
     bool seas = uType == 3 || uType == 4;
-    // relief normal from the height field (finite differences at the pixel's scale; none in VR)
+    // relief normal from the height field (finite differences at the pixel's scale; none in VR),
+    // and on the landing terrain the hills its vertices don't resolve; one loop over the three
+    // samples keeps the shader small (compilers inline every call)
     vec3 t1 = normalize(cross(abs(nB.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0), nB));
     vec3 t2 = cross(nB, t1);
     float eps = clamp(fp * 1.5, 2e-5, 0.01);
-    float hn = (h - uHMid) / uHSpan;      // dry worlds: height by quantile (about -0.5 .. 0.5 for 10 .. 90 %)
-    // rough mountains and highlands, smoother plains and lowlands
-    float rough = seas ? 0.25 + 0.75 * smoothstep(sea + 0.01, sea + 0.2, h) : 0.5 + 0.5 * smoothstep(-0.2, 0.45, hn);
-    float dd = detail(nB, fp) * rough;
-    float hd = h + dd * 0.008;
-    vec2 g = vec2(0.0);
-    if (!lite) {
-      vec3 n1 = normalize(nB + t1 * eps), n2 = normalize(nB + t2 * eps);
-      float hx = terrain(n1) + detail(n1, fp) * rough * 0.008;
-      float hy = terrain(n2) + detail(n2, fp) * rough * 0.008;
-      g = vec2(hx - hd, hy - hd) / eps;
+    bool terr = uTerrain > 0.5 && !lite;
+    float fmin = uRadius / (2.5 * max(length(vPosView) * 0.065, 1.0));   // (the patch's vertex spacing there)
+    float low = 0.0, h = 0.0, hn = 0.0, rough = 0.0, dd = 0.0;
+    vec3 hs3 = vec3(0.0);
+    int nFD = lite || terr ? 1 : 3;   // (the landing terrain has its own normal)
+    for (int k = 0; k < 3; k++) {
+      if (k >= nFD) break;
+      vec3 nk = k == 0 ? nB : normalize(nB + (k == 1 ? t1 : t2) * eps);
+      float lk;
+      float tk = terrainX(nk, lk);
+      if (k == 0) {
+        h = tk; low = lk;
+        hn = (h - uHMid) / uHSpan;      // dry worlds: height by quantile (about -0.5 .. 0.5 for 10 .. 90 %)
+        // rough mountains and highlands, smoother plains and lowlands
+        rough = seas ? 0.25 + 0.75 * smoothstep(sea + 0.01, sea + 0.2, h) : 0.5 + 0.5 * smoothstep(-0.2, 0.45, hn);
+      }
+      float dk = detail(nk, fp) * rough;
+      if (k == 0) dd = dk;
+      hs3[k] = tk + dk * 0.008;
+    }
+    vec2 g = nFD == 1 ? vec2(0.0) : vec2(hs3.y - hs3.x, hs3.z - hs3.x) / eps;
+    if (terr) {
+      // slope of the landing terrain's relief, in the height field's units per radian
+      vec3 nG0 = normalize(vTerrN);
+      g = -vec2(dot(nG0, t1), dot(nG0, t2)) / max(dot(nG0, nB), 0.2) / uRelief;
     }
     bool wet = seas && h < sea;
-    if (uTerrain > 0.5 && !lite && !wet) {
-      float fmin = uRadius / (2.5 * max(length(vPosView) * 0.065, 1.0));   // (the patch's vertex spacing there)
-      vec3 m1 = normalize(nB + t1 * eps), m2 = normalize(nB + t2 * eps);
-      float h0 = hills(nB, fp, fmin, rough);
-      hillTilt = (t1 * (hills(m1, fp, fmin, rough) - h0) + t2 * (hills(m2, fp, fmin, rough) - h0)) / (eps * uRadius);
+    if (terr) {
+      // its gradient along the ground from screen derivatives (surface gradient of a height field)
+      float hl = hills(nB, fp, fmin, rough);
+      vec3 dpx = dFdx(vGround), dpy = dFdy(vGround);
+      vec3 nG0 = normalize(vTerrN);
+      vec3 r1 = cross(dpy, nG0), r2 = cross(nG0, dpx);
+      float det = dot(dpx, r1);
+      if (!wet && abs(det) > 1e-12) hillTilt = (dFdx(hl) * r1 + dFdy(hl) * r2) / det;
     }
     // slope of the ground (relief range over the radius); the shading exaggerates it so relief reads
     // from orbit (as it does at low sun on real planets, from slopes far below the pixel)
@@ -497,7 +543,7 @@ void main() {
     float exag = 4.0;
     // craters (airless and thin-aired worlds), large ones first; skipped below a few pixels
     float fresh = 0.0, crat = 0.0;
-    if (uCraters > 0.0 && !wet) {
+    if (uCraters > 0.0 && !wet && uTerrain * uHScale < 0.99) {
       vec3 pm = nB * uRadius;
       float pxm = fp * uRadius;
       vec3 cg = vec3(0.0);
@@ -550,11 +596,17 @@ void main() {
         // beaches and coastal flats
         albedo = mix(albedo, uC2 * 1.1, (1.0 - smoothstep(0.0, 0.006, h - sea)) * smoothstep(275.0, 290.0, T) * 0.6);
       }
-      cloud = clouds(nB, uTime, fp);
       // cloud shadows on the ground (clouds ~0.15 % of the radius up), cloud tops shaded by their thickness
       float muB = dot(nB, sunB);
       vec3 sp = normalize(nB + (sunB - nB * muB) * 0.0025 / max(muB, 0.15));
-      float cs = lite ? cloud : clouds(sp, uTime, fp * 2.0);
+      float cs = 0.0;
+      int nCl = lite ? 1 : 2;
+      for (int k = 0; k < 2; k++) {
+        if (k >= nCl) break;
+        float ck = clouds(k == 0 ? nB : sp, uTime, k == 0 ? fp : fp * 2.0);
+        if (k == 0) cloud = ck; else cs = ck;
+      }
+      if (lite) cs = cloud;
       shadow = 1.0 - 0.75 * cs * smoothstep(-0.05, 0.25, muB);
       cloud = clamp(cloud, 0.0, 1.0) * smoothstep(4000.0, 9000.0, uCamAlt);
       albedo = mix(albedo, vec3(mix(0.62, 0.92, cloud)) * clamp(1.0 - 1.6 * (cs - cloud), 0.55, 1.15), cloud);
@@ -571,10 +623,13 @@ void main() {
       float lake = smoothstep(-0.4, -0.5, hn + 0.1 * var);
       albedo = mix(albedo, uC1 * 0.6, lake);
       // seams between crust plates glow (wider and hotter in the lowlands), small cracks inside them
-      float live = smoothstep(0.5, 0.75, pn(nB * 3.5 + uSeed * 2.2) + 0.3 * smoothstep(0.1, -0.4, hn));
-      float cracks = (smoothstep(0.05, 0.0, seam) * 0.8 + smoothstep(0.04, 0.0, seam2) * 0.3) * live;
+      float live = smoothstep(0.62, 0.85, pn(nB * 3.5 + uSeed * 2.2) + 0.25 * smoothstep(0.1, -0.4, hn));
+      live *= live;
+      float cracks = (smoothstep(0.04, 0.0, seam) * 0.8 + smoothstep(0.03, 0.0, seam2) * 0.3) * live;
       albedo *= 1.0 - 0.5 * cracks;
       emit = uGlow * (cracks + lake * (0.6 + 0.4 * pn(nB * 60.0 + uSeed)));
+      // hotter (yellower) in the middle of wide seams and lakes, dull red at the edges
+      emitColor = mix(vec3(0.9, 0.16, 0.03), vec3(1.0, 0.5, 0.14), clamp(cracks * 1.2 + lake * 0.8, 0.0, 1.0));
       msel = vec4(2.0, 0.0, 3.0, 6.0);           // lava fields: dark rocky ground
     } else if (uType == 5) {
       // ice: bright plains, darker older terrain, long crossing ridges and cracks (lineae, along
@@ -684,7 +739,7 @@ void main() {
   radiance += uAtmoColor * sunL * uAtmo * rim * smoothstep(-0.25, 0.3, mu0) * 0.9 * (1.0 - uTerrain);   // (the sphere's limb only)
   // thermal glow (night side mostly)
   // (scaled to the starlight so it shows at the exposure the lit planet sets)
-  radiance += emitColor * emit * luminance(sunL) * (0.012 + 0.4 * smoothstep(0.2, -0.2, mu0));
+  radiance += emitColor * emit * luminance(sunL) * (0.012 + 0.2 * smoothstep(0.2, -0.2, mu0));
   gl_FragColor = vec4(min(radiance * uExposure, vec3(6.0e4)), 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>

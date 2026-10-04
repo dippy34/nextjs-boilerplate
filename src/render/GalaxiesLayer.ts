@@ -1,6 +1,6 @@
 import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, Points, Quaternion, ShaderMaterial, Vector2, Vector3, Vector4 } from 'three';
 import type { UPos } from '../core/upos';
-import { discFrame, type Galaxy, type GalaxyShape } from '../universe/Galaxies';
+import { discFrame, type Galaxy } from '../universe/Galaxies';
 import { noise3D, sampleNoise } from './Noise3D';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, POINT_CLIP, PROJECT_PARS } from './shaders/xr';
 
@@ -26,8 +26,9 @@ uniform vec4 uRing;    // ring radius, width, young boost, dust boost
 uniform vec4 uBulgeW;  // coefficient, 1/Re, b_n, 1/n
 uniform vec3 uBulgeAx; // 1 / spheroid axes (galaxy frame)
 uniform vec4 uDustP;   // face-on optical depth, 1/dust scale length, extraplanar dust, disc truncation radius
-uniform vec4 uBarP;    // bar half-length, warp, scale of the spiral-coordinate noise along the arms, -
+uniform vec4 uBarP;    // bar half-length, warp, scale of the spiral-coordinate noise along the arms, giant region's blueness
 uniform vec4 uSpot;    // a giant star-forming region (disc frame xyz, coefficient)
+uniform float uSpotW;  // its radius (radii)
 uniform mat3 uDiscRot; // galaxy frame -> disc frame
 const vec3 C_OLD = vec3(1.0, 0.84, 0.67);
 const vec3 C_BULGE = vec3(1.0, 0.79, 0.57);
@@ -58,7 +59,7 @@ void discNoise(vec3 p, float lod) {
   vec4 nB = nz(p * 0.3 + uSeed * 0.53, lod - 1.7);
   gwid = nB.g;
   float lr = log(max(gr, 0.03));
-  gpsi = atan(p.y, p.x) - lr * uArmP.y + uArmP.w + uArmP.z * ((nB.r - 0.5) * 3.0 + (gA.r - 0.5) * 0.8);
+  gpsi = atan(p.y, p.x) - lr * uArmP.y + uArmP.w + uArmP.z * ((nB.r - 0.5) * 2.0 + (gA.r - 0.5) * 0.25);
   gsc = vec3(cos(gpsi) * 0.45, sin(gpsi) * 0.45, lr * uBarP.z + p.z * 1.2) + uSeed * 0.37;
   glodS = lod + log2(0.45 * (1.0 + uArmP.y) / max(gr, 0.05));
   // in the middle, where the spiral winds ever tighter, plain 3D noise instead of spiral streaks
@@ -173,8 +174,8 @@ void main() {
       float bar = uDiscS.w > 0.0 ? exp(-sq(pd.x / uBarP.x) - sq(pd.y / (0.25 * uBarP.x)) - sq(pd.z / 0.04)) : 0.0;
       j += win * (C_OLD * (uDiscW.x * old + uDiscW.y * thick + uDiscS.w * bar) + yv * ym * (C_YOUNG * uDiscW.z + C_HII * uDiscW.w * knots) * uYoungW);
       if (uSpot.w > 0.0) {
-        vec3 dq = pd - uSpot.xyz;
-        j += C_HII * uSpot.w * exp(-dot(dq, dq) / 0.0016) * (0.4 + 1.2 * gS.a) * uYoungW;
+        vec3 dq = (pd - uSpot.xyz) * vec3(1.0, 1.0, 3.3);   // flattened into the disc
+        j += mix(C_HII, C_YOUNG, uBarP.w) * uSpot.w * exp(-dot(dq, dq) / (uSpotW * uSpotW)) * (0.4 + 1.2 * gS.a) * uYoungW;
       }
       if (uDustP.x > 0.0) {
         // dust texture: isotropic clumps and filaments mixed with the streaks along the arms
@@ -295,6 +296,12 @@ interface Look {
   axes?: [number, number, number];
   /** a dusty disc in its own orientation (sky position angle, inclination; degrees) */
   disc?: { pa: number; incl: number };
+  /** the giant region is a blue star cloud (1) rather than a pink H II region (0) */
+  spotBlue?: number;
+  /** its radius (radii; default 0.04) */
+  spotW?: number;
+  /** share of the young light carried by star-cloud sprites up close (default CLOUD_SHARE) */
+  cloudShare?: number;
   /** phase of the arms (rad; default from the seed) */
   armPhase?: number;
   /** a giant star-forming region (disc frame) and its share of the light */
@@ -338,11 +345,11 @@ function lookFor(g: Galaxy, all: Galaxy[] = []): Look {
   }
   const named: Record<string, Partial<Look>> = {
     // a tightly wound, ring-like spiral: the 10 kpc ring of young stars and dust dominates
-    'Andromeda Galaxy': { pitchDeg: 7, irreg: 0.9, ring: [0.47, 0.07, 2.2, 3.0], dust: 1.3, dustHr: 0.6, bulge: 0.3, bulgeRe: 0.05, bulgeN: 2.2, bulgeQ: 0.75, young: 0.1, knots: 0.012 },
+    'Andromeda Galaxy': { pitchDeg: 13, irreg: 0.35, ring: [0.47, 0.09, 1.0, 0.6], dust: 1.4, dustHr: 0.6, bulge: 0.28, bulgeRe: 0.05, bulgeN: 2.2, bulgeQ: 0.75, young: 0.17, knots: 0.03, spot: [-0.42, -0.05, 0, 0.006], spotBlue: 0.85, spotW: 0.07 },
     // flocculent, patchy, with the giant H II region NGC 604
     'Triangulum Galaxy': { pitchDeg: 28, irreg: 1.3, clumpy: 0.35, spot: [0.28, 0.33, 0, 0.012] },
     // the grand-design spiral
-    'Whirlpool Galaxy': { pitchDeg: 19, irreg: 0.4, young: 0.25, knots: 0.07, dust: 1.4, bulge: 0.12, bulgeRe: 0.04 },
+    'Whirlpool Galaxy': { pitchDeg: 19, irreg: 0.25, young: 0.25, knots: 0.07, dust: 1.4, bulge: 0.12, bulgeRe: 0.04 },
     // edge-on discs: a dark lane, with dust filaments rising out of NGC 891's plane
     'NGC 891': { dust: 2.2, extra: 0.6, hz: 0.014 },
     'Needle Galaxy': { dust: 1.6, extra: 0.2, bulge: 0.22, bulgeRe: 0.05, bulgeQ: 0.6 },
@@ -351,11 +358,13 @@ function lookFor(g: Galaxy, all: Galaxy[] = []): Look {
     // a giant elliptical crossed by a warped dusty disc with young stars
     'Centaurus A': { arms: 0, bulge: 0.94, bulgeRe: 0.22, bulgeN: 4, axes: [1, 0.78, 0.78], old: 0, thick: 0, young: 0.035, knots: 0.025, hr: 0.2, clumpy: 0.6, dust: 2.4, dustHr: 0.6, trunc: 0.4, warp: 0.35, disc: { pa: 115, incl: 73 }, ring: [0.2, 0.08, 0.5, 0.5] },
     M87: { bulgeRe: 0.33, bulgeN: 4, axes: [1, 0.93, 0.93] },
+    // the Black Eye: a dense dusty ring across the inner disc, smooth tightly wound arms
+    'Black Eye Galaxy': { pitchDeg: 10, irreg: 0.2, ring: [0.24, 0.07, 0.2, 9], dust: 1.2, dustHr: 0.35 },
     // the Whirlpool's companion: amorphous, crossed by dust
     'NGC 5195': { dust: 0.9, dustHr: 0.5, bulge: 0.6, bulgeRe: 0.1, old: 0.35, irreg: 1.5, clumpy: 0.5 },
     // the LMC: a bar, one arm, patchy star formation (the Tarantula is drawn by the nebulae layer)
-    'Large Magellanic Cloud': { bar: 0.12, barLen: 0.2, knots: 0.08, young: 0.25, clumpy: 0.45 },
-    'Small Magellanic Cloud': { bar: 0.1, barLen: 0.35, hz: 0.08, clumpy: 1 },
+    'Large Magellanic Cloud': { bar: 0.12, barLen: 0.2, knots: 0.08, young: 0.25, clumpy: 0.45, cloudShare: 0.15 },
+    'Small Magellanic Cloud': { bar: 0.1, barLen: 0.35, hz: 0.08, clumpy: 1, cloudShare: 0.15 },
   };
   const look: Look = { ...l, ...(named[g.name] ?? {}) };
   // the Whirlpool's arm reaches out to its companion: an arm crest at r = 1 in its direction
@@ -423,7 +432,7 @@ class GalaxyModel {
     const iYoung = radial((r) => Math.exp(-r / (1.5 * l.hr)) * ymMean(r));
     const iKnots = iYoung * 1.5;
     const iBar = Math.PI ** 1.5 * l.barLen * 0.25 * l.barLen * 0.04;
-    const iSpot = Math.PI ** 1.5 * 0.04 ** 3;
+    const iSpot = Math.PI ** 1.5 * (l.spotW ?? 0.04) ** 3 / 3.3;
     // Sérsic spheroid: tabulated radial distribution (also for sampling)
     const bn = sersicB(l.bulgeN), Re = l.bulgeRe;
     const sMax = Math.min(3, Math.max(this.ext.x, this.ext.y, this.ext.z) / Math.min(...axes));
@@ -460,8 +469,9 @@ class GalaxyModel {
       uBulgeW: { value: new Vector4(c.bulge, 1 / Re, bn, 1 / l.bulgeN) },
       uBulgeAx: { value: new Vector3(1 / axes[0], 1 / axes[1], 1 / axes[2]) },
       uDustP: { value: new Vector4(l.dust, 1 / l.dustHr, l.extra, l.trunc) },
-      uBarP: { value: new Vector4(l.barLen, l.warp, this.alongScale, 0) },
+      uBarP: { value: new Vector4(l.barLen, l.warp, this.alongScale, l.spotBlue ?? 0) },
       uSpot: { value: new Vector4(...(l.spot ? [l.spot[0], l.spot[1], l.spot[2], c.spot] : [0, 0, 0, 0])) },
+      uSpotW: { value: l.spotW ?? 0.04 },
       uDiscRot: { value: this.rot },
     };
   }
@@ -533,7 +543,7 @@ class GalaxyModel {
     this.dA.set(this.nz(px * 0.9 + s * 0.71, py * 0.9 + s * 0.71, pz * 0.9 + s * 0.71));
     const B = this.nz(px * 0.3 + s * 0.53, py * 0.3 + s * 0.53, pz * 0.3 + s * 0.53);
     const lr = Math.log(Math.max(r, 0.03));
-    const psi = Math.atan2(py, px) - lr / this.tanP + this.phase + l.irreg * ((B[0] - 0.5) * 3 + (this.dA[0] - 0.5) * 0.8);
+    const psi = Math.atan2(py, px) - lr / this.tanP + this.phase + l.irreg * ((B[0] - 0.5) * 2 + (this.dA[0] - 0.5) * 0.25);
     return { r, psi, wid: B[1] };
   }
 
@@ -593,7 +603,7 @@ class GalaxyModel {
       // disc parts: radius from a gamma(2) distribution, height from a Laplace one
       let px: number, py: number, pz: number;
       if (comp === 5) { px = gauss() * l.barLen / Math.SQRT2; py = gauss() * 0.25 * l.barLen / Math.SQRT2; pz = gauss() * 0.04 / Math.SQRT2; }
-      else if (comp === 6 && l.spot) { px = l.spot[0] + gauss() * 0.028; py = l.spot[1] + gauss() * 0.028; pz = l.spot[2] + gauss() * 0.028; }
+      else if (comp === 6 && l.spot) { const w = (l.spotW ?? 0.04) / Math.SQRT2; px = l.spot[0] + gauss() * w; py = l.spot[1] + gauss() * w; pz = l.spot[2] + gauss() * w * 0.3; }
       else {
         const hr = comp === 2 ? 1.3 * l.hr : comp >= 3 ? 1.5 * l.hr : l.hr;
         const r = -hr * Math.log(rnd() * rnd() + 1e-12);
@@ -654,7 +664,8 @@ function* fillCloud(model: GalaxyModel, star: Float32Array, flux: Float32Array, 
   state: { n: number; stars: number; clouds: number }): Generator<void> {
   const r = mulberry(model.g.seed + 0.123);
   const red = [1.0, 0.66, 0.42];
-  const cols = [C_BULGE, C_OLD, C_OLD, C_YOUNG, C_HII, C_OLD, C_HII];
+  const sb = model.look.spotBlue ?? 0;
+  const cols = [C_BULGE, C_OLD, C_OLD, C_YOUNG, C_HII, C_OLD, C_HII.map((v, i) => v + (C_YOUNG[i] - v) * sb)];
   const B = model.bright;
   state.n = 0; state.stars = 0; state.clouds = 0;
   // single stars: blue supergiants where stars are young, red giants everywhere; a steep
@@ -677,7 +688,7 @@ function* fillCloud(model: GalaxyModel, star: Float32Array, flux: Float32Array, 
     // young star clouds, a few thousandths to a hundredth of a radius, and smaller H II knots
     const size = comp === 4 || comp === 6 ? 0.002 + 0.005 * r() : Math.min(0.004 + 0.012 * r(), 2 * hz + 0.002);
     const c = cols[comp];
-    const f = (CLOUD_SHARE * fy * B) / nClouds;
+    const f = ((model.look.cloudShare ?? CLOUD_SHARE) * fy * B) / nClouds;
     const n = state.n++;
     star[n * 4] = x; star[n * 4 + 1] = y; star[n * 4 + 2] = z; star[n * 4 + 3] = size;
     flux[n * 3] = c[0] * f; flux[n * 3 + 1] = c[1] * f; flux[n * 3 + 2] = c[2] * f;
@@ -884,9 +895,8 @@ export class GalaxiesLayer {
       // (as far as the cloud is filled yet)
       const ws = g === near && g === this.cloudOf ? wStars * this.fill.stars : 0, wc = g === near && g === this.cloudOf ? wClouds * this.fill.clouds : 0;
       u.uWeight.value = 1 - STAR_SHARE * ws;
-      u.uYoungW.value = (1 - STAR_SHARE * ws - CLOUD_SHARE * wc) / (1 - STAR_SHARE * ws);
+      u.uYoungW.value = (1 - STAR_SHARE * ws - (this.models.get(g)!.look.cloudShare ?? CLOUD_SHARE) * wc) / (1 - STAR_SHARE * ws);
     }
   }
 }
 
-export type { GalaxyShape };

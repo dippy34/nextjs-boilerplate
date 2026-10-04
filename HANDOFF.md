@@ -173,10 +173,29 @@ Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/ele
   nothing loaded covers the point; blends adjacent levels; `lastMetresPerSample`/`lastLevel` say
   what it used), `maxLevelAt(body, dir)`, `exists`, `loaded`, `version(body)`; helpers
   `faceToDir`, `dirToFace`, `tileOf`, `decodePng16` (own PNG decoder over `DecompressionStream`,
-  so heights stay exact 16-bit). LRU cache, 96 MB default, levels 0-1 never evicted.
-* Regenerate: `cd pipeline && python3 build_elevation.py [body ...]` (downloads ~14 GB once).
+  so heights stay exact 16-bit). LRU cache, 24 MB default, levels 0-1 never evicted.
+* Regional levels (`pipeline/elevation_hires.py`, run by the build or `python3 build_elevation.py
+  hires [earth|moon]`): Earth L8/L9 (153/76 m, 1551 tiles, 90 MB) from Copernicus DEM GLO-90 over the
+  Alps, Everest Himalaya, Aconcagua, Grand Canyon, Kilimanjaro, Mauna Kea, Fuji, Denali; Moon L6/L7
+  (167/83 m, 881 tiles, 45 MB) from SLDEM2015 in 10 x 10 degree boxes around the Apollo 11/15/17
+  sites, Chang'e 4, Tycho, Copernicus. These levels list their tiles (`list`: flat face, x, y) instead
+  of a bitmap. Elevation total now ~475 MB; the whole site ~910 MB (keep it under ~950).
+* Reference surface for consumers: heights are metres above the body's ellipsoid (`radii`), exactly
+  like the older `terrain/*.png` maps (Moon: the 1737.4 km sphere). `referenceRadius` is the mean
+  radius for `metresPerSample` only. The tile worker (`workers/terrainTiles.worker.ts`) uses them so.
+* Checked in the app (vite preview, software GL): flying to Everest, the Matterhorn and Apollo 17
+  requests levels 8-9 (Earth) and 6-7 (Moon) and the ground under Everest is at +8.5 km, Apollo 17 at
+  -2.6 km. Each tile worker fetches and decodes its own copy (~90 tiles, ~12 MB per worker per descent).
+* Memory: each `ElevationStore` caps decoded tiles at 24 MB by default (about 180 tiles, 2x a
+  descent's working set; tested in `tests/elevation.test.ts`). With 3-4 tile workers that is at
+  most ~100 MB on Quest. A cache shared between workers would need SharedArrayBuffer (cross-origin
+  isolation, not available on GitHub Pages); routing all `sample` calls through one worker is the
+  alternative if memory gets tight.
+* Regenerate: `cd pipeline && python3 build_elevation.py [body ...]` (downloads ~14 GB once, plus
+  ~0.6 GB of Copernicus tiles and SLDEM rows by range requests).
 * Mercury's older `public/data/terrain/mercury.png` was twice too tall: `terrain.json` now applies
-  the GeoTIFF's 0.5 m scale (and `build_terrain.py` bakes it in on a rebuild). Mars/Earth heights are relative to the
+  the GeoTIFF's 0.5 m scale (and `build_terrain.py` bakes it in on a rebuild); the pyramids were
+  always right. Mars/Earth heights are relative to the
   areoid/geoid but the engine adds them to the ellipsoid (as before: the difference is a smooth,
   very long-wavelength undulation, kilometre-scale on Mars, ~100 m on Earth). Earth land below sea level (Dead Sea, Caspian) is stored as ocean in the fine levels.
 

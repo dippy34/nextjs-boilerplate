@@ -21,7 +21,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
 // ground, so a batch of frames can take minutes; allow it the time (a real GPU / Quest is far faster).
 const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 480000 }); };
 
-await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 // software rendering runs at a few frames per second: let the terrain build in fewer frames
 await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
@@ -203,7 +203,7 @@ console.log('fps', JSON.stringify(st));
 
 // 7, 8. landmarks with sharper regional elevation patches (LOLA 128 px/deg, MOLA 463 m), from where
 // "go to" arrives, at a time when the Sun is 20 degrees up there
-await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
 for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8-olympus-patch', 'Olympus Mons', 'Mars', 'mars'], ['t9-everest', 'Mount Everest', 'Earth', 'earth']]) {
@@ -234,7 +234,8 @@ for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8
   await page.waitForFunction((b) => window.app.terrain.owner?.name === b, body, { timeout: 120000 }).catch(() => undefined);
   await frames(30);
   st = await page.evaluate((k) => ({ version: window.app.bodies.terrainSource.versions.get(k) ?? 0, owner: window.app.terrain.owner?.name ?? null,
-    haze: window.app.terrain.group.children.find((m) => m.name === 'terrain haze')?.visible ?? false }), key);
+    // per-tile haze meshes (planet-wide terrain): any of them drawn
+    haze: window.app.terrain.group.children.some((m) => m.name === 'terrain haze' && m.visible) }), key);
   check(`${id}: sharper elevation patch loaded and drawn`, st.version > 0 && st.owner === body, JSON.stringify(st));
   if (body !== 'Moon') check(`${id}: the atmosphere is drawn over the terrain`, st.haze);
   await page.screenshot({ path: path.join(outDir, `${id}.png`), timeout: 180000 });

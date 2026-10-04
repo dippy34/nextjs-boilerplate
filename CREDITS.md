@@ -300,7 +300,8 @@ Whole-world heights for terrain seen from orbit down to the ground, as cube-face
 (16-bit PNG, 257 x 257 samples per tile). Every level down to about 2.7 km (Moon), 5.2 km (Mars),
 9.8 km (Earth), 3.7 km (Mercury), 1.4 km (Ceres) and 0.8 km (Vesta) covers the whole body; deeper
 levels hold the tiles that add the most detail, plus those around the landmarks, down to the
-resolution of the source. All sources are public domain (U.S. Government works / NASA mission data):
+resolution of the source. All sources are public domain (U.S. Government works / NASA mission data)
+except Copernicus DEM GLO-90 (free use with attribution, below):
 
 | Body | Source | Finest level | Credit / licence |
 |---|---|---|---|
@@ -309,6 +310,8 @@ resolution of the source. All sources are public domain (U.S. Government works /
 | Earth | **NOAA NCEI ETOPO 2022** 15 arc-second surface elevation (288 tiles of 15°), DOI 10.25921/fd45-gt74, <https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/15s_surface_elev_gtif/> | 305 m | NOAA — U.S. Government work, no restrictions |
 | Mercury | **MESSENGER** USGS global DEM 665 m v2 (`Mercury_Messenger_USGS_DEM_Global_665m_v2.tif`), USGS Astrogeology | 468 m | NASA/JHUAPL/Carnegie Institution of Washington, USGS — public domain |
 | Ceres | **Dawn** FC HAMO DTM (DLR) 60 px/deg (`Ceres_Dawn_FC_HAMO_DTM_DLR_Global_60ppd_Oct2016.tif`), USGS Astrogeology | 180 m | NASA/JPL-Caltech/UCLA/MPS/DLR/IDA — public domain |
+| Moon, regional (167 m / 83 m around the Apollo 11, 15, 17 sites, Chang'e 4, Tycho, Copernicus) | **SLDEM2015** (LRO LOLA + SELENE Terrain Camera, 512 px/deg, ~59 m, Barker et al. 2016, *Icarus* 273, 346), PDS Geosciences Node, <https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/sldem2015/> | 83 m | NASA/GSFC LOLA team, JAXA SELENE — public domain (NASA PDS) |
+| Earth, regional (153 m / 76 m over the Alps, the Everest Himalaya, the Aconcagua Andes, the Grand Canyon, Kilimanjaro, Mauna Kea, Fuji, Denali) | **Copernicus DEM GLO-90** (3″, ~90 m), AWS open data `copernicus-dem-90m` | 76 m | produced using Copernicus WorldDEM-90 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. Free of charge for any use under the Copernicus DEM licence, with this attribution |
 | Vesta | **Dawn** FC HAMO DTM (DLR) 48 px/deg (`Vesta_Dawn_HAMO_DTM_DLR_Global_48ppd.tif`), USGS Astrogeology | 200 m | NASA/JPL-Caltech/UCLA/MPS/DLR/IDA — public domain |
 
 Heights are converted to the engine's reference surfaces: the IAU ellipsoids for Mercury (from the

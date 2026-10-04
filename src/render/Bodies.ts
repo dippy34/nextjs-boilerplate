@@ -349,6 +349,8 @@ export class BodiesLayer {
       name: isStar ? 'sun-surface' : 'body',
       vertexShader: BODY_VERT,
       fragmentShader: isStar ? STAR_FRAG : BODY_FRAG,
+      // Earth's cloud code is compiled into Earth's program only (BODY_FRAG: #ifdef CLOUDS)
+      defines: !isStar && b.name === 'Earth' ? { CLOUDS: 1 } : {},
       uniforms: {
         uMap: { value: null }, uHasMap: { value: 0 }, uMapGray: { value: mapInfo?.channels === 'L' ? 1 : 0 },
         uNight: { value: null }, uHasNight: { value: 0 },

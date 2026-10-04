@@ -7,8 +7,8 @@
    "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA Dawn FC HAMO DTM (DLR) 60 px/deg, via USGS Astrogeology"
   },
   "earth": {
-   "maxLevel": 7,
-   "bytes": 79999861,
+   "maxLevel": 9,
+   "bytes": 169999631,
    "credit": "NOAA NCEI ETOPO 2022 15 arc-second Global Relief Model (surface), DOI 10.25921/fd45-gt74"
   },
   "mars": {
@@ -22,8 +22,8 @@
    "credit": "NASA/JHUAPL/CIW MESSENGER, USGS global DEM 665 m v2, via USGS Astrogeology"
   },
   "moon": {
-   "maxLevel": 5,
-   "bytes": 114974517,
+   "maxLevel": 7,
+   "bytes": 159973955,
    "credit": "NASA/GSFC/MIT LRO LOLA gridded elevation LDEM_128 (128 px/deg), PDS Geosciences Node"
   },
   "vesta": {

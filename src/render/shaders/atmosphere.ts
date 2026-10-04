@@ -73,7 +73,9 @@ void main() {
   if (ta.y <= 0.0 || ta.x > ta.y) discard;
   float t0 = max(ta.x, 0.0);
   float t1 = ta.y;
-  vec2 tp = hitSphere(uO, d, uRp);
+  // the ground: the reference sphere, or just under the camera where the real ground lies below it
+  // (Gale Crater is 4.5 km under Mars's reference radius; the terrain covers whatever lies below)
+  vec2 tp = hitSphere(uO, d, min(uRp, length(uO) - 20.0));
   bool ground = tp.x <= tp.y && tp.y > 0.0;
   if (ground) t1 = min(t1, max(tp.x, 0.0));
   float ds = (t1 - t0) / float(uSteps);
@@ -122,7 +124,9 @@ export const ATMO_HAZE_FRAG = ATMO_FRAG
   if (ta.y <= 0.0 || ta.x > ta.y) discard;
   float t0 = max(ta.x, 0.0);
   float t1 = ta.y;
-  vec2 tp = hitSphere(uO, d, uRp);
+  // the ground: the reference sphere, or just under the camera where the real ground lies below it
+  // (Gale Crater is 4.5 km under Mars's reference radius; the terrain covers whatever lies below)
+  vec2 tp = hitSphere(uO, d, min(uRp, length(uO) - 20.0));
   bool ground = tp.x <= tp.y && tp.y > 0.0;
   if (ground) t1 = min(t1, max(tp.x, 0.0));`, `  vec3 pe = uToBody * vPosView;
   float te = length(pe);

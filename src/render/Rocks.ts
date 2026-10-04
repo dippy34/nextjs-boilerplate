@@ -1,12 +1,12 @@
 import {
   BufferGeometry, CircleGeometry, Color, CustomBlending, DoubleSide, Group, HalfFloatType, IcosahedronGeometry, InstancedBufferAttribute, InstancedMesh,
-  Matrix4, NearestFilter, MaxEquation, NoBlending, OneFactor, OrthographicCamera, Quaternion, RGBAFormat, Scene, ShaderMaterial, Vector3, Vector4,
+  Matrix4, NearestFilter, MaxEquation, NoBlending, OneFactor, OrthographicCamera, Quaternion, RGFormat, Scene, ShaderMaterial, Vector3, Vector4,
   WebGLRenderTarget, type WebGLRenderer,
 } from 'three';
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { UPos } from '../core/upos';
 import { baseRadius, vnoise } from '../universe/Terrain';
-import { MAT, MATERIALS, ROCK_SHADOW_GLSL } from './Materials';
+import { adaptMaterials, MAT, MATERIALS, ROCK_SHADOW_GLSL } from './Materials';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import type { TerrainPatch } from './TerrainPatch';
 
@@ -221,8 +221,9 @@ const TIERS: Tier[] = [
   { cell: 40, reach: 320, reachVr: 220, perCell: 0.5, min: 1.2, max: 7, slope: 2.6, seed: 53 },
 ];
 const SHAPES = 6;
-/** rocks larger than this (m) use the detailed shapes */
+/** rocks larger than this (m) use the detailed shapes; smaller than SMALL, the simplest */
 const BIG = 0.7;
+const SMALL = 0.15;
 
 interface RockCell { key: string; serial: number; pos: Float64Array; data: Float32Array; n: number; reach: number }
 // per rock in RockCell.data: size, turn, stretch, height, shape, tilt x, tilt y, tilt z (up), brightness, sun clearance, map u, map v,
@@ -266,6 +267,10 @@ export class Rocks {
   private shCam = new OrthographicCamera();
   /** half-sizes (m) of the areas the shadow map's two cascades cover around the explorer */
   shadowReach: [number, number];
+  /** what the shadow map holds: its body-fixed centre, Sun and vertical, and the rocks it was drawn with */
+  private shadowState = { valid: false, centre: new Vector3(), sun: new Vector3(), up: new Vector3(), fills: -1 };
+  /** counts the rebuilds of the instances */
+  private fills = 0;
   shadows = true;
 
   constructor(private terrain: TerrainPatch, vr = false) {
@@ -284,10 +289,10 @@ export class Rocks {
       // opaque, but in the transparent pass like the terrain (after the atmosphere shell)
       transparent: true, blending: NoBlending,
     });
-    const size = vr ? 1024 : 2048;
-    this.shadowReach = vr ? [10, 60] : [16, 110];
+    const size = vr ? 512 : 1024;
+    this.shadowReach = vr ? [10, 60] : [13, 100];
     MATERIALS.uRockTexel.value.set(1 / (2 * size), 1 / size);
-    this.target = new WebGLRenderTarget(2 * size, size, { type: HalfFloatType, format: RGBAFormat, depthBuffer: false, minFilter: NearestFilter, magFilter: NearestFilter, generateMipmaps: false });
+    this.target = new WebGLRenderTarget(2 * size, size, { type: HalfFloatType, format: RGFormat, depthBuffer: false, minFilter: NearestFilter, magFilter: NearestFilter, generateMipmaps: false });
     const blend = { blending: CustomBlending, blendEquation: MaxEquation, blendSrc: OneFactor, blendDst: OneFactor, depthTest: false, depthWrite: false, side: DoubleSide };
     this.shMat = new ShaderMaterial({ name: 'rock-shadow', vertexShader: SHADOW_VERT, fragmentShader: SHADOW_FRAG, uniforms: { uM: { value: new Matrix4() }, uLo: { value: 0 } }, ...blend });
     this.aoMat = new ShaderMaterial({ name: 'rock-contact', vertexShader: AO_VERT, fragmentShader: AO_FRAG, uniforms: { uM: { value: new Matrix4() }, uLo: { value: 0 } }, ...blend });
@@ -295,10 +300,12 @@ export class Rocks {
     this.shGroup.matrixAutoUpdate = false;
     this.shScene.add(this.shGroup);
     this.shScene.matrixWorldAutoUpdate = true;
-    for (const big of [false, true]) {
+    // three levels of detail: pebbles (80 triangles), stones, boulders
+    for (const lod of [0, 1, 2]) {
       for (let k = 0; k < SHAPES; k++) {
-        const n = big ? Math.ceil(this.cap / 10) : Math.ceil(this.cap / SHAPES);
-        const m = new InstancedMesh(rockGeometry(k * 17 + 2, big ? (vr ? 3 : 4) : (vr ? 1 : 2)), this.mat, n);
+        const n = Math.ceil((this.cap * [0.75, 0.35, 0.06][lod]) / SHAPES) + 8;
+        const detail = [[1, 2, 4], [1, 1, 3]][vr ? 1 : 0][lod];
+        const m = new InstancedMesh(rockGeometry(k * 17 + 2, detail), this.mat, n);
         m.geometry.setAttribute('aRock', new InstancedBufferAttribute(new Float32Array(n * 4), 4));
         m.count = 0;
         m.frustumCulled = false;
@@ -321,10 +328,11 @@ export class Rocks {
 
   /** Per frame, after the terrain patch. `cam`: the explorer's position; `gl` renders the shadow map. */
   update(cam: UPos, gl?: WebGLRenderer): void {
+    if (gl) adaptMaterials(gl);
     const t = this.terrain;
     const c = t.current;
     const below = t.below(cam);
-    const hide = () => { this.group.visible = false; MATERIALS.uRockOn.value = 0; };
+    const hide = () => { this.group.visible = false; MATERIALS.uRockOn.value = 0; this.shadowState.valid = false; };
     if (!c || !below || t.hScale < 0.99 || below.dist - below.ground > 700) { hide(); return; }
     const g = c.ground;
     const density = this.density(c);
@@ -401,7 +409,7 @@ export class Rocks {
     m.uLayer.value = u.uMatSel ? (u.uMatMode?.value === 3 ? MAT.snow : MAT.cliff) : MAT.cliff;
     this.group.visible = true;
     // shadow map around the ground below the explorer
-    if (gl && this.shadows) this.renderShadows(gl, below.dir.clone().multiplyScalar(R).applyQuaternion(q).add(rel), below.dir.clone().applyQuaternion(q), u.uSunDir.value as Vector3);
+    if (gl && this.shadows) this.renderShadows(gl, c, below.dir.clone().multiplyScalar(R), below.dir.clone(), cam);
     else MATERIALS.uRockOn.value = 0;
   }
 
@@ -437,25 +445,43 @@ export class Rocks {
     sky.set(out[0], out[1], out[2]);
   }
 
-  private renderShadows(gl: WebGLRenderer, centre: Vector3, up: Vector3, sun: Vector3): void {
-    if (sun.dot(up) < -0.05) { MATERIALS.uRockOn.value = 0; return; }
-    // (u, v, depth) from camera-relative world positions, across the sunlight and seen from above,
-    // for a cascade covering +-E metres in one half of the target
-    const proj = (z: Vector3, out: Matrix4, depth: boolean, E: number, half: number) => {
-      const x = new Vector3().crossVectors(Math.abs(z.y) < 0.9 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0), z).normalize();
+  /**
+   * The shadow map is laid out in the body-fixed frame (around the ground below the explorer, across
+   * the sunlight and from above) and drawn again only when the explorer has moved, the Sun has
+   * turned or the rocks have changed; each frame only the receivers' matrices follow the camera.
+   */
+  private renderShadows(gl: WebGLRenderer, c: NonNullable<TerrainPatch['current']>, centreBF: Vector3, upBF: Vector3, cam: UPos): void {
+    const sunBF = c.sunBF;
+    if (sunBF.dot(upBF) < -0.05) { MATERIALS.uRockOn.value = 0; return; }
+    const st = this.shadowState;
+    const redraw = !st.valid || st.fills !== this.fills || st.centre.distanceTo(centreBF) > 0.2 || st.sun.angleTo(sunBF) > 0.002;
+    if (redraw) { st.centre.copy(centreBF); st.sun.copy(sunBF); st.up.copy(upBF); st.fills = this.fills; st.valid = true; }
+    // body-fixed (u, v, depth) of a cascade covering +-E metres in one half of the target ...
+    const projBF = (z: Vector3, out: Matrix4, depth: boolean, E: number, half: number) => {
+      const x = new Vector3().crossVectors(Math.abs(z.z) < 0.9 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0), z).normalize();
       const y = new Vector3().crossVectors(z, x);
       const k = 1 / (2 * E);
+      const o = st.centre;
       out.set(
-        x.x * k * 0.5, x.y * k * 0.5, x.z * k * 0.5, (0.5 - centre.dot(x) * k) * 0.5 + half * 0.5,
-        y.x * k, y.y * k, y.z * k, 0.5 - centre.dot(y) * k,
-        depth ? z.x : 0, depth ? z.y : 0, depth ? z.z : 0, depth ? -centre.dot(z) : 0,
+        x.x * k * 0.5, x.y * k * 0.5, x.z * k * 0.5, (0.5 - o.dot(x) * k) * 0.5 + half * 0.5,
+        y.x * k, y.y * k, y.z * k, 0.5 - o.dot(y) * k,
+        depth ? z.x : 0, depth ? z.y : 0, depth ? z.z : 0, depth ? -o.dot(z) : 0,
         0, 0, 0, 1);
     };
+    // ... applied to camera-relative world positions: world -> body-fixed first
+    const toBF = new Matrix4().extractRotation(c.orient).transpose();
+    const rel = c.upos.sub(cam, new Vector3());
+    toBF.multiply(new Matrix4().makeTranslation(-rel.x, -rel.y, -rel.z));
     const [nearE, farE] = this.shadowReach;
-    proj(sun, MATERIALS.uRockShM.value, true, nearE, 0);
-    proj(sun, MATERIALS.uRockShM1.value, true, farE, 1);
-    proj(up, MATERIALS.uRockAOM.value, false, nearE, 0);
-    proj(up, MATERIALS.uRockAOM1.value, false, farE, 1);
+    const M = MATERIALS;
+    const set = (out: Matrix4, z: Vector3, depth: boolean, E: number, half: number) => { projBF(z, out, depth, E, half); out.multiply(toBF); };
+    set(M.uRockShM.value, st.sun, true, nearE, 0);
+    set(M.uRockShM1.value, st.sun, true, farE, 1);
+    set(M.uRockAOM.value, st.up, false, nearE, 0);
+    set(M.uRockAOM1.value, st.up, false, farE, 1);
+    M.uRockMap.value = this.target.texture;
+    M.uRockOn.value = 1;
+    if (!redraw) return;
     this.shGroup.matrix.copy(this.group.matrix);
     this.shGroup.matrixWorldNeedsUpdate = true;
     this.shMeshes.forEach((s, i) => { s.count = this.meshes[i].count; });
@@ -470,21 +496,22 @@ export class Rocks {
     gl.clear(true, false, false);
     // both passes in one target: R keeps the largest depth, G the strongest contact shading
     // (each cascade's matrices already map into its half of the target)
-    for (const [mat, M0, M1, on, off] of [[this.shMat, MATERIALS.uRockShM.value, MATERIALS.uRockShM1.value, this.shMeshes, this.aoMeshes], [this.aoMat, MATERIALS.uRockAOM.value, MATERIALS.uRockAOM1.value, this.aoMeshes, this.shMeshes]] as const) {
+    for (const [mat, M0, M1, off] of [[this.shMat, M.uRockShM.value, M.uRockShM1.value, this.aoMeshes], [this.aoMat, M.uRockAOM.value, M.uRockAOM1.value, this.shMeshes]] as const) {
       for (const m of off) m.visible = false;
-      for (const [k, M] of [M0, M1].entries()) {
-        mat.uniforms.uM.value.copy(M);
+      const on = off === this.aoMeshes ? this.shMeshes : this.aoMeshes;
+      for (const [k, Mk] of [M0, M1].entries()) {
+        mat.uniforms.uM.value.copy(Mk);
         mat.uniforms.uLo.value = k * 0.5;
+        // the far cascade only needs the large rocks (pebbles' shadows are under a pixel out there)
+        if (k === 1) on.forEach((m, i) => { m.visible = i >= 2 * SHAPES; });
         gl.render(this.shScene, this.shCam);
       }
+      for (const m of on) m.visible = true;
       for (const m of off) m.visible = true;
-      void on;
     }
     gl.setRenderTarget(prev);
     gl.setClearColor(clear, ca);
     gl.xr.enabled = xr;
-    MATERIALS.uRockMap.value = this.target.texture;
-    MATERIALS.uRockOn.value = 1;
   }
 
   /** Rocks per cell relative to the lunar maria (1): fewer on worlds with soil and plants. */
@@ -598,6 +625,7 @@ export class Rocks {
   /** Rebuild the instance matrices relative to the current origin. */
   private fill(): void {
     this.dirty = false;
+    this.fills++;
     const counts = this.meshes.map(() => 0);
     const mtx = new Matrix4(), q = new Quaternion(), q2 = new Quaternion(), sc = new Vector3(), p = new Vector3(), up = new Vector3();
     const Y = new Vector3(0, 1, 0);
@@ -611,7 +639,7 @@ export class Rocks {
         const grow = fd < 0.8 ? 1 : Math.max(0, 1 - (fd - 0.8) / 0.2);
         if (grow <= 0.02) continue;
         const size = c.data[o] * grow;
-        const k = c.data[o + 4] + (c.data[o] > BIG ? SHAPES : 0);
+        const k = c.data[o + 4] + (c.data[o] > BIG ? 2 * SHAPES : c.data[o] > SMALL ? SHAPES : 0);
         const mesh = this.meshes[k];
         if (counts[k] >= mesh.instanceMatrix.count) continue;
         up.set(c.data[o + 5], c.data[o + 6], c.data[o + 7]);
