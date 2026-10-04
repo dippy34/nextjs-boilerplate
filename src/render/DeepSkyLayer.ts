@@ -112,7 +112,7 @@ uniform sampler3D uNoise;
 uniform vec3 uCenter;   // camera-relative (m)
 uniform float uRadius;  // m
 uniform mat3 uRot;      // world -> nebula frame
-uniform float uType;    // 0 emission, 1 planetary, 2 supernova remnant
+uniform float uType;    // 0 emission, 1 planetary, 2 supernova remnant, 3 reflection
 uniform float uShape;
 uniform float uSeed;
 uniform float uGain;
@@ -122,7 +122,7 @@ uniform float uPixAng;
 uniform vec3 uAxes;     // envelope axes (nebula frame, radii)
 uniform vec3 uAxis;     // symmetry axis (nebula frame)
 uniform vec4 uP;        // emission: cavity radius, pillars, lanes, [O III] extent
-uniform vec4 uQ;        // emission: filaments, pillar angular scale, -, reflection
+uniform vec4 uQ;        // emission: filaments, pillar angular scale, ionisation-front bar, reflection
 varying vec3 vPos;
 float sq(float x) { return x * x; }
 vec4 nz(vec3 p, float lod) { return textureLod(uNoise, p, max(lod, 0.0)); }
@@ -163,6 +163,13 @@ void emission(vec3 p, float lod, out vec3 e, out float dust) {
   float oiii = 1.0 - smoothstep(uP.w * 0.5, uP.w * 1.4, rp + 0.3 * (n1.a - 0.5));
   vec3 tint = mix(mix(vec3(1.0, 0.16, 0.26), vec3(1.0, 0.32, 0.38), n0.r), vec3(0.32, 0.95, 0.82), oiii * 0.8);
   e = tint * dens * ion * 6.0;
+  if (uQ.z > 0.0) {
+    // an ionisation front seen edge-on: a bright straight ridge beside the cluster (Orion's Bright Bar)
+    vec3 bc = vec3(0.1, -0.16, 0.12), bn = normalize(vec3(0.55, 0.85, 0.0)), ba = normalize(vec3(0.85, -0.55, 0.0));
+    vec3 dq = p - bc;
+    float bar = exp(-sq(dot(dq, bn) / 0.025) - sq(dq.z / 0.12)) * smoothstep(0.24, 0.1, abs(dot(dq, ba)));
+    e += mix(vec3(1.0, 0.35, 0.35), vec3(0.9, 0.85, 0.6), 0.4) * bar * uQ.z * (0.6 + 0.8 * n1.g) * ion * 3.0;
+  }
   dust = 0.0;
   if (uP.y > 0.0) {
     // pillars: a few short columns of dense dust in the walls, pointing at the stars (noise of the
@@ -290,6 +297,26 @@ void remnant(vec3 p, float lod, out vec3 e) {
   }
 }
 
+// a reflection nebula: dust lit by the cluster's hot stars, blue, in fine parallel striations
+// (the Pleiades' nebulosity is a cloud the cluster is passing through, combed by its light)
+void reflection(vec3 p, float lod, out vec3 e) {
+  float r = length(p);
+  vec3 q = p * vec3(1.0, 4.0, 1.0);                 // striations along x
+  vec4 n0 = nz(p * 0.5 + sd, lod - 1.0);
+  vec4 n1 = nz(q * 0.9 + sd * 1.3 + (n0.xyz - 0.5) * 0.5, lod + 1.85);
+  vec4 n2 = hi ? nz(q * 2.4 + sd * 1.7, lod + 3.26) : vec4(0.5);
+  float dens = thr(n0.r, 0.3, 0.75, lod - 1.0) * (0.3 + 1.4 * n1.g * (0.5 + n2.b)) * (1.0 - smoothstep(0.55, 1.0, r));
+  // lit by the bright stars near the middle
+  float lit = 0.0;
+  for (int k = 0; k < 5; k++) {
+    vec3 sp = (vec3(fract(sin(float(k) * 12.9898 + uSeed * 78.233) * 43758.5453), fract(sin(float(k) * 39.346 + uSeed * 11.135) * 43758.5453),
+      fract(sin(float(k) * 73.156 + uSeed * 52.235) * 43758.5453)) - 0.5) * 0.5;
+    vec3 d = p - sp;
+    lit += 1.0 / (0.01 + dot(d, d) * 12.0);
+  }
+  e = vec3(0.42, 0.58, 1.0) * dens * lit * 0.08;
+}
+
 void main() {
   vec3 dir = uRot * normalize(vPos);
   vec3 oc = uRot * (-uCenter / uRadius);
@@ -318,7 +345,8 @@ void main() {
     float dust = 0.0;
     if (uType < 0.5) emission(p, lod, e, dust);
     else if (uType < 1.5) planetary(p, lod, e);
-    else remnant(p, lod, e);
+    else if (uType < 2.5) remnant(p, lod, e);
+    else reflection(p, lod, e);
     col += T * e * dt;
     T *= exp(-dust * dt);
   }
@@ -335,7 +363,7 @@ void main() {
     }
   }
   // the dying star at a planetary nebula's centre, the pulsar in the Crab
-  if (uType > 0.5 && uType < 1.5 || uType > 1.5 && uShape < 0.5) {
+  if (uType > 0.5 && uType < 1.5 || uType > 1.5 && uType < 2.5 && uShape < 0.5) {
     float ts = dot(-oc, dir);
     if (ts > 0.0) {
       float d = length(oc + dir * ts) / max(ts, 1e-3);
@@ -356,6 +384,8 @@ interface NebLook {
   /** emission: filaments, pillar angular scale, -, reflection */
   q?: [number, number, number, number];
   bright?: number;
+  /** a reflection nebula around a cluster */
+  reflection?: boolean;
   /** planetary / remnant: tilt of the symmetry axis from our line of sight (degrees) */
   tilt?: number;
 }
@@ -366,7 +396,7 @@ interface NebLook {
  * 4 Cat's Eye. Remnants: 0 filled (Crab), 1 thin shell (Veil), 2 knotty shell (Cas A).
  */
 const LOOKS: Record<string, NebLook> = {
-  'Orion Nebula': { shape: 2, axes: [1, 1, 0.7], p: [0.15, 0, 0.8, 0.3], q: [1.2, 3, 0, 0.4], bright: 1.6 },
+  'Orion Nebula': { shape: 2, axes: [1, 1, 0.7], p: [0.15, 0, 0.8, 0.3], q: [1.2, 3, 1.0, 0.4], bright: 1.6 },
   'Eagle Nebula': { shape: 0, axes: [1, 1.1, 0.85], p: [0.3, 2.0, 0.3, 0.3], q: [1.0, 1.1, 0, 0] },
   'Lagoon Nebula': { shape: 0, axes: [1, 0.6, 0.7], p: [0.2, 0.3, 1.1, 0.2], q: [1.0, 3, 0, 0.2] },
   'Carina Nebula': { shape: 0, axes: [1, 0.85, 0.8], p: [0.25, 0.8, 1.1, 0.35], q: [1.1, 2.6, 0, 0.1], bright: 2.2 },
@@ -377,6 +407,7 @@ const LOOKS: Record<string, NebLook> = {
   'Omega Nebula': { shape: 0, axes: [1, 0.7, 0.7], p: [0.2, 0.3, 0.6, 0.3], q: [1.2, 3, 0, 0], bright: 1.3 },
   'California Nebula': { shape: 0, axes: [1, 0.3, 0.4], p: [0.2, 0.2, 0.4, 0.1], q: [1.4, 3, 0, 0] },
   'Heart Nebula': { shape: 1, axes: [1, 0.9, 0.9], p: [0.4, 0.6, 0.4, 0.2], q: [1.0, 3, 0, 0] },
+  Pleiades: { shape: 0, reflection: true, bright: 1.6 },
   'Ring Nebula': { shape: 0, tilt: 25 },
   'Helix Nebula': { shape: 3, tilt: 18 },
   'Southern Ring Nebula': { shape: 0, tilt: 45 },
@@ -419,7 +450,7 @@ export class DeepSkyLayer {
     const noise = noise3D().tex;
     for (const o of objects) {
       const k = o.data.kind;
-      if (k === 'open') continue;
+      if (k === 'open' && !LOOKS[o.name]?.reflection) continue;
       if (k === 'globular') {
         const m = new Mesh(quad, new ShaderMaterial({
           name: 'cluster-glow', vertexShader: BILL_VERT, fragmentShader: GLOW_FRAG,
@@ -459,7 +490,7 @@ export class DeepSkyLayer {
       const ey = new Vector3().crossVectors(L, ex).normalize();
       const rot = new Matrix3().set(ex.x, ex.y, ex.z, ey.x, ey.y, ey.z, L.x, L.y, L.z);
       const tilt = ((look.tilt ?? 0) * Math.PI) / 180;
-      const type = k === 'emission' ? 0 : k === 'planetary' ? 1 : 2;
+      const type = look.reflection ? 3 : k === 'emission' ? 0 : k === 'planetary' ? 1 : 2;
       const m = new Mesh(sphere, new ShaderMaterial({
         name: 'nebula-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG,
         uniforms: {
