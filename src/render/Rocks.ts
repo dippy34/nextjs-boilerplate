@@ -221,8 +221,9 @@ const TIERS: Tier[] = [
   { cell: 40, reach: 320, reachVr: 220, perCell: 0.5, min: 1.2, max: 7, slope: 2.6, seed: 53 },
 ];
 const SHAPES = 6;
-/** rocks larger than this (m) use the detailed shapes */
+/** rocks larger than this (m) use the detailed shapes; smaller than SMALL, the simplest */
 const BIG = 0.7;
+const SMALL = 0.15;
 
 interface RockCell { key: string; serial: number; pos: Float64Array; data: Float32Array; n: number; reach: number }
 // per rock in RockCell.data: size, turn, stretch, height, shape, tilt x, tilt y, tilt z (up), brightness, sun clearance, map u, map v,
@@ -299,10 +300,12 @@ export class Rocks {
     this.shGroup.matrixAutoUpdate = false;
     this.shScene.add(this.shGroup);
     this.shScene.matrixWorldAutoUpdate = true;
-    for (const big of [false, true]) {
+    // three levels of detail: pebbles (80 triangles), stones, boulders
+    for (const lod of [0, 1, 2]) {
       for (let k = 0; k < SHAPES; k++) {
-        const n = big ? Math.ceil(this.cap / 10) : Math.ceil(this.cap / SHAPES);
-        const m = new InstancedMesh(rockGeometry(k * 17 + 2, big ? (vr ? 3 : 4) : (vr ? 1 : 2)), this.mat, n);
+        const n = Math.ceil((this.cap * [0.75, 0.35, 0.06][lod]) / SHAPES) + 8;
+        const detail = [[1, 2, 4], [1, 1, 3]][vr ? 1 : 0][lod];
+        const m = new InstancedMesh(rockGeometry(k * 17 + 2, detail), this.mat, n);
         m.geometry.setAttribute('aRock', new InstancedBufferAttribute(new Float32Array(n * 4), 4));
         m.count = 0;
         m.frustumCulled = false;
@@ -494,11 +497,15 @@ export class Rocks {
     // (each cascade's matrices already map into its half of the target)
     for (const [mat, M0, M1, off] of [[this.shMat, M.uRockShM.value, M.uRockShM1.value, this.aoMeshes], [this.aoMat, M.uRockAOM.value, M.uRockAOM1.value, this.shMeshes]] as const) {
       for (const m of off) m.visible = false;
+      const on = off === this.aoMeshes ? this.shMeshes : this.aoMeshes;
       for (const [k, Mk] of [M0, M1].entries()) {
         mat.uniforms.uM.value.copy(Mk);
         mat.uniforms.uLo.value = k * 0.5;
+        // the far cascade only needs the large rocks (pebbles' shadows are under a pixel out there)
+        if (k === 1) on.forEach((m, i) => { m.visible = i >= 2 * SHAPES; });
         gl.render(this.shScene, this.shCam);
       }
+      for (const m of on) m.visible = true;
       for (const m of off) m.visible = true;
     }
     gl.setRenderTarget(prev);
@@ -631,7 +638,7 @@ export class Rocks {
         const grow = fd < 0.8 ? 1 : Math.max(0, 1 - (fd - 0.8) / 0.2);
         if (grow <= 0.02) continue;
         const size = c.data[o] * grow;
-        const k = c.data[o + 4] + (c.data[o] > BIG ? SHAPES : 0);
+        const k = c.data[o + 4] + (c.data[o] > BIG ? 2 * SHAPES : c.data[o] > SMALL ? SHAPES : 0);
         const mesh = this.meshes[k];
         if (counts[k] >= mesh.instanceMatrix.count) continue;
         up.set(c.data[o + 5], c.data[o + 6], c.data[o + 7]);
