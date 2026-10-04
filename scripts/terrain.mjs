@@ -21,7 +21,7 @@ const check = (name, ok, detail = '') => { results.push({ name, ok }); console.l
 // ground, so a batch of frames can take minutes; allow it the time (a real GPU / Quest is far faster).
 const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 360000 }); };
 
-await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 // software rendering runs at a few frames per second: let the terrain build in fewer frames
 await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
@@ -203,7 +203,7 @@ console.log('fps', JSON.stringify(st));
 
 // 7, 8. landmarks with sharper regional elevation patches (LOLA 128 px/deg, MOLA 463 m), from where
 // "go to" arrives, at a time when the Sun is 20 degrees up there
-await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
+await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load', timeout: 180000 });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
 await page.evaluate(() => { window.app.terrain.budgetMs = 60; });
 for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8-olympus-patch', 'Olympus Mons', 'Mars', 'mars'], ['t9-everest', 'Mount Everest', 'Earth', 'earth']]) {
