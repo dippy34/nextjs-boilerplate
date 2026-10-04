@@ -138,6 +138,17 @@ float bnAt(vec3 ci, vec3 r) {
   return mix(mix(mix(bh3(i), bh3(i + vec3(1,0,0)), f.x), mix(bh3(i + vec3(0,1,0)), bh3(i + vec3(1,1,0)), f.x), f.y),
              mix(mix(bh3(i + vec3(0,0,1)), bh3(i + vec3(1,0,1)), f.x), mix(bh3(i + vec3(0,1,1)), bh3(i + vec3(1,1,1)), f.x), f.y), f.z);
 }
+// bnAt with its analytic gradient (per cell unit) in .yzw
+vec4 bnAtG(vec3 ci, vec3 r) {
+  vec3 i = ci + floor(r); vec3 f = fract(r);
+  vec3 u = f * f * (3.0 - 2.0 * f), du = 6.0 * f * (1.0 - f);
+  float a = bh3(i), b = bh3(i + vec3(1,0,0)), c = bh3(i + vec3(0,1,0)), d = bh3(i + vec3(1,1,0));
+  float e = bh3(i + vec3(0,0,1)), g = bh3(i + vec3(1,0,1)), h = bh3(i + vec3(0,1,1)), k = bh3(i + vec3(1,1,1));
+  float k1 = b - a, k2 = c - a, k3 = e - a, k4 = a - b - c + d, k5 = a - c - e + h, k6 = a - b - e + g, k7 = -a + b + c - d + e - g - h + k;
+  float v = a + k1 * u.x + k2 * u.y + k3 * u.z + k4 * u.x * u.y + k5 * u.y * u.z + k6 * u.z * u.x + k7 * u.x * u.y * u.z;
+  vec3 grad = du * vec3(k1 + k4 * u.y + k6 * u.z + k7 * u.y * u.z, k2 + k5 * u.z + k4 * u.x + k7 * u.z * u.x, k3 + k6 * u.x + k5 * u.y + k7 * u.x * u.y);
+  return vec4(v, grad);
+}
 // One scale of craters on the unit sphere: height (radius units) and freshness (bright ejecta).
 // Only the 2x2x2 block of cells nearest to the point is visited (crater influence stays within
 // half a cell: radius <= 0.36, rim out to 1.35 radii), 8 cells instead of 27.
@@ -353,21 +364,22 @@ void main() {
 #ifdef TERRAIN
   if (uTerrain > 0.5 && uCraters < 0.05) {
     // ground without craters (Earth): uneven, rocky detail below the mesh and map resolution, on
-    // land only, each scale faded in once its cells span many pixels
+    // land only, each scale faded in once its cells span many pixels; lit by its analytic slope
+    // (screen-space derivatives stepped in 2x2-pixel blocks on steep walls)
     float land = 1.0 - water;
-    float n;
+    vec4 n;
     float w0 = smoothstep(400.0 / 6.0, 400.0 / 20.0, mppT);
-    if (w0 > 0.0) { n = bnAt(uOI0, uOF0 + vLocal / 400.0) - 0.5; hBump += w0 * land * 400.0 * 0.1 * n; groundVar += w0 * n; }
+    if (w0 > 0.0) { n = bnAtG(uOI0, uOF0 + vLocal / 400.0); n.x -= 0.5; slopeT += w0 * land * 0.1 * n.yzw; groundVar += w0 * n.x; }
     float w1 = smoothstep(90.0 / 6.0, 90.0 / 20.0, mppT);
-    if (w1 > 0.0) { n = bnAt(uOI1, uOF1 + vLocal / 90.0) - 0.5; hBump += w1 * land * 90.0 * 0.1 * n; groundVar += w1 * n * 0.7; }
+    if (w1 > 0.0) { n = bnAtG(uOI1, uOF1 + vLocal / 90.0); n.x -= 0.5; slopeT += w1 * land * 0.1 * n.yzw; groundVar += w1 * n.x * 0.7; }
     float w2 = uLite > 0.5 ? 0.0 : smoothstep(20.0 / 6.0, 20.0 / 20.0, mppT);
-    if (w2 > 0.0) { n = bnAt(uOI2, uOF2 + vLocal / 20.0) - 0.5; hBump += w2 * land * 20.0 * 0.1 * n; groundVar += w2 * n * 0.5; }
+    if (w2 > 0.0) { n = bnAtG(uOI2, uOF2 + vLocal / 20.0); n.x -= 0.5; slopeT += w2 * land * 0.1 * n.yzw; groundVar += w2 * n.x * 0.5; }
     groundVar *= land * uHScale;
   }
 #endif
   if (hBump != 0.0) nP = bumpNormal(vPosView, nP, hBump * limbFade);
 #ifdef TERRAIN
-  if (uTerrain > 0.5 && uCraters > 0.05) {
+  if (uTerrain > 0.5) {
     vec3 sW = uBodyToWorld * slopeT * (uHScale * limbFade);
     nP = normalize(nP - (sW - nP * dot(sW, nP)));
   }
