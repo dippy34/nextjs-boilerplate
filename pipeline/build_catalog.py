@@ -13,6 +13,7 @@ credited in CREDITS.md):
   t  planet hosts   TESS Objects of Interest (NASA Exoplanet Archive), not false positives
   x  X-ray binaries Avakyan+ 2023 (LMXB) and Neumann+ 2023 (HMXB) XRBcats                         VizieR J/A+A/675/A199, 677/A134
   q  quasars        Shen+ 2011 SDSS DR7 quasars with virial black-hole masses (the 1,900 nearest) VizieR J/ApJS/194/45
+                    + 8 famous quasars and blazars (3C 273, OJ 287, TON 618, ...) with published masses
   g  galaxies       Cosmicflows-4 (Tully+ 2023) distances, OpenNGC names/sizes (CC BY-SA 4.0),
                     Karachentsev+ 2013 Updated Nearby Galaxy Catalog                            VizieR J/ApJ/944/94, J/AJ/145/101
   c  clusters       Hunt & Reffert 2023 (Gaia DR3), Harris 1996 (2010 ed.) globulars             VizieR J/A+A/673/A114, VII/202
@@ -52,8 +53,8 @@ from common import OUT, write_json
 
 warnings.filterwarnings("ignore")
 DEST = OUT / "catalog"
-CHUNK = 2000          # records per file
-IDX_CHUNK = 4000      # index lines per file
+CHUNK = 4000          # records per file
+IDX_CHUNK = 8000      # index lines per file (few, larger files: static hosts cap the file count)
 
 GREEK = {"Alp": "α", "Bet": "β", "Gam": "γ", "Del": "δ", "Eps": "ε", "Zet": "ζ", "Eta": "η", "The": "θ",
          "Iot": "ι", "Kap": "κ", "Lam": "λ", "Mu": "μ", "Nu": "ν", "Xi": "ξ", "Omi": "ο", "Pi": "π",
@@ -141,7 +142,7 @@ def comoving_pc(z: float) -> float:
     """Comoving distance (pc) in flat LCDM, Planck 2018 parameters."""
     global _COSMO
     if _COSMO is None:
-        zs = np.linspace(0, 7, 70001)
+        zs = np.linspace(0, 10, 100001)
         inv_e = 1.0 / np.sqrt(OM * (1 + zs) ** 3 + (1 - OM))
         dc = np.concatenate([[0], np.cumsum((inv_e[1:] + inv_e[:-1]) * 0.5 * np.diff(zs))])
         _COSMO = (zs, dc * 299792.458 / H0 * 1e6)
@@ -324,10 +325,31 @@ def xrbs() -> Cat:
     return c
 
 
+# Famous quasars and blazars outside the SDSS list (too bright for SDSS, or beyond z = 5), with
+# published black-hole masses. Positions and redshifts: SIMBAD (2026), or the J2000 name.
+FAMOUS_QSO = [
+    # name, aliases, ra, dec, z, mass (Sun), reference
+    ("3C 273", ["PG 1226+023", "QSO B1226+023"], 187.27792, 2.05239, 0.15757, 2.6e8,
+     "GRAVITY Collaboration 2018, Nature 563, 657 (resolved broad-line region)"),
+    ("OJ 287", ["PG 0851+202", "PKS 0851+202"], 133.70365, 20.10851, 0.306, 1.835e10,
+     "Dey et al. 2018, ApJ 866, 11 (the primary of the binary black hole)"),
+    ("TON 618", ["Ton 618", "QSO B1225+317"], 187.10402, 31.47712, 2.219, 6.6e10, "Shemmer et al. 2004, ApJ 614, 547 (C IV virial mass)"),
+    ("S5 0014+81", ["QSO B0014+810"], 4.28531, 81.58559, 3.378, 4e10, "Ghisellini et al. 2010, MNRAS 405, 387 (accretion-disk fit)"),
+    ("Markarian 421", ["Mrk 421"], 166.11381, 38.20883, 0.0300, 2e8, "Barth, Ho & Sargent 2003, ApJ 583, 134 (velocity dispersion)"),
+    ("Markarian 501", ["Mrk 501"], 253.46757, 39.76017, 0.03412, 1e9, "Barth, Ho & Sargent 2003, ApJ 583, 134 (velocity dispersion)"),
+    ("J0313-1806", ["DES J031343.84-180636.4"], 48.43267, -18.11011, 7.642, 1.6e9,
+     "Wang et al. 2021, ApJL 907, L1 (the most distant quasar known)"),
+    ("ULAS J1342+0928", [], 205.53375, 9.47739, 7.5413, 7.8e8, "Bañados et al. 2018, Nature 553, 473"),
+]
+
+
 def quasars(limit: int = 1900) -> Cat:
-    c = Cat("q", "quasars", "Quasars", COMMON + ["z", "logMassSun", "logLbol", "iAbsMag"],
-            "Shen+ 2011, SDSS DR7 quasar properties with virial black-hole masses (VizieR J/ApJS/194/45)")
+    c = Cat("q", "quasars", "Quasars", COMMON + ["z", "logMassSun", "logLbol", "iAbsMag", "ref"],
+            "Shen+ 2011, SDSS DR7 quasar properties with virial black-hole masses (VizieR J/ApJS/194/45); famous quasars: "
+            "published masses (reference on each card)")
     t = cds("J/ApJS/194/45", "catalog.dat")
+    for name, al, ra, dec, z, m, ref in FAMOUS_QSO:
+        c.add(name, al, ra, dec, comoving_pc(z), "z", 0, z=z, logMassSun=round(math.log10(m), 3), logLbol=None, iAbsMag=None, ref=ref)
     rows = [r for r in t if (val(r["logBH"]) or 0) > 0]
     rows.sort(key=lambda r: float(r["z"]))
     for r in rows[:limit]:

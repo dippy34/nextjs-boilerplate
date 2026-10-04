@@ -261,7 +261,8 @@ export class Catalog {
         const mass = 10 ** (num(r.logMassSun) ?? 8);
         const bh = this.host.addBlackHole({
           name: r.name, aliases: [`quasar, z = ${r.z}`], kind: 'supermassive', raDeg: ra, decDeg: dec, distPc: dist, massSun: mass,
-          ref: `${cat.credit}: virial mass ±0.4 dex; comoving distance from z = ${r.z} (Planck 2018)`,
+          ref: r.ref ? `black-hole mass: ${r.ref}; comoving distance from z = ${r.z} (Planck 2018)`
+            : `${cat.credit.split(';')[0]}: virial mass ±0.4 dex; comoving distance from z = ${r.z} (Planck 2018)`,
         });
         // a quasar's disk is the opposite of the faint flows of Sgr A* and M87*: say so on the card
         const lbol = num(r.logLbol);
