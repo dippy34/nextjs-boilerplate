@@ -359,8 +359,11 @@ def quasars(limit: int = 1900) -> Cat:
     return c
 
 
+B_MINUS_V = 0.7   # typical integrated colour of galaxies, for B-only magnitudes
+
+
 def galaxies() -> Cat:
-    c = Cat("g", "galaxies", "Galaxies", COMMON + ["morph", "majArcmin", "minArcmin", "paDeg", "bmag", "method"],
+    c = Cat("g", "galaxies", "Galaxies", COMMON + ["morph", "majArcmin", "minArcmin", "paDeg", "vmag", "method"],
             "Cosmicflows-4 (Tully+ 2023, VizieR J/ApJ/944/94); OpenNGC (M. Verga, CC BY-SA 4.0); "
             "Karachentsev+ 2013 Updated Nearby Galaxy Catalog (VizieR J/AJ/145/101)")
     g: dict[str, dict] = {}
@@ -393,8 +396,10 @@ def galaxies() -> Cat:
             sd = r["Dec"]
             dec = dms(sd[0], *sd[1:].split(":"))
             maj, mn, pa = val(r["MajAx"]), val(r["MinAx"]), val(r["PosAng"])
-            bmag = val(r["B-Mag"]) or val(r["V-Mag"])
-            rank = 0 if r["M"] or r["Common names"] else (3 if (bmag or 99) < 12 else 5)
+            # V magnitude: OpenNGC's V, else B - 0.7 (a typical galaxy colour B-V)
+            vm, bm = val(r["V-Mag"]), val(r["B-Mag"])
+            bmag = vm if vm is not None else (bm - B_MINUS_V if bm is not None else None)
+            rank = 0 if r["M"] or r["Common names"] else (3 if (bmag or 99) < 11.3 else 5)
             key = f"pgc{pgc}" if pgc is not None else f"ngc:{nm}"
             if key in g:
                 e = g[key]
@@ -432,10 +437,10 @@ def galaxies() -> Cat:
             e["rank"] = min(e["rank"], 3)
         else:
             g[f"ungc:{name}"] = dict(names=[pretty], ra=ra, dec=dec, dist=d * 1e6, flag="m", method=f"UNGC {sval(r['f_Dist'])}".strip(),
-                                    morph=sval(r["TT"]), maj=val(r["a26"]), mn=None, pa=None, bmag=val(r["Bmag"]), rank=4)
+                                    morph=sval(r["TT"]), maj=val(r["a26"]), mn=None, pa=None, bmag=(val(r["Bmag"]) - B_MINUS_V if val(r["Bmag"]) is not None else None), rank=4)
     for e in g.values():
         c.add(e["names"][0], e["names"][1:], e["ra"], e["dec"], e["dist"], e["flag"], e["rank"],
-              morph=e["morph"] or "", majArcmin=e["maj"], minArcmin=e["mn"], paDeg=e["pa"], bmag=e["bmag"], method=e["method"])
+              morph=e["morph"] or "", majArcmin=e["maj"], minArcmin=e["mn"], paDeg=e["pa"], vmag=e["bmag"], method=e["method"])
     return c
 
 

@@ -5793,7 +5793,7 @@ Hen 2-99	n	14p	6
 Hen 3-1333	n	x3	6
 Hen 3-1357	n	175	6
 Heng	s	cu	0
-Hercules	g	p1	4
+Hercules	g	p2	4
 Herschel 1	c	6r	4
 Her X-1	x	7w	5
 HESS J0632+057	x	2z	5
@@ -5806,7 +5806,7 @@ Hf 69	n	yi	6
 HFG 1	n	vj	6
 HFG 2	n	yn	6
 HIDEEP J1337-33	g	6h	3
-HIJASS J1021+6842	g	qd	4
+HIJASS J1021+6842	g	qe	4
 HIP 1	s	1zmy	6
 HIP 10	s	e6m	4
 HIP 100	s	1cpt	4

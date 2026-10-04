@@ -281,8 +281,7 @@ export class App {
       this.rig.upos.set(x * PC, y * PC, z * PC);
       this.rig.lookAt(new Vector3(-x, -y, -z).normalize());
     } else if (target) {
-      const obj = this.findByName(target);
-      if (obj) {
+      const place = (obj: SpaceObject) => {
         const dist = Number(q.get('dist') ?? 4) * Math.max(obj.radius, 1);
         this.placeNear(obj, dist, Number(q.get('az') ?? 35), Number(q.get('el') ?? 15));
         if (obj instanceof Galaxy && !q.get('el')) {
@@ -297,7 +296,11 @@ export class App {
           this.rig.lookAt(dir.clone().negate(), obj.diskNormal);
         }
         this.select(obj);
-      }
+      };
+      const obj = this.findByName(target);
+      if (obj) place(obj);
+      // [catalog] objects only the catalogue has (?target=3C 273): its best exact match
+      else void this.objCatalog?.lookup(target).then((o) => { if (o) place(o); });
     } else {
       const earth = this.system.byId.get(399)!;
       this.placeNear(earth, 3.4 * earth.radius, 35, 12);

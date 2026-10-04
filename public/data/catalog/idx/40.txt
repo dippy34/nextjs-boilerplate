@@ -2551,7 +2551,7 @@ Riddle 4	c	3wm	6
 Riddle 6	c	1k8	6
 Rigel	s	f8	0
 Rigil Kentaurus	s	2	0
-RKK 1610	g	y2	4
+RKK 1610	g	y3	4
 Rosalíadecastro	s	a2	0
 Roslund 1	c	1ln	6
 Roslund 2	c	fy	4
@@ -2742,7 +2742,7 @@ Sadr	s	fv	0
 Safina	s	ah	0
 Sagarmatha	s	7z	0
 Sag dIr	g	2q	3
-Sag dSph	g	om	4
+Sag dSph	g	on	4
 SAI 102	c	4zc	6
 SAI 103	c	47r	6
 SAI 104	c	3ts	6
@@ -2879,7 +2879,7 @@ Scheat	s	9c	0
 Schedar	s	9u	0
 Schoenball 1	c	53j	6
 Sco X-1	x	30	5
-Sculptor	g	ox	4
+Sculptor	g	oy	4
 Sculptor Filament	g	e	0
 SDSS J000410.80-104527.1	q	u5	6
 SDSS J000557.23+002837.7	q	13e	6
@@ -4795,9 +4795,9 @@ SDSSp J120358.19+001550.3	d	3k	5
 Secunda Hyadum	s	7v	0
 Segin	s	ds	0
 Seginus	s	48	0
-Segue 1	g	ol	4
-Segue 2	g	oo	4
-Segue 3	g	on	4
+Segue 1	g	om	4
+Segue 2	g	op	4
+Segue 3	g	oo	4
 Serpens	c	p6	4
 Ser X-1	x	5r	5
 Ser X-2	x	4u	5
@@ -5224,7 +5224,7 @@ Struve 2398 A	s	g	0
 Struve 2398 B	s	h	0
 Sualocin	s	a0	0
 Subra	s	6v	0
-SUCD 1	g	vh	4
+SUCD 1	g	vi	4
 Suhail	s	eb	0
 Sulafat	s	eu	0
 Sunflower Galaxy	g	q	0
