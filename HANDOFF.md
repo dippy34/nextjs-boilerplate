@@ -174,11 +174,14 @@ procedural generation for the rest. Never use SpaceEngine's own files.
 
 `pipeline/build_elevation.py` (sources and resumable downloads in `pipeline/elevation_sources.py`,
 raw files and int16 work grids in `data-raw/elevation/`, ~25 GB while building) ->
-`public/data/elevation/<body>/<level>/<face>-<k>.pak` (tiles packed per level and face, at most
-16 MB a file; 214 files instead of 6,617, for static hosts' file caps) + `manifest.json` (each level's
-`packs`: tiles in file order with their byte lengths; Elevation.ts fetches one tile with an HTTP range
-request and slices the whole file if a server ignores ranges), and `index.json`. The build writes
-loose PNGs, then `pack()` concatenates them (`python3 build_elevation.py pack` packs loose tiles).
+`public/data/elevation/<body>/<level>/<face>-<s>-<bx>-<by>.pak` (small spatial packs: the tiles of a
+4x4 block of siblings, or 2x2 where 4x4 would pass 1.5 MB, one face at levels 0-1; 977 packs instead
+of 6,617 PNGs) + `manifest.json` (each level's `packs`: tiles in file order with byte lengths), and
+`index.json`. Elevation.ts reads a tile with an HTTP range request (GitHub Pages answers 206); a host
+that ignores ranges (Cloudflare Pages, `python3 -m http.server`: 200 with the whole file) gets the
+whole pack once and every tile in it is kept, and from then on whole packs are fetched directly
+(concurrent first requests for one pack share one download). The build writes loose PNGs, then
+`pack()` packs them (`python3 build_elevation.py pack` re-packs).
 Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/elevation.test.ts`
 (fixture `tests/fixtures/elevation_points.json` is written by the build).
 

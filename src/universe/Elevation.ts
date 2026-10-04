@@ -201,6 +201,8 @@ interface BodyState {
   base: number[];
   /** where each tile is in the pack files (key -> file, offset, length) */
   loc: Map<number, { file: string; off: number; len: number }>;
+  /** the tiles of each pack file, in file order */
+  packs: Map<string, { key: number; level: number; off: number; len: number }[]>;
   maxLevel: number;
   tiles: Map<number, Tile>;
   pending: Map<number, Promise<void>>;
@@ -255,7 +257,7 @@ export class ElevationStore {
   private state(key: string): BodyState {
     let s = this.bodies.get(key);
     if (!s) {
-      s = { man: null, loading: null, bits: [], base: [], loc: new Map(), maxLevel: -1, tiles: new Map(), pending: new Map(), failed: new Map(), version: 0 };
+      s = { man: null, loading: null, bits: [], base: [], loc: new Map(), packs: new Map(), maxLevel: -1, tiles: new Map(), pending: new Map(), failed: new Map(), version: 0 };
       this.bodies.set(key, s);
     }
     return s;
@@ -297,7 +299,11 @@ export class ElevationStore {
         let at = 0;
         for (let i = 0; i + 3 < pk.tiles.length; i += 4) {
           const [f, x, y, len] = [pk.tiles[i], pk.tiles[i + 1], pk.tiles[i + 2], pk.tiles[i + 3]];
-          s.loc.set(s.base[l] + (f * n + y) * n + x, { file: pk.file, off: at, len });
+          const key = s.base[l] + (f * n + y) * n + x;
+          s.loc.set(key, { file: pk.file, off: at, len });
+          let list = s.packs.get(pk.file);
+          if (!list) s.packs.set(pk.file, (list = []));
+          list.push({ key, level: l, off: at, len });
           at += len;
         }
       }
@@ -359,7 +365,17 @@ export class ElevationStore {
     return !!s?.man && level <= s.maxLevel && s.tiles.has(this.key(s, face, level, x, y));
   }
 
-  /** Fetch and decode a tile (resolves at once if it is loaded or does not exist; rejects on a network/decode error). */
+  /** whether the host honours HTTP range requests (null until the first packed tile arrives) */
+  private ranges: boolean | null = null;
+  /** whole-pack downloads (hosts without ranges), and first range requests per pack, by `body/file` */
+  private packLoads = new Map<string, Promise<void>>();
+
+  /**
+   * Fetch and decode a tile (resolves at once if it is loaded or does not exist; rejects on a
+   * network/decode error). Packed tiles are read with an HTTP range request; when the host ignores
+   * ranges (it answers 200 with the whole pack, as Cloudflare Pages does), every tile of the pack
+   * is kept (they are the neighbours needed next) and later tiles fetch whole packs directly.
+   */
   async request(bodyKey: string, face: number, level: number, x: number, y: number): Promise<void> {
     const man = this.manifest(bodyKey) ?? (await this.load(bodyKey));
     if (!man || !this.exists(bodyKey, face, level, x, y)) return;
@@ -369,32 +385,79 @@ export class ElevationStore {
     const failedAt = s.failed.get(k);
     if (failedAt !== undefined && Date.now() - failedAt < 30e3) throw new Error('tile failed recently');
     let p = s.pending.get(k);
-    if (!p) {
-      // packed tiles: a byte range of the pack file (a server that ignores ranges sends the whole
-      // file, which is sliced); otherwise one PNG per tile
-      const loc = s.loc.get(k);
+    if (p) return p;
+    const loc = s.loc.get(k);
+    const packId = loc ? `${bodyKey}/${loc.file}` : '';
+    if (loc && this.ranges === false) {
+      p = this.loadPack(bodyKey, s, loc.file);
+    } else if (loc && this.ranges === null && this.packLoads.has(packId)) {
+      // the first answer for this pack is on its way: it may bring the whole pack
+      p = this.packLoads.get(packId)!.catch(() => undefined)
+        .then(() => {
+          if (s.tiles.has(k)) return undefined;
+          s.pending.delete(k);         // (else the request below would wait for this very promise)
+          return this.request(bodyKey, face, level, x, y);
+        });
+    } else {
       const url = loc ? `${this.base}/${bodyKey}/${loc.file}`
         : `${this.base}/${bodyKey}/${man.path.replace('{level}', `${level}`).replace('{face}', `${face}`).replace('{x}', `${x}`).replace('{y}', `${y}`)}`;
       p = this.fetchFn(url, loc ? { headers: { Range: `bytes=${loc.off}-${loc.off + loc.len - 1}` } } : undefined)
         .then(async (r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status ?? '?'} for ${url}`);
           const b = await r.arrayBuffer();
-          return loc && r.status !== 206 && b.byteLength > loc.len ? b.slice(loc.off, loc.off + loc.len) : b;
+          if (loc && r.status === 206) this.ranges = true;
+          if (loc && r.status !== 206 && b.byteLength > loc.len) {
+            this.ranges = false;
+            await this.storePack(s, loc.file, b);
+            return;
+          }
+          await this.storeTile(s, k, level, b);
+        });
+      if (loc && this.ranges === null) {
+        const probe = p;
+        this.packLoads.set(packId, probe);
+        void probe.catch(() => undefined).finally(() => { if (this.packLoads.get(packId) === probe) this.packLoads.delete(packId); });
+      }
+    }
+    p = p.catch((err) => { s.failed.set(k, Date.now()); throw err; }).finally(() => s.pending.delete(k));
+    s.pending.set(k, p);
+    return p;
+  }
+
+  /** Download a whole pack (once) and keep all its tiles. */
+  private loadPack(bodyKey: string, s: BodyState, file: string): Promise<void> {
+    const id = `${bodyKey}/${file}`;
+    let p = this.packLoads.get(id);
+    if (!p) {
+      const url = `${this.base}/${bodyKey}/${file}`;
+      p = this.fetchFn(url)
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status ?? '?'} for ${url}`);
+          return r.arrayBuffer();
         })
-        .then((b) => decodePng16(b))
-        .then(({ width, height, data }) => {
-          if (width !== PIX || height !== PIX) throw new Error(`bad tile size ${width}x${height}`);
-          s.tiles.set(k, { data, used: ++this.clock, level });
-          this.bytes += data.byteLength;
-          s.version++;
-          s.failed.delete(k);
-          this.evict();
-        })
-        .catch((err) => { s.failed.set(k, Date.now()); throw err; })
-        .finally(() => s.pending.delete(k));
-      s.pending.set(k, p);
+        .then((b) => this.storePack(s, file, b))
+        .finally(() => this.packLoads.delete(id));
+      this.packLoads.set(id, p);
     }
     return p;
+  }
+
+  /** Decode and keep the tiles of a whole pack file that are not loaded yet. */
+  private async storePack(s: BodyState, file: string, buf: ArrayBuffer): Promise<void> {
+    for (const t of s.packs.get(file) ?? []) {
+      if (!s.tiles.has(t.key)) await this.storeTile(s, t.key, t.level, buf.slice(t.off, t.off + t.len));
+    }
+  }
+
+  private async storeTile(s: BodyState, k: number, level: number, buf: ArrayBuffer): Promise<void> {
+    const { width, height, data } = await decodePng16(buf);
+    if (width !== PIX || height !== PIX) throw new Error(`bad tile size ${width}x${height}`);
+    if (s.tiles.has(k)) return;
+    s.tiles.set(k, { data, used: ++this.clock, level });
+    this.bytes += data.byteLength;
+    s.version++;
+    s.failed.delete(k);
+    this.evict();
   }
 
   /**
