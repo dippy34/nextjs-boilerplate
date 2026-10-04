@@ -23,6 +23,8 @@ export const SCENES = [
   { name: 'c4-rigel-close', query: `target=Rigel&dist=2.5&fov=60` },
   { name: 'c5-vega-close', query: `target=Vega&dist=2.5&fov=60` },
   { name: 'c6-sirius-b-close', query: `target=Sirius B&dist=2.5&fov=60` },
+  { name: 'c7-sun-surface', query: `target=Sun&dist=1.04&el=10&fov=60` },
+  { name: 'c8-betelgeuse-surface', query: `target=Betelgeuse&dist=1.15&el=10&fov=60` },
 ];
 const only = new Set((process.env.ONLY ?? '').split(',').filter(Boolean));
 const lite = process.env.LITE === '1';
