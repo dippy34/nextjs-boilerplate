@@ -1103,7 +1103,7 @@ export class App {
         : ((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
       wBest = w;
       lBest = L;
-      keyBest = b.kind === 'star' ? STAR_KEY : 0.45;
+      keyBest = b.kind === 'star' ? STAR_KEY * (1 - 0.15 * smoothstep(0.3, 0.9, coverage)) : 0.45;
     }
     for (const cv of this.craft.views) {
       if (cv.pixelRadius < 2) continue;
@@ -1159,7 +1159,9 @@ export class App {
       if (w > wBest && this.project(rel)) {
         wBest = w;
         lBest = (magToIrradiance(s.absMag + 5 * Math.log10(d / PC) - 5) * d * d) / (Math.PI * s.radius * s.radius);
-        keyBest = STAR_KEY;
+        // a disk filling the view is shown a little darker, so its surface keeps its contrast and
+        // colour below the tone curve's shoulder
+        keyBest = STAR_KEY * (1 - 0.15 * smoothstep(0.3, 0.9, coverage));
       }
     }
     const lx = Math.log(xDark);

@@ -70,7 +70,9 @@ export function starLook(key: string, teff: number, radiusSun: number, absMag: n
   // granulation cells around the circumference ∝ R g / T (Sun ~4400)
   const cells = (4400 * mass) / (R * (T / 5772));
   // per unit of radius (the pattern is laid on the unit sphere): cells / 2 pi; the Sun's granules ~1000 km
-  const granFreq = Math.min(900, Math.max(2.2, cells / (2 * Math.PI)));
+  // (red supergiants: a handful of giant convection cells across the disk, as interferometric
+  // images of Betelgeuse and simulations show)
+  const granFreq = supergiant && T < 5000 ? 1.6 + 1.6 * r2 : Math.min(900, Math.max(2.2, cells / (2 * Math.PI)));
   // (giant cells on red giants and supergiants are bright and dark patches across the whole disk, as
   // interferometric images of Betelgeuse and Antares show)
   const granAmp = whiteDwarf ? 0.01 : convective ? 0.16 + 0.32 * smooth(3, 200, R) + 0.05 * r3 : 0.025 + 0.02 * r3;
