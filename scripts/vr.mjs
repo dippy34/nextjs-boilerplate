@@ -93,7 +93,8 @@ const t0 = Date.now();
 await frames(8); // frame-counted waits: software rendering in CI can run at ~1 fps
 const xrDraw = await page.evaluate(async () => {
   const gl = window.app.renderer.gl; const orig = gl.render.bind(gl); const seen = [];
-  gl.render = (sc, cam) => { const t = gl.getRenderTarget(); seen.push(!!t && t.isXRRenderTarget === true); return orig(sc, cam); };
+  // (the reduced-resolution volume pass draws into its own target first: not the page canvas)
+  gl.render = (sc, cam) => { const t = gl.getRenderTarget(); if (!t || t !== window.app.renderer.volTarget) seen.push(!!t && t.isXRRenderTarget === true); return orig(sc, cam); };
   await new Promise((res) => { const s = window.app.frameCount; const t = setInterval(() => { if (window.app.frameCount >= s + 3) { clearInterval(t); res(); } }, 10); });
   gl.render = orig;
   return { draws: seen.length, intoXR: seen.filter(Boolean).length };
@@ -232,7 +233,7 @@ st = await page.evaluate(() => { const a = window.app; const h = a.blackHoles.fi
 check('Black holes tab flies to Gaia BH1 and draws it', st.drawn && st.r > 15 && st.r < 21, `${st.r.toFixed(1)} rs, drawn=${st.drawn}`);
 const bhDraw = await page.evaluate(async () => {
   const a = window.app; const gl = a.renderer.gl; const orig = gl.render.bind(gl); const main = []; let env = 0;
-  gl.render = (sc, cam) => { const t = gl.getRenderTarget(); if (cam === a.renderer.camera) main.push(!!t && t.isXRRenderTarget === true); else if (t && t.isWebGLCubeRenderTarget) env++; return orig(sc, cam); };
+  gl.render = (sc, cam) => { const t = gl.getRenderTarget(); if (cam === a.renderer.camera && (!t || t !== a.renderer.volTarget)) main.push(!!t && t.isXRRenderTarget === true); else if (t && t.isWebGLCubeRenderTarget) env++; return orig(sc, cam); };
   await new Promise((res) => { const s = a.frameCount; const t = setInterval(() => { if (a.frameCount >= s + 3) { clearInterval(t); res(); } }, 10); });
   gl.render = orig;
   return { main: main.length, intoXR: main.filter(Boolean).length, env };
