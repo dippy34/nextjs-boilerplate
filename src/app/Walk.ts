@@ -374,6 +374,8 @@ export class Walk {
   private hudTimer = 0;
   /** short status for the HUD and the VR wrist */
   status = '';
+  /** the last thing walking said (a toast may be replaced by another; tests read this) */
+  said = '';
   /** bootprints and dust */
   readonly marks = new GroundMarks();
   private stepIndex = 0;
@@ -483,6 +485,7 @@ export class Walk {
   }
 
   private say(msg: string): void {
+    this.said = msg;
     this.app.hud.toast(msg, 3);
     if (this.app.vr.active) this.app.vr.flash(msg);
   }

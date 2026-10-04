@@ -178,8 +178,8 @@ if (which !== 'vr') {
   await frames(4);
   await page.keyboard.press('KeyB');
   await frames(2);
-  st = await page.evaluate(() => ({ state: window.app.walk.state, toast: document.querySelector('.hud-toast')?.textContent ?? '' }));
-  check('w4: no walking on Jupiter, with the reason', st.state === 'off' && /no solid surface/.test(st.toast), st.toast);
+  st = await page.evaluate(() => ({ state: window.app.walk.state, said: window.app.walk.said }));
+  check('w4: no walking on Jupiter, with the reason', st.state === 'off' && /no solid surface/.test(st.said), st.said);
 
   // the ship: walking takes you out of it
   await page.evaluate(() => window.app.game.setMode('cockpit'));
