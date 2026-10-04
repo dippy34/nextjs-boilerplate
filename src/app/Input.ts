@@ -38,7 +38,9 @@ export class Input {
       this.wheel += Math.sign(e.deltaY) * Math.min(3, Math.abs(e.deltaY) / 100 + 0.5);
     }, { passive: false });
     window.addEventListener('keydown', (e) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      // typing in a text field is not flying (a checkbox or slider with focus doesn't take the keys)
+      const t = e.target as HTMLInputElement | null;
+      if (t?.tagName === 'TEXTAREA' || t?.tagName === 'SELECT' || (t?.tagName === 'INPUT' && !['checkbox', 'radio', 'range', 'button'].includes(t.type))) return;
       this.keys.add(e.code);
       this.onKey?.(e);
     });

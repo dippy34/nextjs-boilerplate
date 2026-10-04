@@ -1,5 +1,6 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
-import { stateToElements } from '../astro/kepler';
+import { keplerState, type OrbitalElements, stateToElements } from '../astro/kepler';
+import { eclToEqu, equToEcl } from '../core/frames';
 import { DAY } from '../core/units';
 import { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
@@ -38,13 +39,39 @@ export interface EntityRecord {
   muScale?: number;
   spin: SpinState;
   spawn?: SpawnSpec;
+  /** Kepler mode: an orbit of its own about `parent` (elements in the ecliptic J2000 frame) */
+  orbit?: KeplerOrbit;
+  /** the spin was edited (Kepler mode otherwise keeps the real rotation) */
+  customSpin?: boolean;
+  phys?: PhysProps;
 }
+
+/** An analytic orbit: elements about a parent entity, ecliptic J2000 frame. */
+export interface KeplerOrbit { parent: number; el: OrbitalElements }
+
+/** Editable physical properties beyond mass and radius. */
+export interface PhysProps {
+  /** polar radius (m); the equatorial one is `radius` scaled by the shape */
+  rpol?: number;
+  albedo?: number;
+  /** greenhouse warming (K) */
+  greenhouse?: number;
+  /** surface pressure (bar) and mean molar mass (kg/mol) of the atmosphere */
+  pressure?: number;
+  molar?: number;
+  /** black holes: dimensionless spin */
+  spin?: number;
+}
+
+export type SimKind = 'kepler' | 'nbody';
 
 export interface WorldState {
   format: 'space-explorer-god';
   version: 1;
   jd: number;
   nextId: number;
+  /** analytic Kepler orbits (default) or the N-body simulation */
+  mode?: SimKind;
   entities: EntityRecord[];
 }
 
@@ -61,6 +88,9 @@ export interface Entity {
   spawn?: SpawnSpec;
   rider?: Rider;
   muScale?: number;
+  orbit?: KeplerOrbit;
+  customSpin?: boolean;
+  phys?: PhysProps;
   /** current state (barycentric, m and m/s), written every frame */
   pos: Vector3;
   vel: Vector3;
@@ -80,7 +110,7 @@ export interface SandboxHooks {
   changed?(e: Entity): void;
 }
 
-interface Baseline { gm: number; systemGm: number; radii: [number, number, number]; radius: number; valid: boolean }
+interface Baseline { gm: number; systemGm: number; radii: [number, number, number]; radius: number; valid: boolean; albedo: number }
 
 const ECLIPTIC_POLE = new Vector3(0, -Math.sin((23.4392911 * Math.PI) / 180), Math.cos((23.4392911 * Math.PI) / 180));
 const UNDO_DEPTH = 40;
@@ -101,6 +131,8 @@ const SPAWN_ID0 = 50_000_000;
  */
 export class Sandbox {
   active = false;
+  /** Kepler orbits (each edited body on its own exact two-body orbit; the rest on the ephemeris) or N-body */
+  mode: SimKind = 'kepler';
   readonly entities = new Map<number, Entity>();
   /** sandbox epoch: simulation time 0 is this JD */
   jd0 = 0;
@@ -146,11 +178,12 @@ export class Sandbox {
   start(jd: number): void {
     if (this.active) return;
     this.active = true;
+    this.mode = 'kepler';
     this.jd = jd;
     this.entities.clear();
     this.baseline.clear();
     for (const b of this.system.bodies) {
-      this.baseline.set(b, { gm: b.gm, systemGm: b.systemGm, radii: [...b.radii], radius: b.radius, valid: b.valid });
+      this.baseline.set(b, { gm: b.gm, systemGm: b.systemGm, radii: [...b.radii], radius: b.radius, valid: b.valid, albedo: b.albedo });
       if (!b.valid) continue;
       const e: Entity = {
         id: b.id, kind: 'body', name: b.name, mode: simMode(b), gm: b.gm, radius: b.radius, flags: b.kind === 'star' ? FLAG_STAR : 0,
@@ -171,7 +204,7 @@ export class Sandbox {
     if (!this.active) return;
     for (const e of [...this.entities.values()]) if (e.kind !== 'body') this.destroyEntity(e);
     for (const [b, base] of this.baseline) {
-      b.gm = base.gm; b.systemGm = base.systemGm; b.radii = [...base.radii]; b.radius = base.radius; b.valid = base.valid;
+      b.gm = base.gm; b.systemGm = base.systemGm; b.radii = [...base.radii]; b.radius = base.radius; b.valid = base.valid; b.albedo = base.albedo;
     }
     // spawned bodies leave the system
     for (let i = this.system.bodies.length - 1; i >= 0; i--) if (!this.baseline.has(this.system.bodies[i])) this.system.bodies.splice(i, 1);
@@ -179,6 +212,8 @@ export class Sandbox {
     this.queue = [];
     this.undoStack = [];
     this.active = false;
+    this.mode = 'kepler';
+    this.order = null;
     this.gen++;
   }
 
@@ -195,6 +230,11 @@ export class Sandbox {
   update(jdWanted: number, rate: number, paused: boolean, dtReal: number): number {
     if (!this.active) { this.jd = jdWanted; return jdWanted; }
     this.primaryCache = null;
+    this.lagging = false;
+    if (this.mode === 'kepler') {
+      this.keplerUpdate(jdWanted, paused ? 0 : rate < 0 ? -1 : 1);
+      return jdWanted;
+    }
     if (this.inline) for (const s of this.inline.pump(paused ? 2 : 6)) this.receive(s);
     if (this.needReseed) { this.needReseed = false; this.reseed(); }
     const dir = rate < 0 ? -1 : 1;
@@ -225,6 +265,96 @@ export class Sandbox {
     this.stepClock += dtReal;
     if (this.stepClock > 1) { this.stepsPerSecond = this.stepCount / this.stepClock; this.stepCount = 0; this.stepClock = 0; }
     return this.jd;
+  }
+
+  private order: Entity[] | null = null;
+  private ephP = new Map<Entity, Vector3>();
+  private ephV = new Map<Entity, Vector3>();
+  private kp = new Vector3();
+  private kv = new Vector3();
+
+  /** The parent an entity's orbit is about in Kepler mode. */
+  parentId(e: Entity): number | null {
+    if (e.orbit) return e.orbit.parent;
+    const bp = e.body?.parent;
+    if (bp && this.entities.has(bp.id)) return bp.id;
+    return this.primaryOf(e)?.id ?? null;
+  }
+
+  /** Parents before children. */
+  private hierarchy(): Entity[] {
+    const depth = new Map<Entity, number>();
+    const d = (e: Entity, guard = 0): number => {
+      const k = depth.get(e);
+      if (k !== undefined) return k;
+      const pid = e.orbit?.parent ?? e.body?.parent?.id;
+      const p = pid !== undefined ? this.entities.get(pid) : undefined;
+      const v = p && p !== e && guard < 20 ? d(p, guard + 1) + 1 : 0;
+      depth.set(e, v);
+      return v;
+    };
+    return [...this.entities.values()].sort((a, b) => d(a) - d(b));
+  }
+
+  /**
+   * Kepler mode: the ephemeris for what was not changed, exact two-body orbits for what was.
+   * A body that was not changed rides along with its parent's change of place (the Moon stays
+   * with a moved Earth).
+   */
+  private keplerUpdate(jd: number, dir: number): void {
+    this.jd = jd;
+    this.system.update(jd, dir);
+    this.order ??= this.hierarchy();
+    const { kp, kv } = this;
+    for (const e of this.order) {
+      const b = e.body;
+      if (b) {
+        let ep = this.ephP.get(e), ev = this.ephV.get(e);
+        if (!ep || !ev) { ep = new Vector3(); ev = new Vector3(); this.ephP.set(e, ep); this.ephV.set(e, ev); }
+        ep.copy(b.pos); ev.copy(b.vel);
+      }
+      if (e.orbit) {
+        const p = this.entities.get(e.orbit.parent);
+        keplerState(e.orbit.el, jd, kp, kv);
+        eclToEqu(kp); eclToEqu(kv);
+        e.pos.copy(kp); e.vel.copy(kv);
+        if (p) { e.pos.add(p.pos); e.vel.add(p.vel); }
+      } else if (b) {
+        e.pos.copy(b.pos); e.vel.copy(b.vel);
+        const pe = b.parent ? this.entities.get(b.parent.id) : undefined;
+        const pp = pe && this.ephP.get(pe), pv = pe && this.ephV.get(pe);
+        if (pe && pp && pv) { e.pos.add(pe.pos).sub(pp); e.vel.add(pe.vel).sub(pv); }
+      }
+      if (b) {
+        b.pos.copy(e.pos); b.vel.copy(e.vel); b.upos.set(e.pos.x, e.pos.y, e.pos.z);
+        if (e.orbit) b.valid = true;
+        if (e.customSpin || !b.rotation && e.kind !== 'body') this.orient(e, b.orientation);
+      }
+    }
+    // deleted bodies stay deleted (the ephemeris would bring them back)
+    for (const [b] of this.baseline) if (!this.entities.has(b.id)) { b.valid = false; b.gm = 0; }
+  }
+
+  /** Osculating elements (ecliptic) of a state about a parent entity. */
+  osculating(pos: Vector3, vel: Vector3, gm: number, parent: Entity | null, jd = this.jd): KeplerOrbit | null {
+    if (!parent) return null;
+    const r = equToEcl(pos.clone().sub(parent.pos)), v = equToEcl(vel.clone().sub(parent.vel));
+    if (r.lengthSq() === 0) return null;
+    // a body with no sideways speed has no orbit plane: give it a whisker of one
+    const h = r.clone().cross(v);
+    if (h.lengthSq() < 1e-12 * r.lengthSq() * v.lengthSq() + 1e-30) {
+      const side = new Vector3(0, 0, 1).cross(r).normalize();
+      if (side.lengthSq() < 0.5) side.set(1, 0, 0);
+      v.addScaledVector(side, 1e-3 * Math.sqrt((parent.gm + gm) / r.length()));
+    }
+    return { parent: parent.id, el: stateToElements(r, v, parent.gm + gm, jd) };
+  }
+
+  /** Current orbit of an entity (its own, or the osculating one about its parent). */
+  orbitOf(e: Entity): KeplerOrbit | null {
+    if (e.orbit) return { parent: e.orbit.parent, el: { ...e.orbit.el } };
+    const pid = this.parentId(e);
+    return this.osculating(e.pos, e.vel, e.gm, pid !== null ? this.entities.get(pid) ?? null : null);
   }
 
   private post(m: SimRequest): void {
@@ -386,9 +516,11 @@ export class Sandbox {
         parent: e.mode === 'rider' ? e.rider?.parent ?? e.body?.parent?.id : undefined, muScale: e.muScale,
         spin: { ax: e.spin.axis.x, ay: e.spin.axis.y, az: e.spin.axis.z, rate: e.spin.rate, locked: e.spin.locked, base: [...base.elements] },
         spawn: e.spawn ? { ...e.spawn } : undefined,
+        orbit: e.orbit ? { parent: e.orbit.parent, el: { ...e.orbit.el } } : undefined,
+        customSpin: e.customSpin, phys: e.phys ? { ...e.phys } : undefined,
       });
     }
-    return { format: 'space-explorer-god', version: 1, jd: this.jd, nextId: this.nextId, entities: ents };
+    return { format: 'space-explorer-god', version: 1, jd: this.jd, nextId: this.nextId, mode: this.mode, entities: ents };
   }
 
   /**
@@ -420,6 +552,8 @@ export class Sandbox {
         if (r.kind !== 'body') this.createEntity(e);
       }
       e.mode = r.mode; e.gm = r.gm; e.radius = r.radius; e.flags = r.flags; e.name = r.name;
+      e.orbit = r.orbit ? { parent: r.orbit.parent, el: { ...r.orbit.el } } : undefined;
+      e.customSpin = r.customSpin; e.phys = r.phys ? { ...r.phys } : undefined;
       e.pos.set(r.x, r.y, r.z); e.vel.set(r.vx, r.vy, r.vz);
       e.spin.axis.set(r.spin.ax, r.spin.ay, r.spin.az).normalize();
       e.spin.rate = r.spin.rate; e.spin.locked = r.spin.locked; e.spin.base.fromArray(r.spin.base); e.spin.jdBase = st.jd;
@@ -429,7 +563,15 @@ export class Sandbox {
         const base = this.baseline.get(b);
         b.gm = r.gm;
         if (base) b.systemGm = base.systemGm * (base.gm > 0 ? r.gm / base.gm : 1);
-        if (Math.abs(b.radius - r.radius) > 1e-6 * r.radius) {
+        if (base) {
+          // shape: the original axes scaled to the radius, the polar one as edited
+          const k = r.radius / base.radius;
+          const rp = r.phys?.rpol;
+          b.radii = rp ? [base.radii[0] * k, base.radii[1] * k, rp] : [base.radii[0] * k, base.radii[1] * k, base.radii[2] * k];
+          if (rp) { const s = r.radius / Math.cbrt(b.radii[0] * b.radii[1] * rp); b.radii = [b.radii[0] * s, b.radii[1] * s, rp * s]; }
+          b.radius = r.radius;
+          b.albedo = r.phys?.albedo ?? b.albedo;
+        } else if (Math.abs(b.radius - r.radius) > 1e-6 * r.radius) {
           const k = r.radius / b.radius;
           b.radii = [b.radii[0] * k, b.radii[1] * k, b.radii[2] * k];
           b.radius = r.radius;
@@ -448,7 +590,11 @@ export class Sandbox {
       }
       this.hooks.changed?.(e);
     }
-    this.sendState();
+    this.mode = st.mode ?? 'kepler';
+    this.order = null;
+    this.primaryCache = null;
+    if (this.mode === 'nbody') this.sendState();
+    else { this.gen++; this.queue = []; this.keplerUpdate(this.jd, 0); }
   }
 
   /** Restart the simulation from the entities as they are (no undo step). */
@@ -589,12 +735,109 @@ export class Sandbox {
     if (r.mode !== 'massive') { r.mode = 'massive'; r.parent = undefined; }
   }
 
-  setMass(id: number, gm: number): void {
+  /** Kepler mode: give a record the orbit its current state has about `parentId` (or its usual parent). */
+  fitOrbit(r: EntityRecord, parentId?: number | null, always = false): void {
+    if (this.mode !== 'kepler' && !always) return;
+    const e = this.entities.get(r.id);
+    const pid = parentId ?? r.orbit?.parent ?? (e ? this.parentId(e) : null);
+    const p = pid !== null && pid !== undefined ? this.entities.get(pid) ?? null : null;
+    const o = this.osculating(new Vector3(r.x, r.y, r.z), new Vector3(r.vx, r.vy, r.vz), r.gm, p);
+    r.orbit = o ?? undefined;
+  }
+
+  /** Mass (and, in the same step, radius and polar radius). */
+  setMass(id: number, gm: number, radius?: number, rpol?: number): void {
     this.edit((st) => {
       const r = st.entities.find((x) => x.id === id);
       if (!r) return;
+      if (radius !== undefined) {
+        // the shape scales with the size unless the polar radius is given
+        const k = radius / r.radius;
+        if (r.phys?.rpol && rpol === undefined) r.phys.rpol *= k;
+        r.radius = Math.max(1, radius);
+      }
+      if (rpol !== undefined) r.phys = { ...r.phys, rpol };
+      if (Math.abs(gm - r.gm) <= 1e-12 * r.gm) return;
       Sandbox.promote(r);
+      const old = r.gm;
       r.gm = Math.max(gm, 1);
+      if (this.mode !== 'kepler') return;
+      // Kepler III: everything orbiting it keeps its orbit's shape and goes round at the new rate
+      for (const c of st.entities) {
+        const e = this.entities.get(c.id);
+        if (!e || c.id === id || (c.orbit?.parent ?? (e ? this.parentId(e) : null)) !== id) continue;
+        if (!c.orbit) this.fitOrbit(c, id);
+        if (!c.orbit) continue;
+        const muOld = old + c.gm, muNew = r.gm + c.gm;
+        scaleMeanMotion(c.orbit.el, muNew / muOld, st.jd);
+      }
+      // its own orbit about its parent includes its own mass too
+      if (r.orbit) { const pg = this.entities.get(r.orbit.parent)?.gm ?? 0; scaleMeanMotion(r.orbit.el, (pg + r.gm) / (pg + old), st.jd); }
+    });
+  }
+
+  /** Kepler mode: change orbital elements (a in m, angles in degrees, M = mean anomaly now). */
+  setOrbit(id: number, ch: { a?: number; e?: number; i?: number; node?: number; peri?: number; M?: number; parent?: number }): void {
+    this.edit((st) => {
+      const r = st.entities.find((x) => x.id === id);
+      if (!r) return;
+      if (ch.parent !== undefined || !r.orbit) this.fitOrbit(r, ch.parent, true);
+      if (!r.orbit) return;
+      if (r.mode === 'rider') Sandbox.promote(r);
+      const el = r.orbit.el;
+      const a0 = el.e < 1 ? el.q / (1 - el.e) : el.q / (1 - el.e);
+      const n0 = Math.sqrt(el.mu / Math.abs(a0) ** 3);
+      let M = ((st.jd - el.tp) * DAY) * n0;
+      if (ch.M !== undefined) M = (ch.M * Math.PI) / 180;
+      const e = Math.min(0.99, Math.max(0, ch.e ?? el.e));
+      const a = ch.a ?? (el.e < 1 ? a0 : el.q / Math.max(1e-3, 1 - e));
+      el.e = e;
+      el.q = a * (1 - e);
+      if (ch.i !== undefined) el.i = ch.i;
+      if (ch.node !== undefined) el.node = ch.node;
+      if (ch.peri !== undefined) el.peri = ch.peri;
+      const n = Math.sqrt(el.mu / a ** 3);
+      el.tp = st.jd - M / n / DAY;
+      this.stateFromOrbit(r, st.jd);
+      // (the N-body simulation starts it from that state)
+      if (this.mode !== 'kepler') r.orbit = undefined;
+    });
+  }
+
+  /** Update a record's position and velocity from its orbit. */
+  private stateFromOrbit(r: EntityRecord, jd: number): void {
+    if (!r.orbit) return;
+    const p = this.entities.get(r.orbit.parent);
+    keplerState(r.orbit.el, jd, this.kp, this.kv);
+    eclToEqu(this.kp); eclToEqu(this.kv);
+    r.x = this.kp.x + (p?.pos.x ?? 0); r.y = this.kp.y + (p?.pos.y ?? 0); r.z = this.kp.z + (p?.pos.z ?? 0);
+    r.vx = this.kv.x + (p?.vel.x ?? 0); r.vy = this.kv.y + (p?.vel.y ?? 0); r.vz = this.kv.z + (p?.vel.z ?? 0);
+  }
+
+  /** Climate, shape and other physical properties. */
+  setPhys(id: number, ch: PhysProps): void {
+    this.edit((st) => {
+      const r = st.entities.find((x) => x.id === id);
+      if (r) r.phys = { ...r.phys, ...ch };
+    });
+  }
+
+  /** Analytic Kepler orbits or the N-body simulation, from the universe as it is now. */
+  setMode(mode: SimKind): void {
+    if (mode === this.mode && this.active) return;
+    this.edit((st) => {
+      st.mode = mode;
+      if (mode === 'kepler') {
+        // everything continues on the orbit it has now (osculating about its primary)
+        for (const r of st.entities) {
+          const e = this.entities.get(r.id);
+          if (!e) continue;
+          const p = this.primaryOf(e);
+          r.orbit = p ? this.osculating(e.pos, e.vel, e.gm, p) ?? undefined : undefined;
+        }
+      } else {
+        for (const r of st.entities) r.orbit = undefined;
+      }
     });
   }
 
@@ -608,6 +851,7 @@ export class Sandbox {
       if (!r) return;
       if (r.mode === 'rider') Sandbox.promote(r);
       r.vx = v.x; r.vy = v.y; r.vz = v.z;
+      this.fitOrbit(r);
     });
   }
 
@@ -618,6 +862,13 @@ export class Sandbox {
       if (r.mode === 'rider') Sandbox.promote(r);
       r.x = p.x; r.y = p.y; r.z = p.z;
       if (v) { r.vx = v.x; r.vy = v.y; r.vz = v.z; }
+      if (this.mode === 'kepler') {
+        // about whatever it now sits near (it rides along with it otherwise)
+        const e = this.entities.get(id)!;
+        const near = this.primaryAt(p, r.gm);
+        this.fitOrbit(r, near && near !== e ? near.id : null);
+        return; // (moons follow by themselves)
+      }
       // its moons come along
       for (const m of st.entities) if (m.mode === 'rider' && m.parent === id) {
         const e = this.entities.get(id)!;
@@ -629,6 +880,13 @@ export class Sandbox {
 
   remove(id: number): void {
     this.edit((st) => {
+      const gone = this.entities.get(id);
+      const grand = gone ? this.parentId(gone) : null;
+      // in Kepler mode its moons go on about its own parent, from where they are
+      if (this.mode === 'kepler') for (const m of st.entities) {
+        const e = this.entities.get(m.id);
+        if (e && m.id !== id && (m.orbit?.parent ?? this.parentId(e)) === id) this.fitOrbit(m, grand);
+      }
       st.entities = st.entities.filter((x) => x.id !== id);
       for (const m of st.entities) if (m.parent === id) { m.mode = 'test'; m.parent = undefined; }
     });
@@ -650,6 +908,7 @@ export class Sandbox {
         r.spin.rate = p ? new Vector3().subVectors(e.vel, p.vel).cross(new Vector3().subVectors(e.pos, p.pos)).length() / e.pos.distanceToSquared(p.pos) : 0;
         r.spin.locked = false;
       }
+      r.customSpin = true;
       if (rate !== null) r.spin.rate = rate;
       if (axis) {
         const q = new Quaternion().setFromUnitVectors(old, axis.clone().normalize());
@@ -662,7 +921,7 @@ export class Sandbox {
   }
 
   /** Add something new; returns its id. */
-  spawn(kind: EntityKind, name: string, spec: SpawnSpec, gm: number, radius: number, pos: Vector3, vel: Vector3, flags = 0): number {
+  spawn(kind: EntityKind, name: string, spec: SpawnSpec, gm: number, radius: number, pos: Vector3, vel: Vector3, flags = 0, parentId?: number): number {
     const id = this.nextId++;
     this.edit((st) => {
       st.nextId = this.nextId;
@@ -675,8 +934,11 @@ export class Sandbox {
         id, kind, name, mode: kind === 'swarm' ? 'test' : 'massive', gm, radius, flags,
         x: pos.x, y: pos.y, z: pos.z, vx: vel.x, vy: vel.y, vz: vel.z,
         spin: { ax: axis.x, ay: axis.y, az: axis.z, rate: kind === 'hole' ? 0 : (2 * Math.PI) / (rotHours * 3600), locked: false, base: [...base.elements] },
-        spawn: spec,
+        spawn: spec, customSpin: true,
       });
+      const rec = st.entities[st.entities.length - 1];
+      const p = parentId !== undefined ? this.entities.get(parentId) ?? null : this.primaryAt(pos, gm);
+      this.fitOrbit(rec, p?.id ?? null);
     });
     return id;
   }
