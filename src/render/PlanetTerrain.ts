@@ -257,6 +257,9 @@ export class PlanetTerrain {
         name: 'terrain-tile',
         vertexShader: TILE_VERT,
         fragmentShader: tileFragment(bodyMat.fragmentShader),
+        // the body shader compiles its terrain-only code (ground materials, relief, rocks' light)
+        // under #ifdef TERRAIN (shaders/body.ts)
+        defines: { ...bodyMat.defines, TERRAIN: 1 },
         uniforms: {
           ...bodyMat.uniforms, ...TILE_UNIFORMS, uTerrain: { value: 1 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
           uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) }, uMatO: { value: new Vector3() },

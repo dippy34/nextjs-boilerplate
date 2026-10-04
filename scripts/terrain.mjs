@@ -234,7 +234,8 @@ for (const [id, name, body, key] of [['t7-tycho', 'Tycho', 'Moon', 'moon'], ['t8
   await page.waitForFunction((b) => window.app.terrain.owner?.name === b, body, { timeout: 120000 }).catch(() => undefined);
   await frames(30);
   st = await page.evaluate((k) => ({ version: window.app.bodies.terrainSource.versions.get(k) ?? 0, owner: window.app.terrain.owner?.name ?? null,
-    haze: window.app.terrain.group.children.find((m) => m.name === 'terrain haze')?.visible ?? false }), key);
+    // per-tile haze meshes (planet-wide terrain): any of them drawn
+    haze: window.app.terrain.group.children.some((m) => m.name === 'terrain haze' && m.visible) }), key);
   check(`${id}: sharper elevation patch loaded and drawn`, st.version > 0 && st.owner === body, JSON.stringify(st));
   if (body !== 'Moon') check(`${id}: the atmosphere is drawn over the terrain`, st.haze);
   await page.screenshot({ path: path.join(outDir, `${id}.png`), timeout: 180000 });
