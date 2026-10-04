@@ -131,7 +131,8 @@ export class Renderer {
                  + 4.0 * texture2D(tSrc, vUv).rgb + 2.0 * texture2D(tSrc, vUv + vec2(o.x, 0.0)).rgb
                  + texture2D(tSrc, vUv + vec2(-o.x, -o.y)).rgb + 2.0 * texture2D(tSrc, vUv + vec2(0.0, -o.y)).rgb
                  + texture2D(tSrc, vUv + vec2(o.x, -o.y)).rgb;
-          gl_FragColor = vec4(s / 16.0 + texture2D(tPrev, vUv).rgb, 1.0);
+          // (clamped: the sum of the levels can exceed half-float range and turn into infinity)
+          gl_FragColor = vec4(min(s / 16.0 + texture2D(tPrev, vUv).rgb, vec3(6.0e4)), 1.0);
         }`,
       uniforms: { tSrc: { value: null }, tPrev: { value: null }, uTexel: { value: new Vector2() }, uRadius: { value: 1 } },
       depthTest: false, depthWrite: false, blending: NoBlending,
@@ -144,7 +145,7 @@ export class Renderer {
         vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
         float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main() {
-          vec3 hdr = texture2D(tScene, vUv).rgb + uBloom * texture2D(tBloom, vUv).rgb;
+          vec3 hdr = min(texture2D(tScene, vUv).rgb, vec3(6.0e4)) + uBloom * min(texture2D(tBloom, vUv).rgb, vec3(6.0e4));
           vec3 c = toSRGB(spTone(hdr * uExposure));
           c += (hash(gl_FragCoord.xy) - 0.5) / 255.0; // dither
           gl_FragColor = vec4(c, 1.0);
