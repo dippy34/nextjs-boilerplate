@@ -261,8 +261,11 @@ export class Flight {
     if (!D) { ship.vel.set(0, 0, 0); core.syncRel(); return; }
     // next to a station, ship or spacecraft: matched to its velocity (ready to dock)
     const t = this.anchorTrack, anc = this.app.rig.anchor;
-    if (t && t.ok && anc && t.obj === anc && anc.upos.sub(ship.upos, this.tmp).length() < 50e3) {
-      ship.vel.copy(t.vel);
+    const orb = anc as unknown as { vel?: Vector3; body?: Body };
+    if (anc && anc.upos.sub(ship.upos, this.tmp).length() < 50e3 && ((t && t.ok && t.obj === anc) || (orb.vel && orb.body))) {
+      // stations and traffic ships know their orbital velocity (about their world); others are tracked
+      if (orb.vel && orb.body instanceof Body) ship.vel.copy(orb.body.vel).add(orb.vel);
+      else ship.vel.copy(t!.vel);
       core.landed = null;
       core.syncRel();
       if (announce) this.app.hud.toast(`Matched velocity with ${anc.name}`);

@@ -286,10 +286,13 @@ export class Game {
     for (const st of this.traffic.stations) {
       const rel = rig.upos.sub(st.port(), new Vector3());
       const dist = rel.length();
-      if (dist > 400 || dist < 1) continue;
-      // in front of the port, roughly on the axis, and slow
-      // (in physics flight the docking computer matches velocity itself)
-      if (rel.dot(st.axis) / dist > 0.75 && (rig.speed < 400 || this.flight.on)) {
+      // physics flight: within 25 km, velocity matched to the station (< 150 m/s) and thrusting
+      // towards it, the docking computer takes over; otherwise in front of the port, on the axis, slow
+      const f = this.flight;
+      const flightDock = f.on && dist < 25e3 && f.ship.throttle > 0
+        && f.ship.vel.clone().sub(st.body.vel).sub(st.vel).length() < 150;
+      if (!flightDock && (dist > 400 || dist < 1)) continue;
+      if (flightDock || (rel.dot(st.axis) / dist > 0.75 && rig.speed < 400)) {
         const hold = this.holdPoint(st);
         this.docking = { station: st, t: 0, from: hold.negate(), q0: rig.quat.clone() };
         this.flight.ship.throttle = 0;
