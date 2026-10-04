@@ -9,10 +9,9 @@ import { Vector3 } from 'three';
  *   { type: 'spec', id, spec }       a world's height function (sent again when its heights change)
  *   { type: 'drop', id }             forget a world
  *   { type: 'tile', job, id, req }   build a tile -> { job, data } (arrays transferred)
- * Replies { type: 'elev', id, version } when sharper global elevation tiles stream in, so the main
- * thread rebuilds the affected tiles with them.
+ * Bodies with a global elevation pyramid: the tiles a job samples are fetched before it is built.
  */
-interface Fn { fn: HeightFn; bodyKey: string | null; elev: boolean; elevVer: number }
+interface Fn { fn: HeightFn; bodyKey: string | null; elev: boolean }
 const fns = new Map<number, Fn>();
 const store = new ElevationStore();
 let elevConfigured = false;
@@ -47,39 +46,53 @@ self.onmessage = (ev: MessageEvent) => {
       elev = true;
       elevSample = makeElevSample(bodyKey);
     }
-    fns.set(m.id, { fn: heightFromSpec(spec, elevSample), bodyKey, elev, elevVer: 0 });
+    fns.set(m.id, { fn: heightFromSpec(spec, elevSample), bodyKey, elev });
     return;
   }
   if (m.type === 'drop') { fns.delete(m.id); return; }
   if (m.type === 'tile') {
     const f = fns.get(m.id);
     if (!f) { (self as unknown as Worker).postMessage({ job: m.job, data: null }); return; }
-    const req = m.req!;
-    // make sure the elevation tiles for this tile's area are being fetched (for this and later builds)
-    if (f.elev && f.bodyKey) {
-      const [s0, t0, w] = tileRect(req.level, req.x, req.y);
-      const c = faceDir(req.face, s0 + w / 2, t0 + w / 2);
-      const spacing = Math.max(req.minSpacing ?? 0, (req.radius * Math.PI) / 2 / 2 ** req.level / 64);
-      void store.prefetch(f.bodyKey, { x: c.x, y: c.y, z: c.z }, spacing, 1).then(() => {
-        const v = store.version(f.bodyKey!);
-        if (v !== f.elevVer) { f.elevVer = v; (self as unknown as Worker).postMessage({ type: 'elev', id: m.id, version: v }); }
-      });
-    }
-    const data = buildTile(req, f.fn);
-    // the column under the explorer, each tile from its parent's shape
-    const chain: { level: number; x: number; y: number; data: TileData }[] = [];
-    if (req.chain && dirFace({ x: req.chain.dir[0], y: req.chain.dir[1], z: req.chain.dir[2] }).face === req.face) {
-      const dir = { x: req.chain.dir[0], y: req.chain.dir[1], z: req.chain.dir[2] };
-      let cur = { level: req.level, x: req.x, y: req.y, data };
-      while (cur.level < req.chain.level) {
-        const c = childToward({ face: req.face, ...cur }, dir);
-        const d = buildTile({ ...req, level: cur.level + 1, x: c.x, y: c.y, chain: null,
-          parent: { pos: cur.data.pos, tn: cur.data.tn, centre: cur.data.centre, qx: c.x & 1, qy: c.y & 1 } }, f.fn);
-        cur = { level: cur.level + 1, x: c.x, y: c.y, data: d };
-        chain.push(cur);
-      }
-    }
-    const bufs = (d: TileData) => [d.pos.buffer, d.morph.buffer, d.n.buffer, d.tn.buffer, d.tnc.buffer, d.uv.buffer, d.sun.buffer, d.h.buffer];
-    (self as unknown as Worker).postMessage({ job: m.job, data, chain }, [...bufs(data), ...chain.flatMap((c) => bufs(c.data))]);
+    void buildJob(m.job!, m.req!, f);
   }
 };
+
+/** a promise that settles after `ms` (so a slow fetch never holds a tile back for long) */
+const later = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
+
+async function buildJob(job: number, req: TileRequest, f: Fn): Promise<void> {
+  // the elevation tiles this tile (and the column below it) samples, fetched first, so its heights
+  // are final when it is drawn: the ground never changes under the explorer as data streams in
+  if (f.elev && f.bodyKey) {
+    const [s0, t0, w] = tileRect(req.level, req.x, req.y);
+    const c = faceDir(req.face, s0 + w / 2, t0 + w / 2);
+    const sp = (level: number) => Math.max(req.minSpacing ?? 0, (req.radius * Math.PI) / 2 / 2 ** level / 64);
+    const want = [store.prefetch(f.bodyKey, { x: c.x, y: c.y, z: c.z }, sp(req.level), 1)];
+    if (req.chain) want.push(store.prefetch(f.bodyKey, { x: req.chain.dir[0], y: req.chain.dir[1], z: req.chain.dir[2] }, sp(req.chain.level), 1));
+    await Promise.race([Promise.all(want).catch(() => undefined), later(4000)]);
+  }
+  const data = buildTile(req, f.fn);
+  // the column under the explorer, each tile from its parent's shape
+  const chain: { level: number; x: number; y: number; data: TileData }[] = [];
+  if (req.chain && dirFace({ x: req.chain.dir[0], y: req.chain.dir[1], z: req.chain.dir[2] }).face === req.face) {
+    const dir = { x: req.chain.dir[0], y: req.chain.dir[1], z: req.chain.dir[2] };
+    // all four children at each level (a tile splits only when its four children are there),
+    // continuing below the one that holds the direction
+    let cur = { level: req.level, x: req.x, y: req.y, data };
+    while (cur.level < req.chain.level) {
+      const c = childToward({ face: req.face, ...cur }, dir);
+      let next = cur;
+      for (let q = 0; q < 4; q++) {
+        const x = cur.x * 2 + (q & 1), y = cur.y * 2 + (q >> 1);
+        const d = buildTile({ ...req, level: cur.level + 1, x, y, chain: null,
+          parent: { pos: cur.data.pos, tn: cur.data.tn, centre: cur.data.centre, qx: q & 1, qy: q >> 1 } }, f.fn);
+        const e = { level: cur.level + 1, x, y, data: d };
+        chain.push(e);
+        if (x === c.x && y === c.y) next = e;
+      }
+      cur = next;
+    }
+  }
+  const bufs = (d: TileData) => [d.pos.buffer, d.morph.buffer, d.n.buffer, d.tn.buffer, d.tnc.buffer, d.uv.buffer, d.sun.buffer, d.h.buffer];
+  (self as unknown as Worker).postMessage({ job, data, chain }, [...bufs(data), ...chain.flatMap((c) => bufs(c.data))]);
+}

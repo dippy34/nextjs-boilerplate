@@ -165,7 +165,7 @@ describe('terrain patch', () => {
     expect(below.dist).toBeCloseTo(b.radius + 800, 3);
     // and exactly the height function there, at the drawn tile's resolution
     expect(Math.abs(below.ground - (b.radius + src.height(b, up, 2)))).toBeLessThan(15);
-  });
+  }, 60000);
 
   it('casts shadows with a low Sun, none with the Sun overhead', () => {
     const up = new Vector3(0.3, -0.5, 0.8).normalize();
@@ -184,7 +184,7 @@ describe('terrain patch', () => {
     console.log(`shadowed: Sun 3 deg up ${(shadowedLow * 100).toFixed(1)} %, overhead ${(shadowedHigh * 100).toFixed(1)} %`);
     expect(shadowedLow).toBeGreaterThan(0.03);
     expect(shadowedHigh).toBeLessThan(0.01);
-  });
+  }, 60000);
 });
 
 describe('rocks', () => {
@@ -240,7 +240,7 @@ describe('rocks', () => {
     const next = at(up.clone().add(new Vector3(1, 0.4, 0).multiplyScalar(200 / b.radius)).normalize());
     expect(next.n).toBeGreaterThan(50);
     expect(next.worst).toBeLessThan(1);
-  });
+  }, 60000);
 });
 
 describe('atmosphere over the terrain', () => {

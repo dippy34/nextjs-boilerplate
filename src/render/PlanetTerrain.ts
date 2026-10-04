@@ -5,7 +5,7 @@ import type { UPos } from '../core/upos';
 import { baseRadius, type Ground, type TerrainSource } from '../universe/Terrain';
 import { heightSpec, type HeightSpec } from '../universe/TerrainHeights';
 import {
-  buildTile, dirFace, faceDir, SUN_CLEAR, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
+  buildTile, childToward, dirFace, faceDir, SUN_CLEAR, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
   type TileData, type TileRequest, tileValue,
 } from '../universe/TerrainTiles';
 import { ATMO_HAZE_FRAG } from './shaders/atmosphere';
@@ -207,7 +207,6 @@ export class PlanetTerrain {
   private jobs = new Map<number, { node: Node; world: World; worker: number; serialAtStart: number }>();
   private jobSeq = 0;
   private frame = 0;
-  private elevVersion = 0;
   /** this frame's column under the explorer: direction (body-fixed) and the level wanted there */
   private chainDir = new Vector3();
   private chainLevel = 0;
@@ -226,11 +225,7 @@ export class PlanetTerrain {
         try {
           const w = new Worker(new URL('../workers/terrainTiles.worker.ts', import.meta.url), { type: 'module', name: `terrain-${workerSeq++}` });
           const k = i;
-          w.onmessage = (ev) => {
-            const d = ev.data as { type?: string; version?: number; job?: number; data?: TileData | null };
-            if (d.type === 'elev') { this.onElevation(d.version ?? 0); return; }
-            this.receive(k, d as { job: number; data: TileData | null });
-          };
+          w.onmessage = (ev) => this.receive(k, ev.data as Parameters<PlanetTerrain['receive']>[1]);
           this.workers.push(w);
           this.busy.push(0);
         } catch { /* no workers: built on the main thread */ }
@@ -434,7 +429,8 @@ export class PlanetTerrain {
       if (n.stale && !n.job) want.push({ n, p: 0.5 });
       const { sse, inView } = errorOf(n);
       const lim = (inView ? P : P * 3) * (n.split ? 0.8 : 1);
-      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && sel.length < drawCap;
+      // (the tile under the explorer always refines: the cap only trims the surroundings)
+      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && (sel.length < drawCap || this.holds(n, up));
       const wantSplit = !merging && canSplit && sse > lim;
       if (wantSplit) {
         if (!n.kids) n.kids = [0, 1, 2, 3].map((q) => new Node(n.face, n.level + 1, n.x * 2 + (q & 1), n.y * 2 + (q >> 1), n));
@@ -448,7 +444,8 @@ export class PlanetTerrain {
         }
         if (all) {
           if (!n.split) { n.split = true; for (const k of n.kids) k.m = 0; }
-          for (const k of n.kids) walk(k, false);
+          // nearest first, so the draw budget goes to what is close
+          for (const k of [...n.kids].sort((a, b) => a.dir.angleTo(up) - b.dir.angleTo(up))) walk(k, false);
           return;
         }
       } else if (n.split && n.kids) {
@@ -486,7 +483,20 @@ export class PlanetTerrain {
       this.chainLevel = Math.max(0, Math.min(24, Math.ceil(Math.log2((R * Math.PI) / 2 / TILE_N / target))));
       this.chainDir.copy(up);
     }
-    this.dispatch(w, want.map((x) => x.n), c, sunBF);
+    // the next missing tile of the column under the explorer goes first, with a reserved slot
+    let column: Node | null = null;
+    if (ready) {
+      let node = w.roots[dirFace(up).face];
+      while (node.data && node.level < this.chainLevel) {
+        if (!node.kids) node.kids = [0, 1, 2, 3].map((q) => new Node(node.face, node.level + 1, node.x * 2 + (q & 1), node.y * 2 + (q >> 1), node));
+        const ct = childToward(node, up);
+        const k = node.kids.find((x) => x.x === ct.x && x.y === ct.y)!;
+        k.used = frame;
+        if (!k.data) { if (!k.job) column = k; break; }
+        node = k;
+      }
+    }
+    this.dispatch(w, want.map((x) => x.n), c, sunBF, column);
     this.stats.pending = this.jobs.size;
     if (!ready) return false;
 
@@ -636,7 +646,8 @@ export class PlanetTerrain {
    * flood of new geometry). Accepted immediately as each worker reports back, so a built tile is
    * never re-requested while it waits in a queue.
    */
-  private dispatch(w: World, nodes: Node[], c: TerrainCandidate, sunBF: Vector3): void {
+  private dispatch(w: World, nodes: Node[], c: TerrainCandidate, sunBF: Vector3, column: Node | null = null): void {
+    if (column) nodes = [column, ...nodes.filter((n) => n !== column)];
     const spec = (w as World & { spec: HeightSpec | null }).spec;
     if (!this.workers.length || !spec) {
       // no workers: build a few tiles on the main thread within a small time budget
@@ -650,7 +661,8 @@ export class PlanetTerrain {
       return;
     }
     const cap = this.vr ? this.inFlightVr : this.inFlight;
-    let free = cap - this.jobs.size;
+    // (one slot beyond the cap is kept for the column under the explorer)
+    let free = cap - this.jobs.size + (column ? 1 : 0);
     for (const n of nodes) {
       if (free <= 0) break;
       if (n.job || (n.data && !n.stale)) continue;
@@ -664,20 +676,10 @@ export class PlanetTerrain {
       this.jobs.set(job, { node: n, world: w, worker: k, serialAtStart: 0 });
       const req = this.reqOf(w, n, sunBF, c.lonLeft);
       if (!n.data && this.chainLevel > n.level + 1 && this.holds(n, this.chainDir)) {
-        req.chain = { dir: [this.chainDir.x, this.chainDir.y, this.chainDir.z], level: Math.min(this.chainLevel, n.level + 8) };
+        req.chain = { dir: [this.chainDir.x, this.chainDir.y, this.chainDir.z], level: Math.min(this.chainLevel, n.level + 6) };
       }
       this.workers[k].postMessage({ type: 'tile', job, id: w.id, req });
     }
-  }
-
-  /**
-   * A worker loaded sharper global elevation: rebuild the drawn tiles to pick it up (bounded churn;
-   * tiles that are not in view rebuild from the current data when they next come into view).
-   */
-  private onElevation(version: number): void {
-    if (version <= this.elevVersion) return;
-    this.elevVersion = version;
-    for (const n of this.drawn) n.stale = true;
   }
 
   /** whether tile `n` holds body-fixed direction `d` */
@@ -699,14 +701,18 @@ export class PlanetTerrain {
     if (!msg.data || j.world !== this.world) return;
     this.accept(j.world, n, msg.data);
     // the column below it, built in the same job
-    let node = n;
+    // (entries come level by level, the four children of one tile each; descend into the parent's
+    // child that has the next level's tiles)
+    const byKey = new Map<string, Node>([[`${n.level}:${n.x}:${n.y}`, n]]);
     for (const c of msg.chain ?? []) {
-      if (!node.kids) node.kids = [0, 1, 2, 3].map((q) => new Node(node.face, node.level + 1, node.x * 2 + (q & 1), node.y * 2 + (q >> 1), node));
-      const kid = node.kids.find((k) => k.x === c.x && k.y === c.y);
-      if (!kid) break;
+      const parent = byKey.get(`${c.level - 1}:${c.x >> 1}:${c.y >> 1}`);
+      if (!parent) continue;
+      if (!parent.kids) parent.kids = [0, 1, 2, 3].map((q) => new Node(parent.face, parent.level + 1, parent.x * 2 + (q & 1), parent.y * 2 + (q >> 1), parent));
+      const kid = parent.kids.find((k) => k.x === c.x && k.y === c.y);
+      if (!kid) continue;
       kid.used = this.frame;
       if (!kid.data && !kid.job) { kid.sunBF.copy(n.sunBF); this.accept(j.world, kid, c.data); }
-      node = kid;
+      byKey.set(`${c.level}:${c.x}:${c.y}`, kid);
     }
   }
 
