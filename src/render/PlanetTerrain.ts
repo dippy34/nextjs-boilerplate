@@ -2,6 +2,8 @@ import {
   BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, NoBlending, Quaternion, ShaderMaterial, Sphere, Vector3,
 } from 'three';
 import type { UPos } from '../core/upos';
+import type { Body } from '../universe/Body';
+import { ExoGround } from '../universe/ExoTerrain';
 import { baseRadius, type Ground, type TerrainSource } from '../universe/Terrain';
 import { heightSpec, type HeightSpec } from '../universe/TerrainHeights';
 import {
@@ -924,6 +926,35 @@ export class PlanetTerrain {
   }
   private static probe: HTMLCanvasElement | undefined;
   private static mapMeans = new WeakMap<object, number>();
+
+  /**
+   * Water level (m above the reference surface) of the current world at body-fixed unit direction
+   * `n`, or null where it has no water: Earth's sea (and its lakes below sea level, but not its dry
+   * depressions, Terrain.DEPRESSIONS), the seas of ocean and Earth-like generated planets (at 0).
+   */
+  waterLevel(n: Vector3): number | null {
+    const w = this.world;
+    if (!w) return null;
+    const g = w.ground;
+    if (g instanceof ExoGround) {
+      const type = (g as unknown as { type: number }).type;
+      return type === 3 || type === 4 ? 0 : null;
+    }
+    return this.source && g.owner ? this.source.waterLevel(g.owner as Body, n) : null;
+  }
+
+  /**
+   * Whether the ground drawn at body-fixed unit direction `n` (of the current world) is open water:
+   * the drawn ground lies flat at the local water level (heights below it are drawn as water).
+   * False with no terrain, and on worlds without water.
+   */
+  isSea(n: Vector3): boolean {
+    const w = this.world;
+    if (!w || !this.current) return false;
+    const lvl = this.waterLevel(n);
+    if (lvl === null) return false;
+    return this.groundRadius(n) - baseRadius(w.ground, n) <= lvl + 0.05;
+  }
 
   groundRadius(n: Vector3): number {
     const w = this.world;

@@ -7,7 +7,7 @@ import { tileFragment } from '../src/render/PlanetTerrain';
 import { Renderer } from '../src/render/Renderer';
 import { BODY_FRAG } from '../src/render/shaders/body';
 import { EXO_FRAG } from '../src/render/shaders/planet';
-import { TerrainSource } from '../src/universe/Terrain';
+import { DEPRESSIONS, earthWaterLevel, TerrainSource } from '../src/universe/Terrain';
 import { heightFromSpec, heightSpec } from '../src/universe/TerrainHeights';
 import {
   buildTile, childToward, dirFace, skirtMasks, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileValue,
@@ -213,5 +213,35 @@ describe('skirts and warm-up', () => {
     bound = was;
     Renderer.prototype.withSceneTarget.call({ ...fake, presenting: true } as never, () => { seen = bound; });
     expect(seen).toBe(was);
+  });
+});
+
+describe('water on Earth', () => {
+  const at = (lat: number, lon: number) => {
+    const la = (lat * Math.PI) / 180, lo = (lon * Math.PI) / 180;
+    return new Vector3(Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la));
+  };
+  it('dry depressions are land with a floor, lakes below sea level keep their own level, open sea stays at 0', () => {
+    const w = (lat: number, lon: number) => earthWaterLevel(at(lat, lon), 0);
+    expect(w(36.25, -116.85)).toMatchObject({ level: -80, water: false });   // Death Valley
+    expect(w(29.6, 27.0)).toMatchObject({ water: false });                   // Qattara
+    expect(w(31.5, 35.5)).toMatchObject({ level: -199, water: true });       // Dead Sea (the data stops at -200 m)
+    expect(w(32.82, 35.59)).toMatchObject({ water: true });                  // Sea of Galilee, not the dry rift around it
+    expect(w(37.0, 51.5)).toMatchObject({ level: -28, water: true });        // southern Caspian
+    expect(w(46.8, 50.5)).toMatchObject({ level: -28, water: true });        // northern Caspian
+    expect(w(43.4, 51.4)).toMatchObject({ water: false });                   // Karagiye, a dry basin by the Caspian
+    expect(w(30, -40)).toMatchObject({ level: 0, water: true });             // mid-Atlantic
+  });
+  it('no depression circle reaches the open sea next to it', () => {
+    const sea: [string, number, number][] = [
+      ['Mediterranean off Tel Aviv', 32.1, 34.7], ['Mediterranean off Haifa', 32.85, 34.95], ['Mediterranean off Gaza', 31.5, 34.35],
+      ['Mediterranean off El Alamein', 30.95, 28.9], ['Mediterranean off Marsa Matruh', 31.45, 27.2], ['Gulf of Gabes', 33.9, 10.4],
+      ['Red Sea off Thio', 14.75, 41.0], ['Gulf of Zula', 15.3, 39.75], ['Gulf of Tadjoura', 11.6, 43.0], ['Ghoubbet', 11.55, 42.6],
+      ['Black Sea off Batumi', 41.65, 41.5], ['Persian Gulf', 29.9, 48.6], ['Gulf of California', 31.6, -114.6],
+      ['Pacific off Los Angeles', 33.7, -118.5], ['Atlantic off Tarfaya', 27.9, -13.1], ['Caribbean off Barahona', 18.15, -71.05],
+      ['Atlantic off Patagonia', -49.6, -67.6], ['Spencer Gulf', -33.0, 137.6], ['Gulf of Suez', 29.5, 32.6],
+    ];
+    for (const [name, lat, lon] of sea) expect(earthWaterLevel(at(lat, lon), 0), name).toMatchObject({ level: 0, water: true });
+    expect(DEPRESSIONS.length).toBeGreaterThan(10);
   });
 });
