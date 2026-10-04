@@ -371,7 +371,6 @@ export class Game {
         warning: fr.warning,
         lock: fr.massLock ? 'MASS-LOCKED' : '',
       };
-      if (fr.massLock && !this.warping) r.warp = 'no target';
     } else r.flight = null;
   }
 

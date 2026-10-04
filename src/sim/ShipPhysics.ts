@@ -439,6 +439,20 @@ export class FlightCore {
     this.ship.vel.copy(src.vel).addScaledVector(t, vc);
     this.landed = null;
     this.frame = src;
+    this.syncRel();
+  }
+
+  /** After the ship's absolute state was set directly: the relative state that place() uses. */
+  syncRel(): void {
+    const D = this.frame, ship = this.ship;
+    if (D) {
+      ship.upos.sub(D.upos, this.rel);
+      this.relVel.copy(ship.vel).sub(D.vel);
+    } else {
+      this.origin.copy(ship.upos);
+      this.rel.set(0, 0, 0);
+      this.relVel.copy(ship.vel);
+    }
   }
 }
 

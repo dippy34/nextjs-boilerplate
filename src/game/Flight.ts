@@ -258,7 +258,7 @@ export class Flight {
     gravity.refresh();
     const D = core.chooseFrame();
     this.frameEnv();
-    if (!D) { ship.vel.set(0, 0, 0); return; }
+    if (!D) { ship.vel.set(0, 0, 0); core.syncRel(); return; }
     const rel = ship.upos.sub(D.upos, new Vector3());
     const r = rel.length();
     const ground = core.groundR;
@@ -271,6 +271,7 @@ export class Flight {
       const dir = rel.clone().normalize();
       const bf = D.orient ? dir.clone().transformDirection(D.orient.clone().invert()) : dir;
       core.landed = { dir: bf, src: D };
+      core.syncRel();
       if (announce) this.app.hud.toast(`Landed on ${D.name}`);
       return;
     }
@@ -280,6 +281,7 @@ export class Flight {
       // too low for an orbit: hanging still over the ground, and starting to fall
       ship.vel.copy(D.vel).add(new Vector3().crossVectors(core.spin, rel));
       core.landed = null;
+      core.syncRel();
       if (announce) this.app.hud.toast(`Over ${D.name} with no orbital speed: you are falling! W throttles up`, 3.5);
       return;
     }
@@ -305,6 +307,7 @@ export class Flight {
     ship.upos.copy(D.upos).addVec(rel);
     ship.vel.copy(D.vel).add(new Vector3().crossVectors(core.spin, rel));
     core.landed = null;
+    core.syncRel();
     this.app.rig.upos.copy(ship.upos);
   }
 
