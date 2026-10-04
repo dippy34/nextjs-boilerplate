@@ -4,6 +4,7 @@ import {
   Vector3, WebGLCoordinateSystem, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { installToneMapping, TONE_GLSL } from './shaders/tone';
+import { Governor, QUALITY, RENDER_SCALE, XR_VOLUME_FACTOR } from './Quality';
 import { OUTPUT_FRAGMENT } from './shaders/xr';
 
 /**
@@ -103,6 +104,11 @@ ${OUTPUT_FRAGMENT}
   width = 1;
   height = 1;
   pixelRatio = 1;
+  /** internal render resolution relative to the canvas (the quality governor's desktop knob) */
+  renderScale = 1;
+  private cssW = 1;
+  private cssH = 1;
+  readonly governor = new Governor(Governor.wanted());
 
   /** dolly carrying the camera (and VR controllers); its orientation is the explorer's orientation */
   readonly rig = new Group();
@@ -226,10 +232,17 @@ ${OUTPUT_FRAGMENT}
   setSize(cssWidth: number, cssHeight: number, dpr: number): void {
     if (this.presenting) return; // the headset owns the framebuffer size
     this.pixelRatio = dpr;
+    this.cssW = cssWidth;
+    this.cssH = cssHeight;
     this.gl.setPixelRatio(dpr);
     this.gl.setSize(cssWidth, cssHeight, false);
-    const w = Math.max(1, Math.floor(cssWidth * dpr));
-    const h = Math.max(1, Math.floor(cssHeight * dpr));
+    this.allocate();
+  }
+
+  /** the internal render targets at the canvas size times `renderScale` (the composite upscales) */
+  private allocate(): void {
+    const w = Math.max(1, Math.floor(this.cssW * this.pixelRatio * this.renderScale));
+    const h = Math.max(1, Math.floor(this.cssH * this.pixelRatio * this.renderScale));
     this.width = w;
     this.height = h;
     this.hdr.dispose();
@@ -288,8 +301,10 @@ ${OUTPUT_FRAGMENT}
         pixelRatio: 1, far: far > 0 ? far : Infinity, xr: true };
     }
     this.camera.getWorldQuaternion(this.viewQuat);
-    return { quat: this.viewQuat, fovY: this.camera.fov, aspect: this.camera.aspect, width: this.width / this.pixelRatio,
-      height: this.height / this.pixelRatio, pixelAngle: this.pixelAngle(), pixelRatio: this.pixelRatio, far: Infinity, xr: false };
+    // (render pixels per CSS pixel: the device's ratio times the internal resolution scale)
+    const ratio = this.pixelRatio * this.renderScale;
+    return { quat: this.viewQuat, fovY: this.camera.fov, aspect: this.camera.aspect, width: this.width / ratio,
+      height: this.height / ratio, pixelAngle: this.pixelAngle(), pixelRatio: ratio, far: Infinity, xr: false };
   }
   /**
    * Run `fn` (shader compilation ahead of time) with the scene's render target bound: three builds
@@ -301,6 +316,16 @@ ${OUTPUT_FRAGMENT}
     const was = this.gl.getRenderTarget();
     this.gl.setRenderTarget(this.hdr);
     try { return fn(); } finally { this.gl.setRenderTarget(was); }
+  }
+
+  /** The quality level changed (Quality.ts): a desktop renders at a scaled internal resolution. */
+  private applyQuality(): void {
+    const scale = RENDER_SCALE[QUALITY.level];
+    console.info(`quality level ${QUALITY.level}${this.presenting ? ' (headset)' : `: render scale ${scale}`}`);
+    if (!this.presenting && scale !== this.renderScale) {
+      this.renderScale = scale;
+      this.allocate();
+    }
   }
 
   /**
@@ -380,6 +405,9 @@ ${OUTPUT_FRAGMENT}
 
   render(): void {
     const gl = this.gl;
+    // adaptive quality: budget 60 Hz on a desktop, the session's rate in a headset
+    const budget = this.presenting ? 1000 / ((gl.xr.getSession() as (XRSession & { frameRate?: number }) | null)?.frameRate || 72) : 1000 / 60;
+    if (this.governor.update(performance.now(), budget)) this.applyQuality();
     if (this.presenting) {
       // three binds the headset's framebuffer (an XR render target backed by the session's
       // projection layer) before every XR frame: draw into that, never into the page canvas.
@@ -392,7 +420,7 @@ ${OUTPUT_FRAGMENT}
       gl.clear(true, true, true);
       if (this.depthMode === 'reversed-z') this.reverseXrProjections();
       const xrTarget = gl.getRenderTarget();
-      this.volQuad.visible = xrTarget ? this.volumePass(xrTarget.width, xrTarget.height, VOLUMES.scaleXr) : false;
+      this.volQuad.visible = xrTarget ? this.volumePass(xrTarget.width, xrTarget.height, VOLUMES.scaleXr * XR_VOLUME_FACTOR[QUALITY.level]) : false;
       gl.setRenderTarget(xrTarget);
       gl.render(this.scene, this.camera);
       return;

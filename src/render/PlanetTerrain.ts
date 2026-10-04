@@ -10,6 +10,7 @@ import {
   buildTile, childToward, dirFace, faceDir, SUN_CLEAR, skirtMasks, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
   type TileData, type TileRequest, tileValue,
 } from '../universe/TerrainTiles';
+import { QUALITY, XR_TERRAIN_FACTOR } from './Quality';
 import { ATMO_HAZE_FRAG } from './shaders/atmosphere';
 import { FIX_LOGDEPTH, PROJECT_PARS } from './shaders/xr';
 
@@ -422,7 +423,8 @@ export class PlanetTerrain {
     const pa = (this.view?.pixelAngle ?? 1e-3) * (this.vr ? 1 : this.view?.pixelRatio ?? 1);
     // height above the ground actually drawn (last frame's tiles)
     const altG = this.drawn.length ? D - this.groundRadius(up) : alt;
-    const P = this.vr ? this.pixPerCellVr : this.pixPerCell;
+    // (a headset's quality level coarsens the terrain: its framebuffer is fixed, Quality.ts)
+    const P = this.vr ? this.pixPerCellVr * XR_TERRAIN_FACTOR[QUALITY.level] : this.pixPerCell;
     const rot = new Matrix3().setFromMatrix4(c.orient);
     const toBF = rot.clone().transpose();
     const viewW = new Vector3(0, 0, -1);
