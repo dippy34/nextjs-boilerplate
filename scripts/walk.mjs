@@ -261,6 +261,80 @@ if (which !== 'vr') {
   await sample(page, 12);
   await page.keyboard.up('KeyW');
   await page.screenshot({ timeout: 400000, path: path.join(outDir, 'w6-exoplanet-walking.png') });
+  await page.keyboard.press('KeyB');
+
+  // the sea's edge on Earth (Nazaré, Portugal): walking west stops at the shoreline; no walking on the sea
+  await page.evaluate(() => {
+    const a = window.app, e = a.findByName('Earth');
+    a.select(e);
+    const la = (39.6015 * Math.PI) / 180, lo = (-9.0735 * Math.PI) / 180;
+    const nBF = e.upos.sub(a.rig.upos).set(Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la));
+    const up = nBF.clone().transformDirection(e.orientation);
+    a.rig.setAnchor(e);
+    a.rig.upos.copy(e.upos).addVec(up, e.radius + 400);
+    const west = nBF.clone().set(Math.sin(lo), -Math.cos(lo), 0).transformDirection(e.orientation);
+    a.rig.lookAt(west, up);
+  });
+  await page.waitForFunction(() => window.app.terrain.owner?.name === 'Earth' && window.app.terrain.hScale > 0.99, null, { timeout: 900000 });
+  await frames(6);
+  const shore = await page.evaluate(() => {
+    const a = window.app, t = a.terrain, e = a.findByName('Earth');
+    const bl = t.below(a.rig.upos);
+    const lo = (-9.0735 * Math.PI) / 180;
+    const west = bl.dir.clone().set(Math.sin(lo), -Math.cos(lo), 0);
+    west.addScaledVector(bl.dir, -west.dot(bl.dir)).normalize();
+    // march west from 1 km inland to 4 km offshore in 5 m steps: the first open water
+    const at = (m) => bl.dir.clone().applyAxisAngle(bl.dir.clone().cross(west).normalize(), m / e.radius).normalize();
+    let prev = null;
+    for (let m = -1000; m < 4000; m += 5) {
+      const n = at(m);
+      if (t.isSea(n)) { if (prev !== null) return { found: true, m }; }
+      else prev = m;
+    }
+    return { found: false };
+  });
+  if (!shore.found) {
+    check('w7: found the shoreline at Nazaré', false, JSON.stringify(shore));
+  } else {
+    // stand 4 m inland of it, facing the sea, and walk west
+    await page.evaluate((m) => {
+      const a = window.app, t = a.terrain, e = a.findByName('Earth');
+      const bl = t.below(a.rig.upos);
+      const lo = (-9.0735 * Math.PI) / 180;
+      const west = bl.dir.clone().set(Math.sin(lo), -Math.cos(lo), 0);
+      west.addScaledVector(bl.dir, -west.dot(bl.dir)).normalize();
+      const n = bl.dir.clone().applyAxisAngle(bl.dir.clone().cross(west).normalize(), (m - 4) / e.radius).normalize();
+      a.rig.upos.copy(e.upos).addVec(n.clone().transformDirection(e.orientation), t.groundRadius(n) + 1.7);
+      a.rig.lookAt(west.clone().transformDirection(e.orientation), n.clone().transformDirection(e.orientation));
+    }, shore.m);
+    await frames(4);
+    await page.keyboard.press('KeyB');
+    await page.waitForFunction(() => window.app.walk.state === 'walk', null, { timeout: 600000 });
+    await page.keyboard.down('KeyW');
+    const toSea = await sample(page, 40);
+    await page.keyboard.up('KeyW');
+    st = await page.evaluate(() => { const a = window.app, w = a.walk; return { sea: a.terrain.isSea(w.body.pos.clone().normalize()), state: w.state }; });
+    const p0 = toSea[0].pos, p1 = toSea[toSea.length - 1].pos;
+    const moved = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
+    check('w7: walking into the Atlantic stops at the shoreline', toSea.some((s) => s.blocked) && !st.sea && st.state === 'walk' && moved > 2, JSON.stringify({ ...st, moved: +moved.toFixed(2) }));
+    await page.screenshot({ timeout: 400000, path: path.join(outDir, 'w7-shoreline.png') });
+    await page.keyboard.press('KeyB');
+    // hover 30 m over the sea a little offshore and ask to walk
+    await page.evaluate((m) => {
+      const a = window.app, t = a.terrain, e = a.findByName('Earth');
+      const bl = t.below(a.rig.upos);
+      const lo = (-9.0735 * Math.PI) / 180;
+      const west = bl.dir.clone().set(Math.sin(lo), -Math.cos(lo), 0);
+      west.addScaledVector(bl.dir, -west.dot(bl.dir)).normalize();
+      const n = bl.dir.clone().applyAxisAngle(bl.dir.clone().cross(west).normalize(), 60 / e.radius).normalize();
+      a.rig.upos.copy(e.upos).addVec(n.clone().transformDirection(e.orientation), t.groundRadius(n) + 30);
+    }, shore.m);
+    await frames(4);
+    await page.keyboard.press('KeyB');
+    await frames(2);
+    st = await page.evaluate(() => ({ state: window.app.walk.state, said: window.app.walk.said, sea: window.app.terrain.isSea(window.app.terrain.below(window.app.rig.upos).dir) }));
+    check('w7: no walking on the open sea, with the reason', st.sea && st.state === 'off' && /open water/.test(st.said), JSON.stringify(st));
+  }
   await page.close();
 }
 
