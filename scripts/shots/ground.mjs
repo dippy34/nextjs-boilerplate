@@ -9,7 +9,7 @@ const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 240000 }); };
+const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 900000 }); };
 for (const [name, body] of sites) {
   await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=${body}&dist=3`, { waitUntil: 'load', timeout: 300000 });
   await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 180000 });

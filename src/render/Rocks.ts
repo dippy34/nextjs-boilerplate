@@ -8,7 +8,7 @@ import type { UPos } from '../core/upos';
 import { baseRadius, vnoise } from '../universe/Terrain';
 import { adaptMaterials, MAT, MATERIALS, ROCK_SHADOW_GLSL } from './Materials';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
-import type { TerrainPatch } from './TerrainPatch';
+import type { PlanetTerrain as TerrainPatch } from './PlanetTerrain';
 
 const ROCK_VERT = /* glsl */ `
 #include <common>
@@ -662,6 +662,33 @@ export class Rocks {
       m.instanceMatrix.needsUpdate = true;
       m.geometry.attributes.aRock.needsUpdate = true;
     });
+  }
+
+  /**
+   * Read-only: the rocks within `radius` metres of body-fixed position `pos` on the current world
+   * (for walking: collisions, stepping over), as body-fixed centres and bounding radii (m). Only
+   * rocks of the cells built around the explorer are known (within ~100-300 m of it).
+   */
+  rocksNear(pos: Vector3, radius: number, minSize = 0.1): { centre: Vector3; radius: number }[] {
+    const out: { centre: Vector3; radius: number }[] = [];
+    const up = new Vector3();
+    for (const c of this.cells.values()) {
+      for (let i = 0; i < c.n; i++) {
+        const o = i * D;
+        const size = c.data[o];
+        if (size < minSize) continue;
+        const r = size * Math.max(c.data[o + 2], 1, c.data[o + 3] * 0.7);
+        const x = c.pos[i * 3], y = c.pos[i * 3 + 1], z = c.pos[i * 3 + 2];
+        const dx = x - pos.x, dy = y - pos.y, dz = z - pos.z;
+        if (dx * dx + dy * dy + dz * dz > (radius + r) ** 2) continue;
+        // the rock's middle: above its base by what shows of its (half-)height, as fill() places it
+        up.set(c.data[o + 5], c.data[o + 6], c.data[o + 7]);
+        const h = size * c.data[o + 3] * 0.7;
+        const sink = (size < 0.15 ? 0.45 : 0.3) * h;
+        out.push({ centre: new Vector3(x, y, z).addScaledVector(up, -sink), radius: r });
+      }
+    }
+    return out;
   }
 
   /** Rock material and a mesh, for compiling the shader up front. */
