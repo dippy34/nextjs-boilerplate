@@ -82,6 +82,12 @@ void main() {
   float blot = fbm3(gp * 0.9 + warp * 2.0) + 0.5 * fbm3(gp * 2.3 + 9.0) - 0.75;
   float giant = (lanes * own - 0.8) * 0.6 + 1.6 * blot;
   float gran = 1.0 + uGranAmp * gVis * mix(dwarf * 2.4, giant, soft);
+  // granulation smaller than a pixel still shows as a fine, even texture (each pixel averages a few
+  // granules): drawn at the finest scale the pixels resolve, weaker the more granules it averages
+  // (cheap: one value-noise octave), so a disk at a few radii is not a flat plate
+  float fineF = uGranFreq * min(1.0, cellPx / 2.5);
+  float avgN = max(uGranFreq / max(fineF, 1e-3), 1.0);
+  gran += uGranAmp * (1.0 - gVis) * 1.4 / sqrt(avgN) * (n3(q * fineF + 3.3) - 0.5) * (1.0 - soft);
   // intergranular bright points (magnetic flux concentrations in the lanes), seen up close
   float bpVis = uLite > 0.5 ? 0.0 : smoothstep(8.0, 30.0, cellPx) * (1.0 - soft);
   if (bpVis > 0.0) {
@@ -96,7 +102,7 @@ void main() {
   // a faint large-scale mottling on every star, so a disk seen from afar is not a flat blob
   // (white-light pictures of the Sun show little of it; this is artistic, kept subtle)
   float mottVis = smoothstep(2.0, 8.0, cellPx * uGranFreq / 9.0);
-  gran *= 1.0 + 0.18 * mottVis * (fbm3(q * 9.0 + 41.0) - 0.5) * (uGranAmp > 0.02 ? 1.0 : 0.3);
+  gran *= 1.0 + 0.28 * mottVis * (fbm3(q * 9.0 + 41.0) - 0.5) * (uGranAmp > 0.02 ? 1.0 : 0.3);
   // spots in the active latitudes: umbra and penumbra
   float band = exp(-pow((abs(lat) - uSpotLat) / 0.22, 2.0));
   float sf = fbm3(q * 7.0 + 31.0) * band;

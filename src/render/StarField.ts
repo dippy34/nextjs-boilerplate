@@ -82,6 +82,7 @@ export class StarFieldLayer {
     uMaxEnergy: { value: 8000 },
     uSat: { value: 1.3 },
     uHalo: { value: 1 },
+    uMinSigma: { value: 0.6 },
     uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
   };
 
