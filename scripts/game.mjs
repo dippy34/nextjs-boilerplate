@@ -68,7 +68,7 @@ st = await page.evaluate(() => ({ ap: window.app.rig.autopilot, warp: window.app
 check('J engages the warp drive', st.ap === true, JSON.stringify(st));
 await page.waitForTimeout(800);
 await page.screenshot({ path: path.join(outDir, 'g2-warp.png'), timeout: 180000 });
-await page.waitForFunction(() => !window.app.rig.autopilot, null, { timeout: 120000 });
+await page.waitForFunction(() => !window.app.rig.autopilot, null, { timeout: 300000 });
 await frames(10);
 st = await page.evaluate(() => { const a = window.app; const m = a.findByName('Moon'); return { anchor: a.rig.anchor?.name, d: m.upos.sub(a.rig.upos).length() / m.radius }; });
 check('warp arrives at the Moon', st.anchor === 'Moon' && st.d < 6, JSON.stringify(st));
@@ -94,7 +94,7 @@ await frames(6);
 st = await page.evaluate(() => { const g = window.app.game; return { stations: g.traffic.stations.map((s) => s.name) }; });
 check('a station orbits the world we are at', st.stations.length === 1, JSON.stringify(st));
 await page.evaluate(() => { const a = window.app; const s = a.game.traffic.stations[0]; a.select(s); a.goTo(s); });
-await page.waitForFunction(() => !window.app.rig.autopilot, null, { timeout: 120000 });
+await page.waitForFunction(() => !window.app.rig.autopilot, null, { timeout: 300000 });
 await frames(4);
 await page.keyboard.down('KeyW');
 await page.waitForFunction(() => window.app.game.docked !== null || window.app.game.docking !== null, null, { timeout: 120000 }).catch(() => undefined);

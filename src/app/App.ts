@@ -1715,7 +1715,11 @@ export class App {
     this.rig.braking = this.input.keys.has('KeyX');
     // walking (src/app/Walk.ts) owns the camera while on foot; otherwise free flight
     if (this.walk.update(dt)) { /* on foot */ }
-    else if (flight.on) flight.after(dt);
+    else if (flight.on) {
+      // the warp drive / docking computer flies the rig; physics resumes at drop-out
+      if (flight.external) this.rig.update(dt, this.input);
+      flight.after(dt);
+    }
     else {
       this.rig.update(dt, this.input);
       this.keepOutsideHorizons();
