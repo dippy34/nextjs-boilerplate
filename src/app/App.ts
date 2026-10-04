@@ -695,7 +695,8 @@ export class App {
       if (Number.isFinite(s)) out.push({ label: 'Milky Way', detail: 'our galaxy, seen from outside', id: 'mw:0', score: s - 0.2 });
     }
     this.blackHoles.forEach((h, i) => {
-      const names = [h.name, ...h.data.aliases, 'black hole'];
+      // SIMBAD-style aliases ("NAME Sgr A*", "M  87") match as typed
+      const names = [h.name, ...h.data.aliases.map((a) => a.replace(/^NAME\s+/, '').replace(/\s+/g, ' ')), 'black hole'];
       const best = Math.min(...names.map(score).filter((x) => x >= 0));
       if (Number.isFinite(best)) out.push({ label: h.name, detail: h.supermassive ? 'supermassive black hole' : 'black hole', id: `bh:${i}`, score: best - 0.1 });
       if (h.companion && score(h.companion.name) >= 0) out.push({ label: h.companion.name, detail: 'star orbiting a black hole', id: `bhc:${i}`, score: score(h.companion.name) + 0.3 });
