@@ -24,7 +24,14 @@
  * the geoid for Earth, the 1737.4 km sphere for the Moon; see the manifest).
  *
  * Deeper levels are sparse (the tiles that add the most detail, and those around landmarks): the
- * manifest's per-level bitmap says which exist; `sample` falls back to the finest loaded ancestor.
+ * manifest's per-level bitmap (or tile list) says which exist; `sample` falls back to the finest
+ * loaded coarser tile. The finest levels of Earth (Copernicus GLO-90) and the Moon (SLDEM2015) cover
+ * only regions around mountains and landing sites.
+ *
+ * Heights are directly comparable with the older global maps of Terrain.ts: add them to the radius
+ * of the body's ellipsoid (`radii`) along the direction. `referenceRadius` is only the mean radius
+ * used for `metresPerSample`; it is not the surface the heights are measured from (except on the
+ * Moon, a sphere).
  */
 
 export interface Vec3Like { x: number; y: number; z: number }
@@ -88,8 +95,10 @@ export interface ElevationLevel {
   tiles: number;
   /** sample spacing (m) on the reference radius */
   metresPerSample: number;
-  /** base64 bitmap (bit (face * n + y) * n + x, LSB first) of the tiles present; absent = all */
+  /** base64 bitmap (bit (face * n + y) * n + x, LSB first) of the tiles present; absent (with no list) = all */
   bitmap?: string;
+  /** the tiles present as flat [face, x, y, face, x, y, ...] (deep, sparse levels) */
+  list?: number[];
 }
 
 export interface ElevationManifest {
@@ -181,8 +190,8 @@ interface Tile { data: Uint16Array; used: number; level: number }
 interface BodyState {
   man: ElevationManifest | null;
   loading: Promise<ElevationManifest | null> | null;
-  /** present-tile bitmaps per level (null = complete level) */
-  bits: (Uint8Array | null)[];
+  /** present tiles per level: null = complete level, a bitmap, or a set of indices */
+  bits: (Uint8Array | Set<number> | null)[];
   /** key offset of each level */
   base: number[];
   maxLevel: number;
@@ -207,7 +216,7 @@ const defaultBase = (): string => {
 export interface ElevationOptions {
   /** URL of public/data/elevation (absolute inside a worker) */
   base?: string;
-  /** memory cap of the decoded tiles (bytes) */
+  /** memory cap of the decoded tiles above level 1 (bytes) */
   maxBytes?: number;
   /** fetch replacement (tests) */
   fetch?: (url: string) => Promise<{ ok: boolean; status?: number; arrayBuffer(): Promise<ArrayBuffer>; json(): Promise<unknown> }>;
@@ -215,7 +224,7 @@ export interface ElevationOptions {
 
 export class ElevationStore {
   private base = defaultBase();
-  private maxBytes = 96 * 2 ** 20;
+  private maxBytes = 24 * 2 ** 20;
   private fetchFn: NonNullable<ElevationOptions['fetch']> = (u) => fetch(u);
   private bodies = new Map<string, BodyState>();
   private clock = 0;
@@ -269,8 +278,13 @@ export class ElevationStore {
       s.base[l] = off;
       off += 6 * 4 ** l;
       const e = m.levels.find((x) => x.level === l);
-      if (!e) s.bits[l] = new Uint8Array(Math.ceil((6 * 4 ** l) / 8));
-      else if (e.bitmap) s.bits[l] = Uint8Array.from(atob(e.bitmap), (c) => c.charCodeAt(0));
+      const n = 1 << l;
+      if (!e) s.bits[l] = new Set();
+      else if (e.list) {
+        const set = new Set<number>();
+        for (let i = 0; i + 2 < e.list.length; i += 3) set.add((e.list[i] * n + e.list[i + 2]) * n + e.list[i + 1]);
+        s.bits[l] = set;
+      } else if (e.bitmap) s.bits[l] = Uint8Array.from(atob(e.bitmap), (c) => c.charCodeAt(0));
       else s.bits[l] = null;
     }
   }
@@ -306,6 +320,7 @@ export class ElevationStore {
     const bits = s.bits[level];
     if (!bits) return true;
     const n = 1 << level, i = (face * n + y) * n + x;
+    if (bits instanceof Set) return bits.has(i);
     return ((bits[i >> 3] >> (i & 7)) & 1) === 1;
   }
 
@@ -362,18 +377,29 @@ export class ElevationStore {
     return p;
   }
 
-  /** Drop the least recently sampled tiles above the memory cap (levels 0-1 stay). */
+  /**
+   * Drop the least recently used tiles once those above level 1 exceed the cap. Levels 0-1 (30
+   * tiles, 4 MB a body) stay and do not count; the tile that just arrived is never dropped.
+   */
   private evict(): void {
-    if (this.bytes <= this.maxBytes) return;
+    if (this.bytes - this.pinned() <= this.maxBytes) return;
     const all: { s: BodyState; k: number; t: Tile }[] = [];
-    for (const s of this.bodies.values()) for (const [k, t] of s.tiles) if (t.level > 1) all.push({ s, k, t });
+    for (const s of this.bodies.values()) for (const [k, t] of s.tiles) if (t.level > 1 && t.used !== this.clock) all.push({ s, k, t });
     all.sort((a, b) => a.t.used - b.t.used);
+    let over = this.bytes - this.pinned() - this.maxBytes * 0.85;
     for (const { s, k, t } of all) {
-      if (this.bytes <= this.maxBytes * 0.85) break;
+      if (over <= 0) break;
       s.tiles.delete(k);
       this.bytes -= t.data.byteLength;
+      over -= t.data.byteLength;
       s.version++;
     }
+  }
+
+  private pinned(): number {
+    let b = 0;
+    for (const s of this.bodies.values()) for (const t of s.tiles.values()) if (t.level <= 1) b += t.data.byteLength;
+    return b;
   }
 
   /** Level whose sample spacing is at or below `metresPerSample` (clamped to the pyramid), fractional. */

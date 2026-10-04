@@ -6,7 +6,6 @@ import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
 import { PlanetTerrain } from '../render/PlanetTerrain';
-import type { TerrainPatch } from '../render/TerrainPatch';
 import { RingSpot } from '../universe/RingSpot';
 import { Landmark, LANDMARKS } from '../universe/Landmarks';
 import { CometTails } from '../render/CometTails';
@@ -210,7 +209,7 @@ export class App {
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
     // scanned ground materials for close-up surfaces (loaded in the background)
     void loadMaterials(DATA, xrCapable).catch((e) => console.warn('materials', e));
-    app.rocks = new Rocks(app.terrain as unknown as TerrainPatch, xrCapable);
+    app.rocks = new Rocks(app.terrain, xrCapable);
     app.terrain.source = bodies.terrainSource;
     app.cometTails = new CometTails(bodies.surfaceExposure);
     const earthBody = system.byId.get(399)!;

@@ -18,7 +18,7 @@ import { StarCorona } from './StarCorona';
 import { RingParticles } from './RingParticles';
 import { ringFrame } from '../universe/RingSpot';
 import { PlanetTerrain } from './PlanetTerrain';
-import type { TerrainCandidate } from './TerrainPatch';
+import type { TerrainCandidate } from './PlanetTerrain';
 import { CloudLayer } from './CloudLayer';
 import { TerrainSource } from '../universe/Terrain';
 import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';

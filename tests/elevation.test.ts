@@ -121,7 +121,7 @@ describe.skipIf(!bodies.length)('elevation tiles', () => {
     it(`${body}: tiles agree along shared edges (between tiles and across faces)`, async () => {
       const man = (await store.load(body)) as ElevationManifest;
       // the deepest complete level, at most 2
-      const L = Math.min(2, Math.max(...man.levels.filter((l) => !l.bitmap).map((l) => l.level)));
+      const L = Math.min(2, Math.max(...man.levels.filter((l) => !l.bitmap && !l.list).map((l) => l.level)));
       const n = 1 << L;
       for (let f = 0; f < 6; f++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) await store.request(body, f, L, x, y);
       const mps = man.levels[L].metresPerSample;
@@ -154,7 +154,7 @@ describe.skipIf(!bodies.length)('elevation tiles', () => {
       expect(fresh.maxLevelAt(body, d)).toBe(-1);
       await fresh.load(body);
       const top = fresh.maxLevelAt(body, d);
-      expect(top).toBeGreaterThanOrEqual(man.levels.filter((l) => !l.bitmap).length - 1);
+      expect(top).toBeGreaterThanOrEqual(man.levels.filter((l) => !l.bitmap && !l.list).length - 1);
       const t = tileOf(d, top);
       expect(fresh.exists(body, t.face, top, t.x, t.y)).toBe(true);
       await fresh.prefetch(body, d, man.levels[1].metresPerSample);
@@ -169,4 +169,58 @@ describe.skipIf(!bodies.length)('elevation tiles', () => {
       expect(hm).toBeLessThanOrEqual(Math.max(h0, h1) + 1e-6);
     });
   }
+});
+
+describe.skipIf(!bodies.includes('earth') || !bodies.includes('moon'))('descending onto a landmark', () => {
+  const ll = (lat: number, lon: number): Vec3Like => {
+    const a = (lat * Math.PI) / 180, o = (lon * Math.PI) / 180;
+    return { x: Math.cos(a) * Math.cos(o), y: Math.cos(a) * Math.sin(o), z: Math.sin(a) };
+  };
+  it('streams the regional levels in, coarse to fine, within the memory cap', async () => {
+    const store = new ElevationStore({ base: 'disk://elevation', fetch: diskFetch, maxBytes: 24 * 2 ** 20 });
+    for (const [body, lat, lon, lo, hi] of [['earth', 27.988, 86.925, 8500, 8900], ['moon', -43.31, -11.36, -2500, -1000]] as const) {
+      const man = (await store.load(body))!;
+      const d = ll(lat, lon);
+      const top = store.maxLevelAt(body, d);
+      expect(top).toBe(man.levels[man.levels.length - 1].level);
+      // a descent: each step asks for half the spacing of the one before
+      for (let l = 0; l <= top; l++) {
+        const mps = man.levels[0].metresPerSample / 2 ** l;
+        await store.prefetch(body, d, mps, 1);
+        expect(store.sample(body, d, mps)).not.toBeNull();
+        expect(store.lastLevel).toBe(l);
+      }
+      expect(store.memoryBytes).toBeLessThanOrEqual(24 * 2 ** 20);
+      // Everest's summit; Tycho's central peak (about 2 km above its 4.7 km deep floor)
+      const v = store.sample(body, d, 1)!;
+      expect(v).toBeGreaterThan(lo);
+      expect(v).toBeLessThan(hi);
+    }
+  });
+});
+
+describe.skipIf(!bodies.includes('moon'))('tile cache', () => {
+  it('evicts the least recently used tiles above the cap and keeps levels 0-1', async () => {
+    const cap = 3 * 2 ** 20;
+    const store = new ElevationStore({ base: 'disk://elevation', fetch: diskFetch, maxBytes: cap });
+    for (let f = 0; f < 6; f++) await store.request('moon', f, 0, 0, 0);
+    for (let f = 0; f < 6; f++) for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) await store.request('moon', f, 1, x, y);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) await store.request('moon', 0, 2, x, y);
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) await store.request('moon', 0, 3, x, y);
+    const tile = (TILE + 3) ** 2 * 2;
+    // levels 0-1 (30 tiles) are pinned and not counted; the tiles above them are trimmed to the cap
+    expect(store.memoryBytes - 30 * tile).toBeLessThanOrEqual(cap);
+    expect(store.memoryBytes - 30 * tile).toBeGreaterThan(cap * 0.5);
+    for (let f = 0; f < 6; f++) expect(store.loaded('moon', f, 0, 0, 0)).toBe(true);
+    // the most recent tile is kept, an early one of the same level was dropped
+    expect(store.loaded('moon', 0, 3, 7, 7)).toBe(true);
+    expect(store.loaded('moon', 0, 2, 0, 0)).toBe(false);
+    // sampling there falls back to the coarser level, and a new request brings it back
+    const d = faceToDir(0, 0.01, 0.01);
+    expect(store.sample('moon', d, 2700)).not.toBeNull();
+    expect(store.lastLevel).toBeLessThan(2);
+    await store.request('moon', 0, 2, 0, 0);
+    store.sample('moon', d, 2700);
+    expect(store.lastLevel).toBe(2);
+  });
 });

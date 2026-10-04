@@ -5,12 +5,31 @@ import type { UPos } from '../core/upos';
 import { baseRadius, type Ground, type TerrainSource } from '../universe/Terrain';
 import { heightSpec, type HeightSpec } from '../universe/TerrainHeights';
 import {
-  buildTile, dirFace, faceDir, SUN_CLEAR, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
+  buildTile, childToward, dirFace, faceDir, SUN_CLEAR, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
   type TileData, type TileRequest, tileValue,
 } from '../universe/TerrainTiles';
 import { ATMO_HAZE_FRAG } from './shaders/atmosphere';
 import { FIX_LOGDEPTH, PROJECT_PARS } from './shaders/xr';
-import type { TerrainCandidate } from './TerrainPatch';
+
+/** A world near the explorer that could get terrain this frame (offered by the body layers). */
+export interface TerrainCandidate {
+  ground: Ground;
+  /** the world's surface material (its uniforms are shared with the terrain's) */
+  material: ShaderMaterial;
+  upos: UPos;
+  /** centre relative to the camera (m) */
+  rel: Vector3;
+  /** body-fixed -> world rotation */
+  orient: Matrix4;
+  /** longitude of the map's left edge (degrees), for map coordinates */
+  lonLeft: number;
+  /** body-fixed direction of the star */
+  sunBF: Vector3;
+  /** altitude above the reference surface (m) */
+  alt: number;
+  /** the material of the world's atmosphere shell, if it has one (render/Atmospheres.ts) */
+  air?: ShaderMaterial | null;
+}
 
 /**
  * Draw order: the atmosphere shell (19.8, render/Atmospheres.ts), then the terrain over it, then the
@@ -165,7 +184,7 @@ export class PlanetTerrain {
   inFlight = 8;
   inFlightVr = 4;
   /** most tiles drawn at once: bounds the draw count (and so the per-frame cost) at any altitude */
-  drawCap = 64;
+  drawCap = 52;
   drawCapVr = 44;
   /** most tiles kept (desktop, headset) */
   maxTiles = 420;
@@ -188,7 +207,9 @@ export class PlanetTerrain {
   private jobs = new Map<number, { node: Node; world: World; worker: number; serialAtStart: number }>();
   private jobSeq = 0;
   private frame = 0;
-  private elevVersion = 0;
+  /** this frame's column under the explorer: direction (body-fixed) and the level wanted there */
+  private chainDir = new Vector3();
+  private chainLevel = 0;
   private groundKey = '';
   private drawn: Node[] = [];
   private lastT = performance.now();
@@ -204,11 +225,7 @@ export class PlanetTerrain {
         try {
           const w = new Worker(new URL('../workers/terrainTiles.worker.ts', import.meta.url), { type: 'module', name: `terrain-${workerSeq++}` });
           const k = i;
-          w.onmessage = (ev) => {
-            const d = ev.data as { type?: string; version?: number; job?: number; data?: TileData | null };
-            if (d.type === 'elev') { this.onElevation(d.version ?? 0); return; }
-            this.receive(k, d as { job: number; data: TileData | null });
-          };
+          w.onmessage = (ev) => this.receive(k, ev.data as Parameters<PlanetTerrain['receive']>[1]);
           this.workers.push(w);
           this.busy.push(0);
         } catch { /* no workers: built on the main thread */ }
@@ -240,6 +257,9 @@ export class PlanetTerrain {
         name: 'terrain-tile',
         vertexShader: TILE_VERT,
         fragmentShader: tileFragment(bodyMat.fragmentShader),
+        // the body shader compiles its terrain-only code (ground materials, relief, rocks' light)
+        // under #ifdef TERRAIN (shaders/body.ts)
+        defines: { ...bodyMat.defines, TERRAIN: 1 },
         uniforms: {
           ...bodyMat.uniforms, ...TILE_UNIFORMS, uTerrain: { value: 1 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
           uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) }, uMatO: { value: new Vector3() },
@@ -412,7 +432,8 @@ export class PlanetTerrain {
       if (n.stale && !n.job) want.push({ n, p: 0.5 });
       const { sse, inView } = errorOf(n);
       const lim = (inView ? P : P * 3) * (n.split ? 0.8 : 1);
-      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && sel.length < drawCap;
+      // (the tile under the explorer always refines: the cap only trims the surroundings)
+      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && (sel.length < drawCap || this.holds(n, up));
       const wantSplit = !merging && canSplit && sse > lim;
       if (wantSplit) {
         if (!n.kids) n.kids = [0, 1, 2, 3].map((q) => new Node(n.face, n.level + 1, n.x * 2 + (q & 1), n.y * 2 + (q >> 1), n));
@@ -426,7 +447,8 @@ export class PlanetTerrain {
         }
         if (all) {
           if (!n.split) { n.split = true; for (const k of n.kids) k.m = 0; }
-          for (const k of n.kids) walk(k, false);
+          // nearest first, so the draw budget goes to what is close
+          for (const k of [...n.kids].sort((a, b) => a.dir.angleTo(up) - b.dir.angleTo(up))) walk(k, false);
           return;
         }
       } else if (n.split && n.kids) {
@@ -437,7 +459,7 @@ export class PlanetTerrain {
       }
       n.split = false;
       // draw this tile
-      n.m = merging ? Math.max(0, n.m - dt / 0.35) : n.level === 0 ? 1 : Math.min(1, n.m + dt / 0.45);
+      n.m = merging ? Math.max(0, n.m - dt / 0.35) : Math.min(1, n.m + dt / 0.45);
       sel.push(n);
     };
     for (const r of w.roots) {
@@ -458,7 +480,26 @@ export class PlanetTerrain {
     }
     // ---- requests
     want.sort((a, b) => b.p - a.p);
-    this.dispatch(w, want.map((x) => x.n), c, sunBF);
+    // the column under the explorer is built down to the detail wanted there in one worker job
+    {
+      const target = Math.max(pa * P * Math.max(altG, 0.2) * 0.5, minSp);
+      this.chainLevel = Math.max(0, Math.min(24, Math.ceil(Math.log2((R * Math.PI) / 2 / TILE_N / target))));
+      this.chainDir.copy(up);
+    }
+    // the next missing tile of the column under the explorer goes first, with a reserved slot
+    let column: Node | null = null;
+    if (ready) {
+      let node = w.roots[dirFace(up).face];
+      while (node.data && node.level < this.chainLevel) {
+        if (!node.kids) node.kids = [0, 1, 2, 3].map((q) => new Node(node.face, node.level + 1, node.x * 2 + (q & 1), node.y * 2 + (q >> 1), node));
+        const ct = childToward(node, up);
+        const k = node.kids.find((x) => x.x === ct.x && x.y === ct.y)!;
+        k.used = frame;
+        if (!k.data) { if (!k.job) column = k; break; }
+        node = k;
+      }
+    }
+    this.dispatch(w, want.map((x) => x.n), c, sunBF, column);
     this.stats.pending = this.jobs.size;
     if (!ready) return false;
 
@@ -537,11 +578,20 @@ export class PlanetTerrain {
     (mat.uniforms.uTanN.value as Vector3).copy(an.n);
     const dO = O.clone().sub(an.pos);
     (mat.uniforms.uMatO.value as Vector3).set(dO.dot(an.e), dO.dot(an.n), dO.dot(an.up));
-    // things scattered on the ground (render/Rocks.ts) re-place when the ground under the explorer
-    // changes: a different leaf tile, or that tile rebuilt — not on every distant tile this frame
-    const lf = this.leafAt(up);
-    const key = lf ? `${lf.face}:${lf.level}:${lf.x}:${lf.y}:${lf.build}` : '';
+    // things scattered on the ground (render/Rocks.ts, within a few hundred metres) re-place when the
+    // ground they stand on changes: the drawn tiles near the explorer are swapped or rebuilt, or one
+    // of them finishes morphing in — not on every distant tile, nor on every frame of a morph
+    let key = '';
+    if (this.hScale > 0) {
+      const reach = 400;
+      for (const n of sel) {
+        const [x, y, z] = n.data!.centre;
+        if (Math.hypot(x - camBF.x, y - camBF.y, z - camBF.z) - n.data!.bound > reach + Math.max(altG, 0)) continue;
+        key += `${n.face}:${n.level}:${n.x}:${n.y}:${n.build}:${n.m >= 1 ? 1 : 0},`;
+      }
+    }
     if (key !== this.groundKey) { this.groundKey = key; this.serial++; }
+    if (this.hScale > 0) this.updateLocalAlbedo(g, c.material, up, c.lonLeft);
     this.evict(w);
     return true;
   }
@@ -599,7 +649,8 @@ export class PlanetTerrain {
    * flood of new geometry). Accepted immediately as each worker reports back, so a built tile is
    * never re-requested while it waits in a queue.
    */
-  private dispatch(w: World, nodes: Node[], c: TerrainCandidate, sunBF: Vector3): void {
+  private dispatch(w: World, nodes: Node[], c: TerrainCandidate, sunBF: Vector3, column: Node | null = null): void {
+    if (column) nodes = [column, ...nodes.filter((n) => n !== column)];
     const spec = (w as World & { spec: HeightSpec | null }).spec;
     if (!this.workers.length || !spec) {
       // no workers: build a few tiles on the main thread within a small time budget
@@ -613,7 +664,8 @@ export class PlanetTerrain {
       return;
     }
     const cap = this.vr ? this.inFlightVr : this.inFlight;
-    let free = cap - this.jobs.size;
+    // (one slot beyond the cap is kept for the column under the explorer)
+    let free = cap - this.jobs.size + (column ? 1 : 0);
     for (const n of nodes) {
       if (free <= 0) break;
       if (n.job || (n.data && !n.stale)) continue;
@@ -625,20 +677,23 @@ export class PlanetTerrain {
       this.busy[k]++;
       free--;
       this.jobs.set(job, { node: n, world: w, worker: k, serialAtStart: 0 });
-      this.workers[k].postMessage({ type: 'tile', job, id: w.id, req: this.reqOf(w, n, sunBF, c.lonLeft) });
+      const req = this.reqOf(w, n, sunBF, c.lonLeft);
+      if (!n.data && this.chainLevel > n.level + 1 && this.holds(n, this.chainDir)) {
+        req.chain = { dir: [this.chainDir.x, this.chainDir.y, this.chainDir.z], level: Math.min(this.chainLevel, n.level + 6) };
+      }
+      this.workers[k].postMessage({ type: 'tile', job, id: w.id, req });
     }
   }
 
-  /** A worker loaded sharper global elevation: rebuild the current world's tiles to pick it up. */
-  private onElevation(version: number): void {
-    if (version <= this.elevVersion) return;
-    this.elevVersion = version;
-    const w = this.world;
-    if (!w) return;
-    for (const n of w.tiles) n.stale = true;
+  /** whether tile `n` holds body-fixed direction `d` */
+  private holds(n: Node, d: Vector3): boolean {
+    const f = dirFace(d);
+    if (f.face !== n.face) return false;
+    const [s0, t0, w] = tileRect(n.level, n.x, n.y);
+    return f.s >= s0 && f.s <= s0 + w && f.t >= t0 && f.t <= t0 + w;
   }
 
-  private receive(worker: number, msg: { job: number; data: TileData | null }): void {
+  private receive(worker: number, msg: { job: number; data: TileData | null; chain?: { level: number; x: number; y: number; data: TileData }[] }): void {
     this.busy[worker] = Math.max(0, this.busy[worker] - 1);
     const j = this.jobs.get(msg.job);
     if (!j) return;
@@ -646,11 +701,42 @@ export class PlanetTerrain {
     const n = j.node;
     if (n.job !== msg.job) return;
     n.job = 0;
-    if (msg.data && j.world === this.world) this.accept(j.world, n, msg.data);
+    if (!msg.data || j.world !== this.world) return;
+    this.accept(j.world, n, msg.data);
+    // the column below it, built in the same job
+    // (entries come level by level, the four children of one tile each; descend into the parent's
+    // child that has the next level's tiles)
+    const byKey = new Map<string, Node>([[`${n.level}:${n.x}:${n.y}`, n]]);
+    for (const c of msg.chain ?? []) {
+      const parent = byKey.get(`${c.level - 1}:${c.x >> 1}:${c.y >> 1}`);
+      if (!parent) continue;
+      if (!parent.kids) parent.kids = [0, 1, 2, 3].map((q) => new Node(parent.face, parent.level + 1, parent.x * 2 + (q & 1), parent.y * 2 + (q >> 1), parent));
+      const kid = parent.kids.find((k) => k.x === c.x && k.y === c.y);
+      if (!kid) continue;
+      kid.used = this.frame;
+      if (!kid.data && !kid.job) { kid.sunBF.copy(n.sunBF); this.accept(j.world, kid, c.data); }
+      byKey.set(`${c.level}:${c.x}:${c.y}`, kid);
+    }
   }
 
   private accept(w: World, n: Node, data: TileData): void {
     const fresh = !n.data;
+    // a drawn tile rebuilt (sharper heights, the star moved): morph from the shape it had, so the
+    // ground never jumps under the explorer (walking follows groundRadius, which follows the morph)
+    const old = n.data;
+    if (old && n.drawn && old.pos.length === data.pos.length) {
+      const dx = old.centre[0] - data.centre[0], dy = old.centre[1] - data.centre[1], dz = old.centre[2] - data.centre[2];
+      const mo = data.morph, op = old.pos, oc = old.morph, m0 = n.m;
+      for (let i = 0; i < mo.length; i += 3) {
+        // the shape drawn this frame (old tile at its current morph), in the new tile's frame
+        mo[i] = oc[i] + (op[i] - oc[i]) * m0 + dx;
+        mo[i + 1] = oc[i + 1] + (op[i + 1] - oc[i + 1]) * m0 + dy;
+        mo[i + 2] = oc[i + 2] + (op[i + 2] - oc[i + 2]) * m0 + dz;
+      }
+      data.tnc.set(old.tn);
+      data.bound = Math.max(data.bound, old.bound + Math.hypot(dx, dy, dz));
+      n.m = 0;
+    }
     n.data = data;
     n.stale = false;
     let shaded = false;
@@ -758,12 +844,66 @@ export class PlanetTerrain {
 
   /** Ground radius (m from the centre of the current world) below body-fixed direction `n`, as drawn. */
   /**
-   * The world's albedo for the exposure near its ground. (TerrainPatch adapts it to the map's
-   * brightness around the explorer; until that is ported here the world's mean albedo is used.)
+   * The albedo the eye adapts to near the ground: the world's mean `mean`, moved most of the way
+   * towards the map's own brightness under the explorer (bright fresh craters, snowfields, salt
+   * flats are not shown blown out, nor dark plains too dark), as the close-up shading fades in.
    */
   exposureAlbedo(mean: number): number {
-    return mean;
+    const a = this.local.albedo;
+    if (a === null || !this.current || !(a > 0) || !(mean > 0)) return mean;
+    // (the map's brightness here relative to its average over the world, applied to the world's albedo)
+    const ratio = Math.min(6, Math.max(0.2, a));
+    return mean * Math.pow(ratio, 0.75 * this.hScale);
   }
+
+  /** the map's brightness under the explorer relative to its world average (null: unknown) */
+  private local = { albedo: null as number | null, ground: null as Ground | null, at: new Vector3(), frame: -1e9 };
+
+  /** Read the colour map around body-fixed direction `up` (a small average) as a relative albedo, now and then. */
+  private updateLocalAlbedo(g: Ground, mat: ShaderMaterial, up: Vector3, lonLeftDeg: number): void {
+    const L = this.local;
+    // again after moving a few km (or to another world), at most every 30 frames
+    if (L.ground === g && (L.at.angleTo(up) * g.radius < 3000 || this.frame - L.frame < 30)) return;
+    L.ground = g; L.at.copy(up); L.frame = this.frame; L.albedo = null;
+    const u = mat.uniforms;
+    const tex = u.uMap?.value as { image?: CanvasImageSource & { width: number; height: number }; flipY?: boolean } | null;
+    const img = tex?.image;
+    if (!img || !u.uHasMap?.value || !(img.width > 0) || typeof document === 'undefined') return;
+    let uu = (Math.atan2(up.y, up.x) - (lonLeftDeg * Math.PI) / 180) / (2 * Math.PI);
+    uu -= Math.floor(uu);
+    const vv = 0.5 + Math.asin(Math.max(-1, Math.min(1, up.z))) / Math.PI;
+    // (a texture uploaded without flipping holds an image already stored bottom row first)
+    const x = uu, y = tex.flipY === false ? vv : 1 - vv;
+    try {
+      const c = PlanetTerrain.probe ??= document.createElement('canvas');
+      c.width = c.height = 4;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      const n = Math.max(2, Math.round(img.width / 1024));   // ~0.1 % of the map across: a few km to tens of km
+      ctx.drawImage(img, Math.floor(x * img.width) - n, Math.floor(y * img.height) - n, 2 * n, 2 * n, 0, 0, 4, 4);
+      const d = ctx.getImageData(0, 0, 4, 4).data;
+      const lin = (v: number) => { const a = v / 255; return a <= 0.04045 ? a / 12.92 : ((a + 0.055) / 1.055) ** 2.4; };
+      let here = 0;
+      for (let k = 0; k < 16; k++) here += 0.2126 * lin(d[k * 4]) + 0.7152 * lin(d[k * 4 + 1]) + 0.0722 * lin(d[k * 4 + 2]);
+      here /= 16;
+      // the whole map's mean (once per map), weighted by area (cos latitude)
+      let mean = PlanetTerrain.mapMeans.get(img);
+      if (mean === undefined) {
+        c.width = 64; c.height = 32;
+        ctx.drawImage(img, 0, 0, 64, 32);
+        const dm = ctx.getImageData(0, 0, 64, 32).data;
+        let sum = 0, wsum = 0;
+        for (let yy = 0; yy < 32; yy++) {
+          const w = Math.cos(((yy + 0.5) / 32 - 0.5) * Math.PI);
+          for (let xx = 0; xx < 64; xx++) { const k = yy * 64 + xx; sum += w * (0.2126 * lin(dm[k * 4]) + 0.7152 * lin(dm[k * 4 + 1]) + 0.0722 * lin(dm[k * 4 + 2])); wsum += w; }
+        }
+        mean = sum / wsum;
+        PlanetTerrain.mapMeans.set(img, mean);
+      }
+      L.albedo = mean > 0 ? here / mean : null;
+    } catch { /* tainted image or no canvas: keep the mean */ }
+  }
+  private static probe: HTMLCanvasElement | undefined;
+  private static mapMeans = new WeakMap<object, number>();
 
   groundRadius(n: Vector3): number {
     const w = this.world;
