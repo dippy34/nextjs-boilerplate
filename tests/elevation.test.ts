@@ -198,3 +198,29 @@ describe.skipIf(!bodies.includes('earth') || !bodies.includes('moon'))('descendi
     }
   });
 });
+
+describe.skipIf(!bodies.includes('moon'))('tile cache', () => {
+  it('evicts the least recently used tiles above the cap and keeps levels 0-1', async () => {
+    const cap = 3 * 2 ** 20;
+    const store = new ElevationStore({ base: 'disk://elevation', fetch: diskFetch, maxBytes: cap });
+    for (let f = 0; f < 6; f++) await store.request('moon', f, 0, 0, 0);
+    for (let f = 0; f < 6; f++) for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) await store.request('moon', f, 1, x, y);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) await store.request('moon', 0, 2, x, y);
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) await store.request('moon', 0, 3, x, y);
+    const tile = (TILE + 3) ** 2 * 2;
+    // levels 0-1 (30 tiles) are pinned and not counted; the tiles above them are trimmed to the cap
+    expect(store.memoryBytes - 30 * tile).toBeLessThanOrEqual(cap);
+    expect(store.memoryBytes - 30 * tile).toBeGreaterThan(cap * 0.5);
+    for (let f = 0; f < 6; f++) expect(store.loaded('moon', f, 0, 0, 0)).toBe(true);
+    // the most recent tile is kept, an early one of the same level was dropped
+    expect(store.loaded('moon', 0, 3, 7, 7)).toBe(true);
+    expect(store.loaded('moon', 0, 2, 0, 0)).toBe(false);
+    // sampling there falls back to the coarser level, and a new request brings it back
+    const d = faceToDir(0, 0.01, 0.01);
+    expect(store.sample('moon', d, 2700)).not.toBeNull();
+    expect(store.lastLevel).toBeLessThan(2);
+    await store.request('moon', 0, 2, 0, 0);
+    store.sample('moon', d, 2700);
+    expect(store.lastLevel).toBe(2);
+  });
+});

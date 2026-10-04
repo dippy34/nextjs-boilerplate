@@ -216,7 +216,7 @@ const defaultBase = (): string => {
 export interface ElevationOptions {
   /** URL of public/data/elevation (absolute inside a worker) */
   base?: string;
-  /** memory cap of the decoded tiles (bytes) */
+  /** memory cap of the decoded tiles above level 1 (bytes) */
   maxBytes?: number;
   /** fetch replacement (tests) */
   fetch?: (url: string) => Promise<{ ok: boolean; status?: number; arrayBuffer(): Promise<ArrayBuffer>; json(): Promise<unknown> }>;
@@ -224,7 +224,7 @@ export interface ElevationOptions {
 
 export class ElevationStore {
   private base = defaultBase();
-  private maxBytes = 40 * 2 ** 20;
+  private maxBytes = 24 * 2 ** 20;
   private fetchFn: NonNullable<ElevationOptions['fetch']> = (u) => fetch(u);
   private bodies = new Map<string, BodyState>();
   private clock = 0;
@@ -377,18 +377,29 @@ export class ElevationStore {
     return p;
   }
 
-  /** Drop the least recently sampled tiles above the memory cap (levels 0-1 stay). */
+  /**
+   * Drop the least recently used tiles once those above level 1 exceed the cap. Levels 0-1 (30
+   * tiles, 4 MB a body) stay and do not count; the tile that just arrived is never dropped.
+   */
   private evict(): void {
-    if (this.bytes <= this.maxBytes) return;
+    if (this.bytes - this.pinned() <= this.maxBytes) return;
     const all: { s: BodyState; k: number; t: Tile }[] = [];
-    for (const s of this.bodies.values()) for (const [k, t] of s.tiles) if (t.level > 1) all.push({ s, k, t });
+    for (const s of this.bodies.values()) for (const [k, t] of s.tiles) if (t.level > 1 && t.used !== this.clock) all.push({ s, k, t });
     all.sort((a, b) => a.t.used - b.t.used);
+    let over = this.bytes - this.pinned() - this.maxBytes * 0.85;
     for (const { s, k, t } of all) {
-      if (this.bytes <= this.maxBytes * 0.85) break;
+      if (over <= 0) break;
       s.tiles.delete(k);
       this.bytes -= t.data.byteLength;
+      over -= t.data.byteLength;
       s.version++;
     }
+  }
+
+  private pinned(): number {
+    let b = 0;
+    for (const s of this.bodies.values()) for (const t of s.tiles.values()) if (t.level <= 1) b += t.data.byteLength;
+    return b;
   }
 
   /** Level whose sample spacing is at or below `metresPerSample` (clamped to the pyramid), fractional. */
