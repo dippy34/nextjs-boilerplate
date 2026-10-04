@@ -79,7 +79,7 @@ describe.skipIf(!has)('catalogue data', () => {
     const top = async (q: string) => (await search.query(q, 5))[0];
     for (const [q, label] of [['HD 209458', 'HD 209458'], ['hd209458', 'HD 209458'], ['Gliese 581', 'Gl 581'], ['HIP 1234', 'HIP 1234'],
       ['NGC 4594', 'NGC 4594'], ['M 104', 'M 104'], ['Pleiades', 'Pleiades'], ['Crab Pulsar', 'Crab Pulsar'], ['TOI-700', 'TOI-700'],
-      ['Cyg X-1', 'Cyg X-1'], ['47 Tucanae', '47 Tucanae'], ['Omega Centauri', 'Omega Centauri'], ['Large Magellanic Cloud', 'Large Magellanic Cloud']] as const) {
+      ['Cyg X-1', 'Cyg X-1'], ['3C 273', '3C 273'], ['TON 618', 'TON 618'], ['47 Tucanae', '47 Tucanae'], ['Omega Centauri', 'Omega Centauri'], ['Large Magellanic Cloud', 'Large Magellanic Cloud']] as const) {
       const h = await top(q);
       expect(h, q).toBeTruthy();
       expect(h.label, q).toBe(label);

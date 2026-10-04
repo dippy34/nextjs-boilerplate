@@ -224,11 +224,11 @@ Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/ele
 
 `pipeline/build_catalog.py` (downloads: `pipeline/catalog_sources.py`, raw in `data-raw/catalog/`;
 the ATNF `psrcat` program is compiled there to get pulsar distances) -> `public/data/catalog/`
-(20 MB): `manifest.json`, `rec/<category>/<k>.tsv` (2,000 records a file), `idx/<k>.txt` (the search
-index: 357,000 names sorted by normalised key, 4,000 a file; the manifest has each file's first
-key). 199,988 objects: stars 112,879 (Hipparcos/Gliese, HD/HR/HIP/Gl/Bayer/Flamsteed names), galaxies
+(20 MB): `manifest.json`, `rec/<category>/<k>.tsv` (4,000 records a file), `idx/<k>.txt` (the search
+index: 356,000 names sorted by normalised key, 8,000 a file; 102 files in all; the manifest has each file's first
+key). 199,996 objects: stars 112,879 (Hipparcos/Gliese, HD/HR/HIP/Gl/Bayer/Flamsteed names), galaxies
 62,301 (Cosmicflows-4 + OpenNGC + UNGC), clusters 7,186, TESS planet hosts 6,266, pulsars 4,319, nebulae
-2,336 (PNe, SNRs, WISE H II), white dwarfs 2,132 (50 pc), quasars 1,900 (with SMBH masses), X-ray
+2,336 (PNe, SNRs, WISE H II), white dwarfs 2,132 (50 pc), quasars 1,908 (with SMBH masses; incl. 3C 273, OJ 287, TON 618), X-ray
 binaries 419, brown dwarfs 250. Sources and licences: CREDITS.md.
 
 * Runtime: `src/universe/CatalogSearch.ts` (no DOM: `normKey` mirrors the pipeline's `norm`; a query
