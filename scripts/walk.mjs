@@ -452,6 +452,14 @@ if (which !== 'desktop' && which !== 'sea') {
     click('places:walk');
     click('go:place:Apollo 11 landing site');
   });
+  // the headset's travel ends straight above the site (the blink hides the move), then down
+  await page.waitForFunction(() => window.app.walk.state === 'descend', null, { timeout: 900000 });
+  const top = await page.evaluate(() => {
+    const a = window.app, lm = a.landmarks.find((l) => l.name === 'Apollo 11 landing site');
+    const up = a.rig.upos.sub(lm.world.upos).normalize();
+    return { fromSite: up.angleTo(lm.up()) * lm.world.radius, height: a.rig.upos.sub(lm.world.upos).length() - lm.world.radius };
+  });
+  check('v6: the travel arrives straight above the site', top.fromSite < 200, JSON.stringify(top));
   await page.waitForFunction(() => window.app.walk.state === 'walk', null, { timeout: 900000 });
   st = await page.evaluate(() => {
     const a = window.app, w = a.walk, d = w.debug();
