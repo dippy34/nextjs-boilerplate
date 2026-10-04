@@ -89,7 +89,11 @@ ${FIX_LOGDEPTH}
 
 /** The surface shader of a world, reading the close-up weight per vertex instead of per draw. */
 export function tileFragment(frag: string): string {
-  return frag.replace(/uniform float uHScale;[^\n]*/, 'varying float vHScale;\n#define uHScale vHScale');
+  return frag
+    .replace(/uniform float uHScale;[^\n]*/, 'varying float vHScale;\n#define uHScale vHScale')
+    // the sphere's hole test never applies to the terrain (uTerrain = 1), and a `discard` anywhere in
+    // a shader turns off early depth rejection: every hidden hillside and skirt would be shaded in full
+    .replace(/if \(uTerrain < 0\.5 && dot\(nB, uHoleDir\) > uHoleCos\) discard;/, '');
 }
 
 /** What the surface shaders need besides the world's own uniforms (shared by all tiles). */
@@ -201,7 +205,8 @@ export class PlanetTerrain {
   private materials = new Map<ShaderMaterial, ShaderMaterial>();
   private hazeMaterials = new Map<ShaderMaterial, ShaderMaterial>();
   private holed: ShaderMaterial | null = null;
-  private index = new BufferAttribute(tileIndices(), 1);
+  /** index buffers by skirt mask (bit e: a skirt on edge e, which borders a coarser drawn tile) */
+  private indices = Array.from({ length: 16 }, (_, m) => new BufferAttribute(tileIndices(m), 1));
   private workers: Worker[] = [];
   private busy: number[] = [];
   private jobs = new Map<number, { node: Node; world: World; worker: number; serialAtStart: number }>();
@@ -510,6 +515,31 @@ export class PlanetTerrain {
     // behind, render/Atmospheres.ts) covers the limb, so no per-tile haze draws there
     const air = c.air && alt < 160e3 ? this.hazeFor(c.air) : null;
     let deepest = 0;
+    // near tiles first: the terrain is in the transparent pass (after the atmosphere shell), which
+    // three sorts back to front; drawn far first, every hillside hidden behind a nearer one would
+    // be shaded in full and then overwritten. Ranked by the distance to each tile's bounds.
+    const byNear = sel.map((n) => {
+      const [x, y, z] = n.data!.centre;
+      return { n, d: Math.hypot(x - camBF.x, y - camBF.y, z - camBF.z) - n.data!.bound };
+    }).sort((a, b) => a.d - b.d);
+    byNear.forEach((e, i) => { e.n.mesh!.renderOrder = ORDER_TERRAIN + i * 1e-5; });
+    // skirts only where a tile borders a coarser drawn one (on a face's border: always)
+    const drawnKeys = new Set(sel.map((n) => `${n.face}:${n.level}:${n.x}:${n.y}`));
+    const NB = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    for (const n of sel) {
+      let mask = 0;
+      const size = 2 ** n.level;
+      for (let e = 0; e < 4; e++) {
+        const nx = n.x + NB[e][0], ny = n.y + NB[e][1];
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) { mask |= 1 << e; continue; }
+        for (let l = n.level - 1; l >= 0; l--) {
+          const sh = n.level - l;
+          if (drawnKeys.has(`${n.face}:${l}:${nx >> sh}:${ny >> sh}`)) { mask |= 1 << e; break; }
+        }
+      }
+      const g = n.mesh!.geometry;
+      if (g.index !== this.indices[mask]) g.setIndex(this.indices[mask]);
+    }
     for (const n of sel) {
       deepest = Math.max(deepest, n.level);
       const mesh = n.mesh!;
@@ -584,7 +614,7 @@ export class PlanetTerrain {
       for (const n of sel) {
         const [x, y, z] = n.data!.centre;
         if (Math.hypot(x - camBF.x, y - camBF.y, z - camBF.z) - n.data!.bound > reach + Math.max(altG, 0)) continue;
-        key += `${n.face}:${n.level}:${n.x}:${n.y}:${n.build}:${n.m >= 1 ? 1 : 0},`;
+        key += `${n.face}:${n.level}:${n.x}:${n.y}:${n.build}:${Math.round(n.m * 4)},`;
       }
     }
     if (key !== this.groundKey) { this.groundKey = key; this.serial++; }
@@ -767,7 +797,7 @@ export class PlanetTerrain {
 
   private geometry(d: TileData): BufferGeometry {
     const g = new BufferGeometry();
-    g.setIndex(this.index);
+    g.setIndex(this.indices[15]);
     g.setAttribute('position', new BufferAttribute(d.pos, 3));
     g.setAttribute('aMorph', new BufferAttribute(d.morph, 3));
     g.setAttribute('aN', new BufferAttribute(d.n, 3));

@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { ElevationStore } from '../universe/Elevation';
 import { heightFromSpec, type HeightSpec } from '../universe/TerrainHeights';
-import { buildTile, childToward, dirFace, faceDir, type HeightFn, type TileData, tileRect, type TileRequest } from '../universe/TerrainTiles';
+import { buildTile, childToward, dirFace, faceDir, type HeightFn, TILE_N, type TileData, tileRect, type TileRequest } from '../universe/TerrainTiles';
 import { Vector3 } from 'three';
 
 /**
@@ -66,7 +66,7 @@ async function buildJob(job: number, req: TileRequest, f: Fn): Promise<void> {
   if (f.elev && f.bodyKey) {
     const [s0, t0, w] = tileRect(req.level, req.x, req.y);
     const c = faceDir(req.face, s0 + w / 2, t0 + w / 2);
-    const sp = (level: number) => Math.max(req.minSpacing ?? 0, (req.radius * Math.PI) / 2 / 2 ** level / 64);
+    const sp = (level: number) => Math.max(req.minSpacing ?? 0, (req.radius * Math.PI) / 2 / 2 ** level / TILE_N);
     const want = [store.prefetch(f.bodyKey, { x: c.x, y: c.y, z: c.z }, sp(req.level), 1)];
     if (req.chain) want.push(store.prefetch(f.bodyKey, { x: req.chain.dir[0], y: req.chain.dir[1], z: req.chain.dir[2] }, sp(req.chain.level), 1));
     await Promise.race([Promise.all(want).catch(() => undefined), later(4000)]);

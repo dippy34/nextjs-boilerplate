@@ -224,7 +224,9 @@ describe('rocks', () => {
           const gr = patch.groundRadius(p.clone().normalize());
           // the rock's centre sits a little below the ground (sunk in), never above it or deep under
           const below = gr - p.length();
-          if (below < -0.01) worst = Infinity;   // floating
+          // floating (while a tile under them morphs in, rocks are re-placed every quarter of the
+          // morph, so they may trail the ground by a few millimetres to centimetres)
+          if (below < -0.03) worst = Infinity;
           // sunk by part of its height, more on a slope (its lowest side), never far under
           else if (sc.y > 0.05) worst = Math.max(worst, below / Math.max(sc.x, sc.z));
           n++;

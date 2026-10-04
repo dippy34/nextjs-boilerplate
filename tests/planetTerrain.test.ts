@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { ExoGround } from '../src/universe/ExoTerrain';
 import type { ExoPlanet } from '../src/universe/Planets';
 import type { Body } from '../src/universe/Body';
+import { tileFragment } from '../src/render/PlanetTerrain';
+import { BODY_FRAG } from '../src/render/shaders/body';
+import { EXO_FRAG } from '../src/render/shaders/planet';
 import { TerrainSource } from '../src/universe/Terrain';
 import { heightFromSpec, heightSpec } from '../src/universe/TerrainHeights';
 import {
@@ -166,6 +169,17 @@ describe('elevation hookup', () => {
     for (let i = 0; i < 20; i++) {
       const n = new Vector3(Math.cos(i), Math.sin(i * 2.1), Math.cos(i * 0.7)).normalize();
       expect(withE(n, 10)).toBe(plain(n, 10));
+    }
+  });
+});
+
+describe('tile shaders', () => {
+  it('the surface shaders run per tile without discard (early depth rejection) and read the close-up weight per vertex', () => {
+    for (const frag of [BODY_FRAG, EXO_FRAG]) {
+      const f = tileFragment(frag);
+      expect(f.slice(f.indexOf('void main()')).includes('discard')).toBe(false);
+      expect(f).toContain('#define uHScale vHScale');
+      expect(f).not.toMatch(/uniform float uHScale;/);
     }
   });
 });
