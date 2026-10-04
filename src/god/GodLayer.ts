@@ -243,7 +243,7 @@ export class GodLayer {
         let t = this.trails.get(e.id);
         if (!t || t.primary !== (p?.id ?? -1)) {
           if (t) this.group.remove(t.line.line);
-          const line = new DynLine(TRAIL_POINTS, e === this.selected ? [1, 0.9, 0.4] : e.kind === 'body' && e.body?.kind === 'moon' ? [0.45, 0.9, 0.65] : [0.5, 0.75, 1], 0.7);
+          const line = new DynLine(TRAIL_POINTS, e === this.selected ? [1, 0.9, 0.4] : e.kind === 'body' && e.body?.kind === 'moon' ? [0.45, 0.9, 0.65] : [0.5, 0.75, 1], 0.45);
           t = { primary: p?.id ?? -1, pts: new Float64Array(TRAIL_POINTS * 3), n: 0, head: 0, line, seen };
           this.trails.set(e.id, t);
           this.group.add(line.line);
@@ -335,7 +335,7 @@ export class GodLayer {
 
   private orbitLine(i: number): DynLine {
     while (this.orbitLines.length <= i) {
-      const l = new DynLine(ORBIT_POINTS + 1, [0.45, 0.6, 1], 0.4);
+      const l = new DynLine(ORBIT_POINTS + 1, [0.45, 0.6, 1], 0.22);
       this.orbitLines.push(l);
       this.group.add(l.line);
     }

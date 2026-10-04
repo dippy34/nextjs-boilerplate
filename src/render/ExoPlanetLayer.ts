@@ -1,6 +1,7 @@
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, DynamicDrawUsage, Group, Line, LineBasicMaterial, Matrix3, Matrix4,
-  Mesh, Points, Quaternion, RingGeometry, ShaderMaterial, SphereGeometry, Vector3,
+  AdditiveBlending, BufferAttribute, BufferGeometry, DoubleSide, DynamicDrawUsage, Group, HalfFloatType, LinearFilter, LinearMipmapLinearFilter,
+  Line, LineBasicMaterial, Matrix3, Matrix4, Mesh, OrthographicCamera, PlaneGeometry, Points, Quaternion, RingGeometry, Scene, ShaderMaterial,
+  SphereGeometry, Vector3, WebGLCubeRenderTarget, type WebGLRenderer,
 } from 'three';
 import { blackbodyRGB, luminance, magToIrradiance } from '../astro/photometry';
 import { PC } from '../core/units';
@@ -8,7 +9,7 @@ import type { UPos } from '../core/upos';
 import { type ExoPlanet, hashKey, type PlanetarySystem, type PlanetType, rng } from '../universe/Planets';
 import { SPRITE_FRAG, SPRITE_VERT } from './NearStars';
 import { BODY_VERT } from './shaders/body';
-import { EXO_FRAG, RING_GLSL } from './shaders/planet';
+import { EXO_BAKE_FRAG, EXO_FRAG, RING_GLSL } from './shaders/planet';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import { ExoPlanet as ExoPlanetClass, PlanetarySystem as SystemClass } from '../universe/Planets';
 import { CatalogStar } from '../universe/Stars';
@@ -175,6 +176,18 @@ ${OUTPUT_FRAGMENT}
 
 interface PlanetDraw { mesh: Mesh; ring: Mesh | null; orbit: Line; orient: Matrix4; ground: ExoGround | null; air: AtmosphereSpec | null; albedo: number }
 
+/** texels per cube face of a baked height field (EXO_BAKE_FRAG) */
+const BAKE_SIZE = 512;
+/** planets whose height field stays baked at once (the least recently used one is released) */
+const BAKE_KEEP = 2;
+/** baked once the planet's radius on screen exceeds this many pixels (smaller disks are cheap anyway) */
+const BAKE_MIN_PX = 24;
+
+const BAKE_VERT = /* glsl */ `void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+/** A planet's height field baked into a cube map, one face per frame. */
+interface Bake { rt: WebGLCubeRenderTarget; mat: ShaderMaterial; faces: number; used: number }
+
 const G = 6.674e-11;
 
 export interface ExoView { planet: ExoPlanet; rel: Vector3; dist: number; pixelRadius: number; radiance: number }
@@ -192,6 +205,13 @@ export class ExoPlanetLayer {
   private ringGeo = new RingGeometry(1.15, 3.0, 256, 1);
   private sprites: Points;
   private sp = { pos: new Float32Array(64 * 3), irr: new Float32Array(64), col: new Float32Array(64 * 3) };
+  /** the renderer, for baking height fields in the headset (set by the app) */
+  gl: WebGLRenderer | null = null;
+  private bakes = new Map<ExoPlanet, Bake>();
+  private bakeScene = new Scene();
+  private bakeQuad = new Mesh(new PlaneGeometry(2, 2));
+  private bakeCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private frameNo = 0;
 
   constructor(psf: Record<string, { value: number }>, private exposure: { value: number }) {
     this.group.name = 'exoplanets';
@@ -238,6 +258,7 @@ export class ExoPlanetLayer {
       uExposure: this.exposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
       uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK, uLite: LITE.uLite, uCSeed: { value: exoCraterSeed(p.name) },
       uTerrain: { value: 0 }, uHScale: { value: 0 }, uCamAlt: { value: 1e9 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
+      uTerrCube: { value: null }, uBaked: { value: 0 },
       ...MATERIALS, uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) },
     };
     for (const [k, v] of Object.entries(pal)) u[k] = { value: Array.isArray(v) ? new Vector3(...v) : v };
@@ -267,9 +288,12 @@ export class ExoPlanetLayer {
     }
     const n = 160;
     const og = new BufferGeometry();
-    og.setAttribute('position', new BufferAttribute(new Float32Array(n * 3), 3).setUsage(DynamicDrawUsage));
+    og.setAttribute('position', new BufferAttribute(new Float32Array(n * 3), 3));
     const orbit = new Line(og, new LineBasicMaterial({ color: 0x6f8fd0, transparent: true, opacity: 0.35, depthWrite: false }));
     orbit.frustumCulled = false;
+    // (points relative to the star, filled once: the ellipse is fixed; the line is moved with the star)
+    orbit.matrixAutoUpdate = false;
+    orbit.userData.filled = false;
     orbit.renderOrder = 5;
     this.group.add(orbit);
     const type = TYPE_ID[p.spec.type];
@@ -346,6 +370,81 @@ export class ExoPlanetLayer {
         if (o === d.orbit) o.geometry.dispose();
       }
       this.draws.delete(p);
+      this.unbake(p);
+    }
+  }
+
+  private unbake(p: ExoPlanet): void {
+    const b = this.bakes.get(p);
+    if (!b) return;
+    b.rt.dispose();
+    b.mat.dispose();
+    this.bakes.delete(p);
+    const d = this.draws.get(p);
+    if (d) { const u = (d.mesh.material as ShaderMaterial).uniforms; u.uBaked.value = 0; u.uTerrCube.value = null; }
+  }
+
+  /**
+   * Headset only: bake the height field of the rocky planet largest on screen (one cube face per
+   * frame; used once all six are done), so its sphere samples a texture instead of the noise.
+   * The desktop's height field has finer octaves and is always evaluated per pixel.
+   */
+  private updateBakes(): void {
+    this.frameNo++;
+    const lite = LITE.uLite.value > 0.5;
+    for (const [p, b] of this.bakes) {
+      const d = this.draws.get(p);
+      if (d) (d.mesh.material as ShaderMaterial).uniforms.uBaked.value = lite && b.faces >= 6 ? 1 : 0;
+    }
+    const gl = this.gl;
+    if (!lite || !gl) return;
+    let best: ExoView | null = null;
+    for (const v of this.views) {
+      const d = this.draws.get(v.planet);
+      if (!d?.ground || !d.mesh.visible || v.pixelRadius < BAKE_MIN_PX) continue;
+      if (!best || v.pixelRadius > best.pixelRadius) best = v;
+    }
+    if (!best) return;
+    const p = best.planet;
+    const d = this.draws.get(p)!;
+    let b = this.bakes.get(p);
+    if (!b) {
+      while (this.bakes.size >= BAKE_KEEP) {
+        let old: ExoPlanet | null = null, t = Infinity;
+        for (const [q, x] of this.bakes) if (x.used < t) { t = x.used; old = q; }
+        this.unbake(old!);
+      }
+      const rt = new WebGLCubeRenderTarget(BAKE_SIZE, {
+        // (allocated with mipmap levels; they are built once, after the last face)
+        type: HalfFloatType, generateMipmaps: true, minFilter: LinearMipmapLinearFilter, magFilter: LinearFilter, depthBuffer: false,
+      });
+      const mu = (d.mesh.material as ShaderMaterial).uniforms;
+      const mat = new ShaderMaterial({
+        name: 'exoplanet-bake', vertexShader: BAKE_VERT, fragmentShader: EXO_BAKE_FRAG,
+        uniforms: { ...mu, uLite: { value: 1 }, uTerrCube: { value: null }, uFace: { value: 0 }, uSize: { value: BAKE_SIZE } },
+        depthTest: false, depthWrite: false,
+      });
+      b = { rt, mat, faces: 0, used: 0 };
+      this.bakes.set(p, b);
+    }
+    b.used = this.frameNo;
+    if (b.faces >= 6) return;
+    const face = b.faces++;
+    b.mat.uniforms.uFace.value = face;
+    b.rt.texture.generateMipmaps = face === 5;   // (three builds the mipmaps after the last face)
+    this.bakeQuad.material = b.mat;
+    if (this.bakeQuad.parent !== this.bakeScene) this.bakeScene.add(this.bakeQuad);
+    const prevTarget = gl.getRenderTarget(), prevFace = gl.getActiveCubeFace(), prevMip = gl.getActiveMipmapLevel();
+    const xrWas = gl.xr.enabled;
+    gl.xr.enabled = false;
+    gl.setRenderTarget(b.rt, face);
+    gl.render(this.bakeScene, this.bakeCam);
+    gl.xr.enabled = xrWas;
+    gl.setRenderTarget(prevTarget, prevFace, prevMip);
+    if (face === 5) {
+      const u = (d.mesh.material as ShaderMaterial).uniforms;
+      u.uTerrCube.value = b.rt.texture;
+      u.uBaked.value = 1;
     }
   }
 
@@ -416,18 +515,24 @@ export class ExoPlanetLayer {
         // orbit line relative to the camera
         d.orbit.visible = this.showOrbits;
         if (this.showOrbits) {
-          const a = d.orbit.geometry.attributes.position as BufferAttribute;
-          const per = p.spec.periodS / 86400;
-          for (let i = 0; i < a.count; i++) {
-            sys.position(p.spec, jd + (per * i) / (a.count - 1), tmp);
-            a.setXYZ(i, starRel.x + tmp.x, starRel.y + tmp.y, starRel.z + tmp.z);
+          if (!d.orbit.userData.filled) {
+            const a = d.orbit.geometry.attributes.position as BufferAttribute;
+            const per = p.spec.periodS / 86400;
+            for (let i = 0; i < a.count; i++) {
+              sys.position(p.spec, jd + (per * i) / (a.count - 1), tmp);
+              a.setXYZ(i, tmp.x, tmp.y, tmp.z);
+            }
+            a.needsUpdate = true;
+            d.orbit.userData.filled = true;
           }
-          a.needsUpdate = true;
+          d.orbit.matrix.makeTranslation(starRel.x, starRel.y, starRel.z);
+          d.orbit.matrixWorldNeedsUpdate = true;
         }
       }
     }
     this.sprites.geometry.setDrawRange(0, ns);
     for (const k of ['position', 'aIrr', 'aColor']) this.sprites.geometry.attributes[k].needsUpdate = true;
     this.prune(active);
+    this.updateBakes();
   }
 }

@@ -218,7 +218,8 @@ export class BlackHoleLayer {
       this.cubeCam.updateCoordinateSystem();
     }
     this.cubeCam.updateMatrixWorld(true);
-    if (!this.fullCapture && !this.moved && ++this.idle < IDLE_FRAMES) return;
+    // (headset: every other frame even while moving; a face is 512 px there and the scene costs more)
+    if (!this.fullCapture && ++this.idle < (this.moved ? (this.vr ? 2 : 1) : IDLE_FRAMES)) return;
     this.idle = 0;
     const faces = this.fullCapture ? [0, 1, 2, 3, 4, 5] : [this.face];
     this.fullCapture = false;

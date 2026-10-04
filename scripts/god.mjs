@@ -1,6 +1,7 @@
-// Drives God mode in headless Chromium: the real ephemeris switching to the N-body sandbox, the
-// panel, reversing Earth's orbit, deleting the Earth (the Moon wanders off), a black hole, a
-// collision, undo, save/load, reset, and the in-headset God tab with an emulated Meta Quest 3.
+// Drives God mode in headless Chromium: the physics editor (mass/radius/density, Kepler elements,
+// the math lines), reversing Earth's orbit, Kepler III after a mass change, deleting the Earth (the
+// Moon wanders off), the N-body switch, a black hole, a collision, undo, save/load, reset, and the
+// in-headset God tab with an emulated Meta Quest 3.
 // Usage: node scripts/god.mjs [baseUrl] [outDir]
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -50,7 +51,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   await frames(3);
   const after = await helio('Earth');
   st = await page.evaluate(() => ({ active: window.app.god.active, badge: document.querySelector('.god-badge')?.textContent, n: window.app.god.sandbox.entities.size }));
-  check('an edit switches to the sandbox', st.active && /Sandbox/.test(st.badge ?? '') && st.n > 300, JSON.stringify(st));
+  check('an edit leaves the real ephemeris (Kepler orbits by default)', st.active && /Kepler/.test(st.badge ?? '') && st.n > 300, JSON.stringify(st));
   check('Reverse orbit flips Earth to a retrograde orbit', before.hEcl > 0.99 && after.hEcl < -0.99 && Math.abs(after.v - before.v) < 50, `${before.hEcl.toFixed(3)} -> ${after.hEcl.toFixed(3)}`);
   const jd0 = await page.evaluate(() => window.app.clock.jdTdb);
   await page.evaluate(() => { window.app.clock.rate = 86400 * 10; window.app.clock.paused = false; });
@@ -67,13 +68,41 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   const undone = await helio('Earth');
   check('Ctrl+Z undoes the edit', undone.hEcl > 0.99, `${undone.hEcl.toFixed(3)}`);
 
-  // 4. mass x1000: the Moon's orbit changes (it now orbits a much heavier Earth)
-  await page.click('button[data-a="mass"][data-k="1000"]');
-  await frames(3);
-  st = await page.evaluate(() => ({ gm: window.app.system.byId.get(399).gm, info: window.app.system.byId.get(399).info().find((r) => r[0] === 'Mass')?.[1] }));
-  check('mass x1000', Math.abs(st.gm / 3.986e17 - 1) < 0.01, JSON.stringify(st));
+  // 4. the editor: type a mass (radius kept, density follows); Kepler III speeds the Moon up
+  const moonP = () => page.evaluate(() => { const v = window.app.god.sandbox.orbitOf(window.app.god.sandbox.entityOf(301)); const a = v.el.q / (1 - v.el.e); return 2 * Math.PI * Math.sqrt(a ** 3 / v.el.mu) / 86400; });
+  await page.fill('input[data-f="mass"]', '4');
+  await page.press('input[data-f="mass"]', 'Enter');
+  await frames(6);
+  st = await page.evaluate(() => {
+    const b = window.app.system.byId.get(399);
+    return { gm: b.gm, r: b.radius, rho: document.querySelector('input[data-f="density"]')?.value, g: document.querySelector('[data-live="g"]')?.textContent, math: document.querySelector('[data-live-m="g"]')?.textContent };
+  });
+  check('typing 4 Earth masses: radius kept, density and g follow, with the working shown', Math.abs(st.gm / (4 * 3.986e14) - 1) < 0.01 && Math.abs(st.r - 6371e3) < 1e3 && Math.abs(Number(st.rho) - 22.05) < 0.2 && /^39\.\d+ m\/s²$/.test(st.g) && /^g = GM \/ R² = /.test(st.math), JSON.stringify(st));
+  const p4 = await moonP();
+  check("Kepler III: the Moon goes round a 4x heavier Earth twice as fast", Math.abs(p4 - 27.32 / 2) < 0.6, `${p4.toFixed(2)} d`);
+  await page.keyboard.press('Control+KeyZ');
+  await frames(4);
+  // orbital elements: set Earth's a to 1.5 AU: P = 1.84 yr from Kepler III, shown with its formula
+  await page.fill('input[data-f="a"]', '1.5');
+  await page.press('input[data-f="a"]', 'Enter');
+  await frames(6);
+  st = await page.evaluate(() => ({ P: document.querySelector('[data-live="P"]')?.textContent, au: (() => { const a = window.app; return a.system.byId.get(399).pos.distanceTo(a.system.sun.pos) / 1.495978707e11; })() }));
+  check('setting a = 1.5 AU puts Earth there; P = 2π√(a³/GM) reads 671 d (1.84 yr)', /^67[01]\d* d$/.test(st.P ?? '') && st.au > 1.48 && st.au < 1.53, JSON.stringify(st));
   await page.keyboard.press('Control+KeyZ');
   await frames(2);
+
+  // climate drawn: 5 bar on Earth thickens its air; a heavier Sun shines brighter (main sequence)
+  await page.evaluate(() => { const g = window.app.god; g.sandbox.setPhys(399, { pressure: 5.065, molar: 0.02897 }); g.setPhysical(10, { massKg: 1.2 * 1.98847e30 }); });
+  await frames(30);
+  st = await page.evaluate(() => {
+    const a = window.app, tw = a.atmospheres.tweaks?.get(a.system.byId.get(399));
+    return { density: tw?.density, h: tw?.hScale };
+  });
+  const lum = await page.evaluate(() => window.app.god.debugState().sunLight);
+  check('5 bar thickens Earth\'s drawn atmosphere; a 1.2 M☉ Sun is ~2x brighter', st.density > 3 && st.density < 7 && lum > 1.9 && lum < 2.3, JSON.stringify({ ...st, lum }));
+  await page.keyboard.press('Control+KeyZ');
+  await page.keyboard.press('Control+KeyZ');
+  await frames(3);
 
   // 5. delete the Earth: the Moon wanders off round the Sun
   await page.keyboard.press('Delete');
@@ -83,12 +112,20 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
     return { earthValid: e.valid, earthGm: e.gm, moonValid: m.valid, mode: a.god.sandbox.entityOf(301)?.mode, primary: a.god.sandbox.primaryOf(a.god.sandbox.entityOf(301))?.name };
   });
   check('Delete removes Earth; the Moon now orbits the Sun', !moonFree.earthValid && moonFree.earthGm === 0 && moonFree.moonValid && moonFree.primary === 'Sun', JSON.stringify(moonFree));
+  // (still gone a moment later: the ephemeris must not bring it back)
+  await frames(3);
+  st = await page.evaluate(() => window.app.system.byId.get(399).valid);
+  check('a deleted body stays deleted', st === false, `${st}`);
   await page.keyboard.press('Control+KeyZ');
   await frames(2);
   st = await page.evaluate(() => ({ valid: window.app.system.byId.get(399).valid, primary: window.app.god.sandbox.primaryOf(window.app.god.sandbox.entityOf(301))?.name }));
   check('undo brings Earth back', st.valid && st.primary === 'Earth', JSON.stringify(st));
 
-  // 6. a black hole of 10 Suns near Earth: drawn by the black-hole layer, felt by everything
+  // 6. the N-body switch, then a black hole of 10 Suns near Earth: drawn by the black-hole layer, felt by everything
+  await page.click('input[data-c="nbody"]');
+  await frames(4);
+  st = await page.evaluate(() => ({ mode: window.app.god.sandbox.mode, badge: document.querySelector('.god-badge')?.textContent }));
+  check('"Simulate gravity" switches to the N-body simulation', st.mode === 'nbody' && /N-body/.test(st.badge), JSON.stringify(st));
   const holeId = await page.evaluate(() => {
     const a = window.app, e = a.system.byId.get(399);
     const pos = e.pos.clone().add(e.vel.clone().normalize().multiplyScalar(3e9));
@@ -114,6 +151,8 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   // 7. a collision: the Moon thrown at Mars merges with it (mass and momentum kept), with a flash
   await page.keyboard.press('Control+KeyZ'); // (the swallow is not an edit: this undoes the black hole)
   await frames(2);
+  st = await page.evaluate(() => window.app.god.sandbox.mode);
+  check('undo keeps the N-body mode', st === 'nbody', st);
   const coll = await page.evaluate(() => {
     const a = window.app, sb = a.god.sandbox, m = sb.entityOf(301), mars = sb.entityOf(499);
     // put the Moon 200,000 km from Mars, heading straight at it at 5 km/s
@@ -170,6 +209,36 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
       spawned: a.system.bodies.filter((b) => b.meta.spawned).length, holes: a.blackHoles.filter((h) => h.key.startsWith('god:')).length };
   });
   check('Reset restores the real universe', !st.active && /Real/.test(st.badge) && st.earth && st.moon && Math.abs(st.marsGm - 4.2828e13) < 1e10 && st.spawned === 0 && st.holes === 0, JSON.stringify(st));
+  // 11. the universe console: a loop, a print with its formula, a creation, an error, undo
+  await page.keyboard.press('Backquote');
+  await frames(2);
+  const type = async (line) => { await page.fill('.god-console input', line); await page.press('.god-console input', 'Enter'); await frames(3); };
+  await type('for p in planets: p.e = 0');
+  st = await page.evaluate(() => {
+    const g = window.app.god, sb = g.sandbox;
+    const es = [199, 299, 399, 499, 599, 699, 799, 899].map((id) => sb.orbitOf(sb.entityOf(id)).el.e);
+    return { maxE: Math.max(...es), open: !document.querySelector('.god-console').classList.contains('hidden'), undo: sb.undoStack?.length };
+  });
+  check('console: for p in planets: p.e = 0 circularizes every planet', st.open && st.maxE < 1e-6, JSON.stringify(st));
+  await type('undo');
+  st = await page.evaluate(() => { const sb = window.app.god.sandbox; return sb.orbitOf(sb.entityOf(499)).el.e; });
+  check('console: one undo restores the whole loop', st > 0.09, `${st}`);
+  await type('print Earth.T_s');
+  await type('create planet "Nova" mass=3 Mearth density=4.5 g/cm3 a=1.6 AU around Sun');
+  await type('Earth.mass = 2');
+  st = await page.evaluate(() => {
+    const g = window.app.god, out = [...document.querySelectorAll('.god-console .out div')].map((d) => d.textContent);
+    const id = g.console.runner.world.find('Nova'), v = id !== null ? g.sandbox.entityOf(id) : null;
+    const o = v ? g.sandbox.orbitOf(v) : null;
+    return { ts: out.find((l) => l.startsWith('Earth.T_s = ')), math: out.find((l) => l.includes('T_s = T_eq + ΔT_greenhouse')), nova: !!v,
+      rho: v ? v.gm / 6.6743e-11 / (4 / 3 * Math.PI * v.radius ** 3) / 1000 : 0, a: o ? o.el.q / (1 - o.el.e) / 1.495978707e11 : 0, err: out[out.length - 1] };
+  });
+  check('console: print shows the formula; create makes Nova (4.5 g/cm³ at 1.6 AU)', /K/.test(st.ts ?? '') && !!st.math && st.nova && Math.abs(st.rho - 4.5) < 0.01 && Math.abs(st.a - 1.6) < 0.01, JSON.stringify(st));
+  check('console: a missing unit is explained', /mass needs a unit/.test(st.err ?? ''), st.err);
+  await shot(page, 'god7-console.png');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.app.god.reset());
+  await frames(2);
   check('no errors on the desktop', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.close();
 }
@@ -211,12 +280,28 @@ if (!skipVr) {
     const pressed = await press('v:reverse');
     const s1 = await page.evaluate(() => ({ active: window.app.god.active, hEcl: (() => { const a = window.app, b = a.system.byId.get(399), s = a.system.sun; const h = b.pos.clone().sub(s.pos).cross(b.vel.clone().sub(s.vel)).normalize(); return h.y * -0.3977771559 + h.z * 0.9174820621; })() }));
     check('VR: Reverse orbit from the God tab', pressed && s1.active && s1.hEcl < -0.99, JSON.stringify(s1));
+    // the editor in the headset: mass x1.1 with a nudge, and a derived value's working
+    const gm0 = await page.evaluate(() => window.app.system.byId.get(399).gm);
+    const nud = await press('mass:3');
+    const m1 = await page.evaluate(() => window.app.system.byId.get(399).gm);
+    check('VR: mass nudge x1.1', nud && Math.abs(m1 / gm0 - 1.1) < 1e-6, `${(m1 / gm0).toFixed(4)}`);
+    const shown = await press('math:P');
+    check('VR: tap a derived value to show its math', shown, '');
+    await frames(4);
+    await page.screenshot({ path: path.join(outDir, 'god6-vr-math.png'), timeout: 180000 });
     await press('spawn:hole');
     const s2 = await page.evaluate(() => window.app.blackHoles.filter((h) => h.key.startsWith('god:')).length);
     check('VR: create a black hole from the God tab', s2 === 1, `${s2}`);
     // grab with the grip and throw: the selected body leaves at the hand's speed (scaled)
     const s3 = await page.evaluate(() => window.app.vr.debugThrow?.() ?? null);
     check('VR: grip grabs the selection and throws it', !!s3 && s3.thrown && s3.speedChange > 0, JSON.stringify(s3));
+    const m3 = await page.evaluate(() => window.app.god.sandbox.mode);
+    check('VR: grabbing switches Kepler mode to the N-body simulation', m3 === 'nbody', m3);
+    await page.evaluate(() => window.app.god.reset());
+    await frames(3);
+    const pre = await press('preset:0');
+    const s5 = await page.evaluate(() => { const sb = window.app.god.sandbox; return Math.max(...[399, 499, 599].map((id) => sb.orbitOf(sb.entityOf(id)).el.e)); });
+    check('VR: a preset script (circular orbits) runs from the God tab', pre && s5 < 1e-6, `${s5}`);
     await press('reset');
     const s4 = await page.evaluate(() => window.app.god.active);
     check('VR: reset to the real universe', s4 === false, `${s4}`);

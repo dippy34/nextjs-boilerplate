@@ -19,6 +19,9 @@ export const GLOBALS = { uPullIn: { value: 0 }, uDepthK: { value: 1 } };
 /** Headset quality tier: 1 while presenting in VR (heavy procedural shaders do less per pixel). */
 export const LITE = { uLite: { value: 0 } };
 
+/** Adaptive quality level (0 full .. 3 lowest), set by the governor (render/Quality.ts): a uniform for shaders, `.value` for layers. */
+export const QUALITY_LEVEL = { uQuality: { value: 0 } };
+
 /** Largest distance (m) the depth buffer has to order: well beyond the observable universe. */
 export const MAX_DEPTH = 1e30;
 

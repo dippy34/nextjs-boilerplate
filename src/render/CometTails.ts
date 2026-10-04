@@ -5,6 +5,7 @@ import { eclToEqu } from '../core/frames';
 import { AU, GM_SUN } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { Comet } from './SmallBodies';
+import { VOLUMES } from './Renderer';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const VERT = /* glsl */ `
@@ -109,9 +110,12 @@ void main() {
       if (x > 0.0) {
         float wi = 0.12 + 0.012 * x;
         float rr = length(p.yz);
-        vec2 u = p.yz / max(rr, 1e-4);
-        float rays = 0.35 + 1.4 * pow(tn(vec3(u * 3.0, x * 0.012 + uSeed)), 2.0);
-        ion += ds * exp(-rr * rr / (2.0 * wi * wi)) / (2.5066 * wi) * exp(-x / uLi) * smoothstep(0.0, 1.0, x) * rays;
+        // (the rays' noise only where the tube has light: within 4 widths of its axis)
+        if (rr < 4.0 * wi) {
+          vec2 u = p.yz / max(rr, 1e-4);
+          float rays = 0.35 + 1.4 * pow(tn(vec3(u * 3.0, x * 0.012 + uSeed)), 2.0);
+          ion += ds * exp(-rr * rr / (2.0 * wi * wi)) / (2.5066 * wi) * exp(-x / uLi) * smoothstep(0.0, 1.0, x) * rays;
+        }
       }
       // dust tail: a thin fan in the orbit plane (z = 0), curving back along the orbit, striated along
       // lines from the nucleus (dust let go at one time drifts out along one line)
@@ -119,9 +123,11 @@ void main() {
       float yc = uBend * xd * xd / uLd;
       float wy = 0.35 + 0.1 * xd;
       float wz = 0.08 + 0.025 * xd;
-      float fan = exp(-(p.y - yc) * (p.y - yc) / (2.0 * wy * wy)) * exp(-p.z * p.z / (2.0 * wz * wz)) / (2.5066 * wz);
-      float stri = 0.6 + 0.8 * tn(vec3(atan(p.y, max(x, 0.5)) * 45.0, xd * 0.003, uSeed + 3.0));
-      dust += ds * fan * exp(-xd / uLd) * smoothstep(-1.0, 1.0, x) * stri;
+      if (abs(p.y - yc) < 4.0 * wy && abs(p.z) < 4.0 * wz) {
+        float fan = exp(-(p.y - yc) * (p.y - yc) / (2.0 * wy * wy)) * exp(-p.z * p.z / (2.0 * wz * wz)) / (2.5066 * wz);
+        float stri = 0.6 + 0.8 * tn(vec3(atan(p.y, max(x, 0.5)) * 45.0, xd * 0.003, uSeed + 3.0));
+        dust += ds * fan * exp(-xd / uLd) * smoothstep(-1.0, 1.0, x) * stri;
+      }
     }
   }
   // tails: a few to tens of times the Milky Way's surface brightness near the head (Hale-Bopp's
@@ -293,6 +299,9 @@ export class CometTails {
       m.frustumCulled = false;
       m.visible = false;
       m.renderOrder = 8;
+      // glowing gas, additive: drawn in the renderer's reduced-resolution volume pass
+      m.layers.set(VOLUMES.layer);
+      VOLUMES.meshes.add(m);
       this.meshes.push(m);
       this.group.add(m);
     }

@@ -22,6 +22,12 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   EXT_clip_control, else log depth; the console says which): `Renderer.reverseXrProjections`
   rebuilds the runtime's eye projections as reversed-Z each frame (three has no reversed-Z path for
   XR cameras), and the far-geometry pull-in is off in that mode. For an A/B on the device.
+* Adaptive quality (`src/render/Quality.ts`): a governor in Renderer.render steps `QUALITY.level`
+  (0 full .. 3) down when frames miss the budget (60 Hz desktop, the session's rate in a headset)
+  and back up after a clean run (with back-off). Desktop: internal render resolution 1/0.85/0.72/0.6
+  (the composite upscales; view.pixelRatio reports render pixels per CSS pixel). Headset: the
+  volume pass and the terrain's split threshold coarsen. Off under automation (navigator.webdriver)
+  unless ?governor=1; ?governor=0 turns it off. Other layers may read QUALITY.level.
 * Volume pass (`Renderer.ts`, `VOLUMES`): ray-marched volumes are drawn at reduced resolution
   (desktop 0.75, headset 0.5) into their own target, then added to the frame by a full-screen quad
   in the scene at the far plane with the volumes' old draw order (after everything opaque, sky
@@ -290,3 +296,23 @@ with a real GPU these run far faster than in the cloud container (software rende
 
 Gaia DR3 supplement (`public/data/stars-gaia/`) is CC BY-NC: drop it for a paid store app. AT-HYG
 tiles are CC BY-SA 4.0; OPAL maps CC BY 4.0; NASA/USGS/NOAA public domain. See `CREDITS.md`.
+
+## God mode (src/god/)
+
+* `physics.ts`: every formula of the editor, each returning its value and its working
+  ("show the math"); tests in `tests/physics.test.ts` (textbook values).
+* `Sandbox.ts`: the edited universe. `mode = 'kepler'` (default): edited bodies follow exact
+  two-body orbits (`Entity.orbit`, ecliptic J2000 elements about a parent), their moons ride along,
+  everything else stays on the ephemeris (SolarSystem.update runs first each frame). `mode = 'nbody'`:
+  IAS15 N-body simulation in `nbody.worker.ts` (`NBody.ts`, `runner.ts`; fast small moons ride Kepler
+  orbits with their mass in the planet's particle, `initial.ts`), the display interpolates snapshots.
+  Edits go through `edit()` (undo snapshot, `WorldState` JSON also used by save/load/export).
+  Spawned planets/stars are Bodies in `system.bodies` (`hidden`, drawn by the exoplanet / near-star
+  layers via proxies in `God.ts`), spawned holes are in `app.blackHoles`; deleted bodies are
+  `valid = false`, `gm = 0`.
+* `God.ts` (glue, proxies, mouse tools, climate -> `SUN_LIGHT` and `AtmospheresLayer.setTweak`),
+  `GodPanel.ts` (desktop editor, Y), `GodTab.ts` (VR menu tab), `GodVR.ts` (grip grab/throw, laser
+  placement), `GodLayer.ts` (trails, predicted orbits, velocity arrow, flashes, debris rings),
+  `BodyView.ts` (what the editors show, real values in `CLIMATE`).
+* Browser suite: `scripts/god.mjs` (desktop + IWER headset); unit: `tests/nbody.test.ts`
+  (1 year vs DE442S, conservation, reversal, merges), `tests/physics.test.ts`.

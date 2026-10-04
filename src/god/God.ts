@@ -9,6 +9,11 @@ import { GodAudio } from './GodAudio';
 import { GodLayer } from './GodLayer';
 import { GodPanel } from './GodPanel';
 import { GodVR } from './GodVR';
+import { GodConsole } from './script/ConsoleUI';
+import { equilibriumTemp, L_SUN, mainSequence as physicsMainSequence } from './physics';
+import { CLIMATE, starLuminosity } from './BodyView';
+import { SUN_LIGHT } from '../astro/photometry';
+import { earthLikeAtmosphere } from '../render/Atmospheres';
 import { FLAG_BLACK_HOLE, FLAG_RIGID, FLAG_STAR } from './NBody';
 import { type Entity, Sandbox, type SpawnSpec } from './Sandbox';
 
@@ -42,14 +47,14 @@ export function planetRadius(type: SpawnType, massEarth: number): number {
   return REARTH * Math.pow(massEarth, 0.27);
 }
 
-/** Main-sequence star from its mass (Suns): luminosity (Suns), radius (m), Teff (K). */
+/** Main-sequence star from its mass (Suns): luminosity (Suns), radius (m), Teff (K) (src/god/physics.ts). */
 export function mainSequence(massSun: number): { lum: number; radius: number; teff: number } {
-  const m = Math.max(0.08, massSun);
-  const lum = m < 0.43 ? 0.23 * m ** 2.3 : m < 2 ? m ** 4 : m < 55 ? 1.4 * m ** 3.5 : 32000 * m;
-  const r = m < 1 ? m ** 0.8 : m ** 0.57;
-  const teff = SUN_TEFF * Math.pow(lum / (r * r), 0.25);
-  return { lum, radius: r * 695_700e3, teff };
+  const ms = physicsMainSequence(massSun);
+  return { lum: ms.lum.value, radius: ms.radius.value, teff: ms.teff.value };
 }
+
+/** mean surface temperatures (K) of the worlds with air, for the change of their scale height */
+const REAL_SURFACE_T: Record<number, number> = { 299: 737, 399: 288, 499: 210, 606: 94, 999: 44, 599: 165, 699: 134, 799: 76, 899: 72 };
 
 const TYPE_LOOK: Record<string, { type: PlanetType; teq: number }> = {
   rocky: { type: 'hot', teq: 420 }, terran: { type: 'terran', teq: 260 }, ocean: { type: 'ocean', teq: 265 }, ice: { type: 'ice', teq: 110 },
@@ -94,6 +99,8 @@ export class God {
   readonly audio = new GodAudio();
   /** headset: grip grab-and-throw, laser placement */
   readonly vr: GodVR;
+  /** the universe console (backquote) */
+  readonly console: GodConsole;
   private proxies = new Map<number, Proxy>();
   private lights = new Map<number, CatalogStar>();
   /** desktop tool in use */
@@ -112,6 +119,7 @@ export class God {
     };
     this.panel = new GodPanel(this);
     this.vr = new GodVR(this);
+    this.console = new GodConsole(this);
     this.bindPointer();
   }
 
@@ -148,13 +156,75 @@ export class God {
       this.layer.selected = sel;
       const anchor = this.entityOf(this.app.rig.anchor);
       this.layer.focusPrimary = anchor ? (anchor.mode === 'massive' && anchor.kind === 'body' && anchor.body?.kind !== 'moon' ? anchor : sb.primaryOf(anchor)) : null;
+      this.climateTimer -= dt;
+      if (this.climateTimer <= 0) { this.climateTimer = 0.3; this.applyClimate(); }
     } else {
       this.app.orbits.group.visible = true;
+      if (this.climateOn) this.clearClimate();
     }
     const cam = this.app.rig.upos;
     const camV = cam.toVector3();
     this.layer.update(cam, (p) => p.distanceTo(camV));
     this.panel.update(dt);
+  }
+
+  // ---------------------------------------------------------------- climate -> rendering
+
+  private climateTimer = 0;
+  private climateOn = false;
+  private tweaked = new Set<Body>();
+
+  /**
+   * What the physics says, drawn: the Sun shines with the luminosity of its (edited) mass, and an
+   * atmosphere's density and scale height follow its pressure, temperature, molar mass and the
+   * world's gravity (H = RT/(Mg)).
+   */
+  private applyClimate(): void {
+    const sb = this.sandbox;
+    this.climateOn = true;
+    const sun = sb.entityOf(10);
+    SUN_LIGHT.lum = sun ? Math.max(1e-6, starLuminosity(sun.gm / G) / L_SUN) : 1e-6;
+    const stars = [...sb.entities.values()].filter((e) => e.flags & FLAG_STAR);
+    const seen = new Set<Body>();
+    for (const e of sb.entities.values()) {
+      const b = e.body;
+      if (!b || !e.gm) continue;
+      const cl = CLIMATE[e.id];
+      const p = e.phys?.pressure ?? cl?.pressure ?? 0;
+      if (!cl && !e.phys?.pressure) continue;
+      const base = sb.baselineOf(b);
+      const M = e.phys?.molar ?? cl?.molar ?? 0.029;
+      // temperature from the brightest star, as the editor shows it
+      let best = 0, T = 0;
+      for (const s of stars) {
+        const L = starLuminosity(s.gm / G), d = Math.max(s.pos.distanceTo(e.pos), 1);
+        if (L / (d * d) > best) { best = L / (d * d); T = equilibriumTemp(L, d, e.phys?.albedo ?? cl?.albedo ?? b.albedo).value; }
+      }
+      T = Math.max(3, T + (e.phys?.greenhouse ?? cl?.greenhouse ?? 0));
+      const g = e.gm / (e.radius * e.radius);
+      const T0 = REAL_SURFACE_T[e.id] ?? T, g0 = base ? base.gm / (base.radius * base.radius) : g;
+      const p0 = cl?.pressure ?? 0, M0 = cl?.molar ?? M;
+      let tw: Parameters<typeof this.app.atmospheres.setTweak>[1];
+      if (p0 > 0) {
+        tw = { density: p0 > 0 ? (p / p0) * (T0 / T) : 0, hScale: Math.min(20, Math.max(0.05, (T / T0) * (M0 / M) * (g0 / g))) };
+        if (Math.abs(tw.density - 1) < 1e-3 && Math.abs(tw.hScale - 1) < 1e-3) tw = null;
+      } else if (p > 0) {
+        const spec = earthLikeAtmosphere(p, T, g);
+        spec.HR *= 0.029 / M; spec.HM *= 0.029 / M; spec.top *= 0.029 / M;
+        tw = { density: 1, hScale: 1, spec };
+      } else tw = null;
+      const had = this.tweaked.has(b);
+      if (tw) { this.app.atmospheres.setTweak(b, tw); this.tweaked.add(b); seen.add(b); }
+      else if (had) { this.app.atmospheres.setTweak(b, null); this.tweaked.delete(b); }
+    }
+    for (const b of [...this.tweaked]) if (!seen.has(b)) { this.app.atmospheres.setTweak(b, null); this.tweaked.delete(b); }
+  }
+
+  private clearClimate(): void {
+    SUN_LIGHT.lum = 1;
+    for (const b of this.tweaked) this.app.atmospheres.setTweak(b, null);
+    this.tweaked.clear();
+    this.climateOn = false;
   }
 
   // ---------------------------------------------------------------- selection
@@ -323,14 +393,106 @@ export class God {
     const e = this.sandbox.entityOf(id);
     if (e) this.sandbox.setMass(id, e.gm * k);
   }
-  setMass(id: number, gm: number): void { this.ensureActive(); this.sandbox.setMass(id, gm); }
+  setMass(id: number, gm: number): void { this.setPhysical(id, { massKg: gm / G }); }
+
+  /** Create panel: orbit radius of a new thing, and its unit */
+  placeA = 1;
+  placeAUnit: 'AU' | 'km' = 'AU';
+
+  /** N-body simulation on (from the universe as it is) or off (everything continues on Kepler orbits). */
+  setSimulation(on: boolean): void {
+    this.ensureActive();
+    this.sandbox.setMode(on ? 'nbody' : 'kepler');
+    this.app.hud.toast(on ? 'Simulating gravity: every body pulls on every other' : 'Kepler orbits: each body on its exact two-body orbit', 2.5);
+  }
+
+  /** Create something on a circular orbit of radius `a` (m) about the selection (or the Sun), at a random place on it. */
+  spawnOnOrbit(type: SpawnType, mass: number, a: number, centerId?: number, name?: string): number | null {
+    this.ensureActive();
+    const app = this.app;
+    const selE = this.entityOf(app.selection);
+    const center = centerId !== undefined ? this.sandbox.entityOf(centerId) : selE ?? this.sandbox.entityOf(10);
+    if (!center) return null;
+    // in the plane of the centre's own orbit (the ecliptic for the Sun)
+    const pp = this.sandbox.primaryOf(center);
+    let n = new Vector3(0, -0.3977771559, 0.9174820621);
+    if (pp && center !== pp) { const h = center.pos.clone().sub(pp.pos).cross(center.vel.clone().sub(pp.vel)); if (h.lengthSq() > 0) n = h.normalize(); }
+    const u = new Vector3(1, 0, 0).cross(n).normalize();
+    const w = n.clone().cross(u);
+    const th = Math.random() * Math.PI * 2;
+    const pos = center.pos.clone().addScaledVector(u, a * Math.cos(th)).addScaledVector(w, a * Math.sin(th));
+    const gm = type === 'star' || type === 'hole' ? mass * GM_SUN : mass * GM_EARTH;
+    const vc = Math.sqrt((center.gm + gm) / a);
+    const vel = center.vel.clone().addScaledVector(n.clone().cross(pos.clone().sub(center.pos)).normalize(), vc);
+    const id = this.spawn(type, mass, pos, vel, center.id, name);
+    if (id !== null) this.selectEntity(id);
+    return id;
+  }
+
+  /** Which of mass, radius and density follows when one of the others is changed. */
+  derive: 'density' | 'mass' | 'radius' = 'density';
+
+  /** Current mass (kg), mean radius, polar radius (m) of a selectable thing (before the sandbox starts too). */
+  bulk(id: number): { massKg: number; radius: number; rpol: number; req: number } | null {
+    const e = this.sandbox.entityOf(id);
+    const b = e?.body ?? this.app.system.byId.get(id) ?? null;
+    const gm = e?.gm ?? b?.gm ?? 0;
+    const R = e?.radius ?? b?.radius ?? 0;
+    if (!R) return null;
+    const req = b ? (b.radii[0] + b.radii[1]) / 2 : R;
+    const rpol = b ? b.radii[2] : R;
+    return { massKg: gm / G, radius: R, rpol, req };
+  }
+
+  /**
+   * Linked mass / radius / density: change one (or the polar radius) and the one chosen in
+   * `derive` follows, the other stays.
+   */
+  setPhysical(id: number, ch: { massKg?: number; radius?: number; densityKgM3?: number; rpol?: number }): void {
+    const cur = this.bulk(id);
+    if (!cur) return;
+    let M = cur.massKg, R = cur.radius;
+    const rho = M / ((4 / 3) * Math.PI * R ** 3);
+    if (ch.massKg !== undefined) { M = ch.massKg; if (this.derive === 'radius') R = Math.cbrt((3 * M) / (4 * Math.PI * rho)); }
+    if (ch.radius !== undefined) { R = ch.radius; if (this.derive === 'mass') M = rho * (4 / 3) * Math.PI * R ** 3; }
+    if (ch.densityKgM3 !== undefined) {
+      if (this.derive === 'radius') R = Math.cbrt((3 * M) / (4 * Math.PI * ch.densityKgM3));
+      else M = ch.densityKgM3 * (4 / 3) * Math.PI * R ** 3;
+    }
+    this.ensureActive();
+    this.sandbox.setMass(id, M * G, R, ch.rpol);
+  }
+
+  /** Rotation: sidereal period (s, > 0) and direction. */
+  setRotation(id: number, periodS: number, retrograde: boolean): void {
+    this.ensureActive();
+    if (periodS > 0) this.sandbox.setSpin(id, ((retrograde ? -1 : 1) * 2 * Math.PI) / periodS, null);
+  }
+
+  /** Orbital elements (Kepler mode; in the N-body mode the body is put on that orbit's state). */
+  setOrbit(id: number, ch: Parameters<Sandbox['setOrbit']>[1]): void {
+    this.ensureActive();
+    this.sandbox.setOrbit(id, ch);
+  }
   scaleRadius(id: number, k: number): void {
     this.ensureActive();
     const e = this.sandbox.entityOf(id);
     if (e) this.sandbox.setRadius(id, e.radius * k);
   }
   setRadius(id: number, r: number): void { this.ensureActive(); this.sandbox.setRadius(id, r); }
-  preset(id: number, what: Parameters<Sandbox['preset']>[1]): void { this.ensureActive(); this.sandbox.preset(id, what); }
+  preset(id: number, what: Parameters<Sandbox['preset']>[1]): void {
+    this.ensureActive();
+    // a body stopped dead falls into what it orbits: only the N-body simulation can let it hit
+    if (what === 'stop') this.needGravity('it falls and hits');
+    this.sandbox.preset(id, what);
+  }
+
+  /** Switch Kepler mode to the N-body simulation for something only gravity can do (with a toast). */
+  needGravity(why: string): void {
+    if (this.sandbox.mode === 'nbody') return;
+    this.sandbox.setMode('nbody');
+    this.app.hud.toast(`Simulating gravity (N-body) so ${why}. Untick "Simulate gravity" for Kepler orbits.`, 3.5);
+  }
   remove(id: number): void {
     this.ensureActive();
     const e = this.sandbox.entityOf(id);
@@ -391,7 +553,7 @@ export class God {
    * Create something at `pos` (barycentric m): moving `vel` if given, else on a circular orbit
    * about the dominant body there. Returns the new entity's id.
    */
-  spawn(type: SpawnType, massValue: number, pos: Vector3, vel?: Vector3): number | null {
+  spawn(type: SpawnType, massValue: number, pos: Vector3, vel?: Vector3, parentId?: number, givenName?: string): number | null {
     this.ensureActive();
     const sb = this.sandbox;
     const info = SPAWN_TYPES.find((t) => t.type === type)!;
@@ -417,6 +579,7 @@ export class God {
           spin: { ax: 0, ay: 0, az: 1, rate: 0, locked: false, base: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }, spawn: { type: 'swarm', seed: seed + i } });
       }
       st.nextId = (sb as unknown as { nextId: number }).nextId;
+      for (const r of st.entities) if (r.kind === 'swarm' && !r.orbit) sb.fitOrbit(r, p?.id ?? null);
       sb.applyState(st);
       this.audio.whoosh();
       return first;
@@ -427,10 +590,10 @@ export class God {
     if (type === 'star') { radius = mainSequence(massValue).radius; kind = 'star'; flags = FLAG_STAR; }
     else if (type === 'hole') { radius = (2 * gm) / (299_792_458 ** 2); kind = 'hole'; flags = FLAG_BLACK_HOLE | FLAG_RIGID; }
     else { radius = planetRadius(type, massValue); kind = 'planet'; }
-    const name = `${type === 'hole' ? 'Black hole' : type === 'star' ? 'Star' : info.label} ${count}`;
+    const name = givenName ?? `${type === 'hole' ? 'Black hole' : type === 'star' ? 'Star' : info.label} ${count}`;
     const spec: SpawnSpec = { type, seed, rings: type === 'giant' && Math.random() < 0.5 };
     if (type === 'star') { const ms = mainSequence(massValue); spec.teff = ms.teff; spec.lum = ms.lum; }
-    const id = sb.spawn(kind, name, spec, gm, radius, pos, v, flags);
+    const id = sb.spawn(kind, name, spec, gm, radius, pos, v, flags, parentId);
     this.audio.whoosh();
     return id;
   }
@@ -630,6 +793,7 @@ export class God {
   /** Keys while God mode's panel is open (true when handled). */
   onKey(e: KeyboardEvent): boolean {
     if (e.code === 'KeyY') { this.panel.toggle(); return true; }
+    if (e.code === 'Backquote') { this.console.toggle(); e.preventDefault(); return true; }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { this.undo(); e.preventDefault(); return true; }
     if (!this.panel.open) return false;
     const id = this.selectedId();
@@ -642,7 +806,7 @@ export class God {
     const sb = this.sandbox;
     return {
       active: sb.active, jd: sb.jd, entities: sb.entities.size, lagging: sb.lagging, stepsPerSecond: Math.round(sb.stepsPerSecond),
-      holes: this.app.blackHoles.filter((h) => h.key.startsWith('god:')).length, canUndo: sb.canUndo,
+      holes: this.app.blackHoles.filter((h) => h.key.startsWith('god:')).length, canUndo: sb.canUndo, mode: sb.mode, sunLight: SUN_LIGHT.lum,
     };
   }
 }
