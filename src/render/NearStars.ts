@@ -8,7 +8,7 @@ import { STAR_FRAG } from './shaders/star';
 import { StarCorona } from './StarCorona';
 import { applyStarLook, starLook, starLookUniforms, type StarLook } from './StarLook';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
-import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
+import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
 
 export const SPRITE_VERT = /* glsl */ `
 #include <common>
@@ -92,7 +92,7 @@ export class NearStarsLayer {
         name: 'near-star-surface', vertexShader: BODY_VERT, fragmentShader: STAR_FRAG,
         uniforms: {
           uColor: { value: new Vector3() }, uRadiance: { value: 1 }, uExposure: this.surfaceExposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
-          ...starLookUniforms(starLook('init', 5772, 1, 4.83)), uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+          ...starLookUniforms(starLook('init', 5772, 1, 4.83)), uLite: LITE.uLite, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
         },
       }));
       m.matrixAutoUpdate = false;

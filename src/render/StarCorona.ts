@@ -63,7 +63,11 @@ export class StarCorona {
     // software rasterisers: one triangle missing, the glow smeared into a slab). The disk itself
     // is left clear by the shader, so the glow need not lie behind the star.
     const k = Math.min(1, NEAR / Math.max(rel.length(), 1));
-    const s = radius * QUAD * k;
+    // up close the disk's visible edge (where the sight lines graze the sphere) lies outside the
+    // radius in the quad's plane through the centre: size the quad so r = 1 is that edge
+    const d = Math.max(rel.length(), radius * 1.0001);
+    const limb = d / Math.sqrt(d * d - radius * radius);
+    const s = radius * QUAD * k * Math.min(limb, 8);
     this.mesh.matrix.compose(rel.clone().multiplyScalar(k), viewQuat, new Vector3(s, s, s));
     this.mesh.matrixWorldNeedsUpdate = true;
     this.mesh.visible = display > 1e-4;

@@ -213,7 +213,12 @@ export class SmallBodiesLayer {
       const u = (this.asteroids.material as ShaderMaterial).uniforms;
       u.uDt.value = jd - this.refEpoch;
       u.uSunRel.value.copy(sunRel);
-      u.uBoost.value = this.boost;
+      // the boost shows the belt as a structure from afar (outside it, or high above the planets'
+      // plane); from inside the inner system the asteroids are part of the sky, and boosted they
+      // would cover it with a grain of false stars: physical there (most are far below the eye's limit)
+      const rc = sunRel.length() / AU, zc = Math.abs(sunRel.clone().applyMatrix3(this.eclToEqu.clone().transpose()).z) / AU;
+      const t = Math.min(1, Math.max(0, (Math.max(rc, 3 * zc) - 1.6) / 2.4));
+      u.uBoost.value = Math.pow(this.boost, t * t * (3 - 2 * t));
     }
     if (this.comets) {
       const u = (this.comets.material as ShaderMaterial).uniforms;

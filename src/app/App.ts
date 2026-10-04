@@ -50,7 +50,7 @@ import { VRSupport } from './VR';
 import { Walk } from './Walk';
 
 /** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
-const STAR_KEY = 0.62;
+const STAR_KEY = 0.9;
 const STAR_CAP = 0.8;
 const DATA = `${import.meta.env.BASE_URL}data`;
 /** catalogue stars closer than this (pc) are drawn individually by the near-star layer */
@@ -72,7 +72,7 @@ export class App {
   /** dark-adapted limiting magnitude for stars ("star brightness") */
   starMagLimit = 7.5;
   /** stars are never dimmed below this fraction of the dark-adapted exposure */
-  starFloor = 0.15;
+  starFloor = 0.3;
   private logExposure = 0;
   private logStarCap = 0;
   private lastTime = performance.now();
@@ -1646,7 +1646,9 @@ export class App {
 
     // 3. exposure and level of detail
     const pixelAngle = this.view.pixelAngle;
-    this.bodies.glareOn = this.vr.active;
+    // the Sun's glare (the desktop bloom alone leaves a resolved Sun a bare dot)
+    this.bodies.glareOn = true;
+    this.bodies.glareVr = this.vr.active;
     this.bodies.allowHi = !this.vr.active;
     this.bodies.update(this.rig.upos, pixelAngle, dt, this.view.quat);
     this.bodies.updateDetail(this.renderer.gl, this.tiles, pixelAngle, new Vector3(0, 0, -1).applyQuaternion(this.view.quat));
