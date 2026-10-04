@@ -159,6 +159,8 @@ export class BodiesLayer {
   private sunLook: StarLook | null = null;
   /** camera-facing glare around the Sun (VR only: the desktop path has a bloom pass) */
   glareOn = false;
+  /** presenting to a headset (no bloom pass: the glare is all there is) */
+  glareVr = false;
   /** allow the 8k map tier (off in VR: uploading an 8k texture stalls a headset frame) */
   allowHi = true;
   /** uploads a texture to the GPU now (set by the app: renderer.initTexture) */
@@ -852,17 +854,27 @@ export class BodiesLayer {
     if (!g) return;
     const sun = this.system.sun;
     const v = this.views.get(sun);
-    g.visible = this.glareOn && !!v && v.resolved && !!viewQuat;
+    // (also while the Sun is only a few pixels across: that is when glare matters most; up close,
+    // with the disk filling much of the view, the eye looks at the surface and the glare fades)
+    const fill = v ? Math.min(1, Math.max(0, (v.pixelRadius - 120) / 280)) : 1;
+    g.visible = this.glareOn && !!v && !!viewQuat && v.pixelRadius > 0.3 && fill < 0.999;
     if (!g.visible || !v || !viewQuat) return;
     const angR = Math.asin(Math.min(1, sun.radius / Math.max(v.dist, sun.radius * 1.0001)));
-    const halfAng = Math.max(angR * 14, (10 * Math.PI) / 180);
-    const half = Math.tan(Math.min(halfAng, 1.2)) * v.dist;
+    const halfAng = Math.min(1.2, Math.max(angR * 14, (10 * Math.PI) / 180));
+    const half = Math.tan(halfAng) * v.dist;
     const u = (g.material as ShaderMaterial).uniforms;
-    u.uDiskFrac.value = Math.min(0.9, angR / Math.min(halfAng, 1.2));
+    // the disk's visible edge in the quad's plane (through the centre), as a fraction of the quad
+    u.uDiskFrac.value = Math.min(0.9, Math.tan(angR) / Math.tan(halfAng));
     // the disk is shown at ~2.5 (eye adaptation caps it); scale the glare with it
     const diskDisplay = this.surfaceExposure.value * (AU / SUN_RADIUS) ** 2;
-    u.uIntensity.value = 0.9 * Math.min(1, diskDisplay / 2.5);
-    g.matrix.compose(v.rel, viewQuat, new Vector3(half, half, half));
+    // (a smaller, farther Sun scatters less light into the eye: weaker glare from the outer planets,
+    // where its point image with its halo and spikes takes over)
+    const far = Math.min(1, angR / (SUN_RADIUS / AU));
+    u.uIntensity.value = (this.glareVr ? 0.9 : 0.8) * Math.min(1, diskDisplay / 2.5) * (1 - fill) * far;
+    // drawn on a scaled-down copy 1e4 km from the eye (same directions and angular size): triangles
+    // ~1e10 m across come out garbled in some rasterisers (as StarCorona does)
+    const k = Math.min(1, 1e7 / Math.max(v.dist, 1));
+    g.matrix.compose(v.rel.clone().multiplyScalar(k), viewQuat, new Vector3(half * k, half * k, half * k));
     g.matrixWorldNeedsUpdate = true;
   }
 }

@@ -15,6 +15,7 @@ uniform float uRadiance;    // mean disk radiance (photometric units)
 uniform float uExposure;
 uniform float uTime;
 uniform mat3 uBodyToWorld;
+uniform float uLite;          // headset tier: no bright points
 ${STAR_LOOK_UNIFORMS}
 varying vec3 vNormalBF;
 varying vec3 vPosView;
@@ -67,9 +68,11 @@ void main() {
   float blob = 1.0 - smoothstep(0.0, 0.75 + 0.4 * soft, c.x);   // bright cell centres
   float gran = 1.0 + uGranAmp * gVis * (mix(lanes * 0.9 + blob * 0.5, lanes * 0.35 + blob * 1.1 + 0.6 * (fbm3(gp * 1.7) - 0.5), soft) - 0.8);
   // intergranular bright points (magnetic flux concentrations in the lanes), seen up close
-  float bpVis = smoothstep(8.0, 30.0, cellPx) * (1.0 - soft);
-  vec2 cb = cells(gp * 2.7 + 11.0);
-  gran += uGranAmp * bpVis * (1.0 - lanes) * smoothstep(0.08, 0.0, cb.x) * step(0.8, h3(floor(gp * 2.7 + 11.0))) * 2.5;
+  float bpVis = uLite > 0.5 ? 0.0 : smoothstep(8.0, 30.0, cellPx) * (1.0 - soft);
+  if (bpVis > 0.0) {
+    vec2 cb = cells(gp * 2.7 + 11.0);
+    gran += uGranAmp * bpVis * (1.0 - lanes) * smoothstep(0.08, 0.0, cb.x) * step(0.8, h3(floor(gp * 2.7 + 11.0))) * 2.5;
+  }
   // mesogranulation: granules brighter and darker in patches of a few
   gran *= 1.0 + 0.35 * uGranAmp * smoothstep(1.5, 5.0, cellPx * 0.25) * (n3(gp * 0.22 + 3.0) - 0.5);
   // giant convection cells / supergranulation (large on supergiants), visible from farther
@@ -95,8 +98,11 @@ void main() {
   vec3 col = uColor * ld * gd * gran * (1.0 - spot) * (1.0 + fac);
   // cooler (redder) spots, lanes and equator; hotter cell centres a little whiter; and a redder
   // limb (the light there comes from higher, cooler layers: limb darkening is stronger in blue)
-  float cool = clamp(spot * 1.4 + uGravDark * (1.0 - lat * lat) + (1.0 - gran) * 1.5 + 0.7 * x * x, 0.0, 1.0);
-  col *= mix(vec3(1.0), vec3(1.0, 0.78, 0.6), cool);
+  float cool = clamp(spot * 1.4 + uGravDark * (1.0 - lat * lat) + (1.0 - gran) * 1.5 + 0.9 * x * x * x, 0.0, 1.0);
+  col *= mix(vec3(1.0), vec3(1.0, 0.72, 0.5), cool);
+  // shown more saturated than the blackbody's own pale tint (as photographs and the eye's
+  // impression of a star's colour are): an M star orange-red, a G star yellow-white, an O star blue
+  col = max(mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, 1.4), 0.0);
   // (the display curve keeps hues now: the blackbody colour is shown as it is, a G star white)
   // flares on active red dwarfs: a bright patch that flashes up and fades
   if (uFlares > 0.0) {
