@@ -351,6 +351,9 @@ export class Flight {
     return `Mass-locked: gravity ${g.toFixed(g < 10 ? 2 : 0)} m/s² (limit ${MASS_LOCK_G}).${need}`;
   }
 
+  /** VR grip throttle this frame (-1 = none) */
+  gripThrottle = -1;
+
   /** true while something else flies the ship: the warp drive, the VR travel, the docking computer */
   get external(): boolean {
     const app = this.app;
@@ -364,6 +367,7 @@ export class Flight {
     const rig = () => app.rig;
     this.limited = false;
     gravity.refresh();
+    this.gripThrottle = app.rig.ext.throttle;
     if (this.external) {
       // the warp drive (or docking computer) carries the ship: physics resumes at drop-out
       this.simDt = clock.paused ? 0 : Math.max(0, Math.min(rawDt, 1) * clock.rate);

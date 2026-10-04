@@ -244,7 +244,9 @@ export class Game {
 
   private updateDocking(dt: number): void {
     const app = this.app, rig = app.rig;
-    const moving = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyR', 'KeyF'].some((k) => app.input.keys.has(k)) || Math.abs(rig.thrust) > 0.05 || (this.flight.on && this.flight.ship.throttle > 0.05);
+    // (VR: the grip throttle; in physics flight the engine is held at zero while the computer flies)
+    const moving = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyR', 'KeyF'].some((k) => app.input.keys.has(k)) || Math.abs(rig.thrust) > 0.05 || (this.flight.on && this.flight.gripThrottle > 0.05);
+    if (this.flight.on && (this.docked || this.docking)) this.flight.ship.throttle = 0;
     this.dockCooldown = Math.max(0, this.dockCooldown - dt);
     if (this.docked) {
       const st = this.docked;
