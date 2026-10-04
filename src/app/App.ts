@@ -40,6 +40,8 @@ import { ExoPlanet, type PlanetarySystem } from '../universe/Planets';
 import { SolarSystem } from '../universe/SolarSystem';
 import { StarCatalog } from '../universe/StarCatalog';
 import { CatalogStar, NamedStars } from '../universe/Stars';
+import { Catalog } from '../universe/Catalog';
+import { normKey } from '../universe/CatalogSearch';
 import { CameraRig } from './CameraRig';
 import { Game } from '../game/Game';
 import { TrafficShip } from '../game/Traffic';
@@ -109,6 +111,8 @@ export class App {
   galaxies!: GalaxiesLayer;
   /** nebulae and star clusters (SIMBAD) */
   deepSky!: DeepSkyLayer;
+  /** the searchable catalogue of ~200,000 real objects (universe/Catalog.ts, public/data/catalog) */
+  objCatalog: Catalog | null = null;
   /** real spacecraft (JPL Horizons trajectories) */
   craft!: SpacecraftLayer;
   /** close-up map tiles for the body being approached */
@@ -222,6 +226,14 @@ export class App {
     app.galaxies = new GalaxiesLayer(galaxyList, starField.psf, xrCapable);
     const dso = await loadDeepSky(DATA).catch((e) => { console.warn('deep sky', e); return [] as DeepSkyObject[]; });
     app.deepSky = new DeepSkyLayer(dso, starField.psf, starField.colorLut, xrCapable);
+    // [catalog] real objects to search and visit; picked ones join the layers above
+    app.objCatalog = new Catalog(`${DATA}/catalog`, {
+      addBlackHole: (d) => { const b = new BlackHole(app.blackHoles.length, d); app.blackHoles.push(b); return b; },
+      addGalaxy: (d, make) => { const g = make(d, app.galaxies.galaxies.length); app.galaxies.add(g); return g; },
+      addDeepSky: (d, make) => { const o = make(d, app.deepSky.objects.length); app.deepSky.add(o, starField.psf, starField.colorLut, xrCapable); return o; },
+      existing: (names) => app.catalogExisting(names),
+    });
+    app.objCatalog.onUpdate = () => { app.hud.refreshSearch(); if (app.vr) app.vr.menu.panel.dirty = true; };
     if (new URLSearchParams(location.search).get('procedural') === '0') app.procStars.enabled = false;
     const mw = new URLSearchParams(location.search).get('mw');
     if (mw !== null) sky.brightness = Number(mw);
@@ -710,8 +722,33 @@ export class App {
       const sc = Math.min(...[c.name, 'spacecraft', 'probe'].map(score).filter((x) => x >= 0));
       if (Number.isFinite(sc)) out.push({ label: c.name, detail: 'spacecraft', id: `sc:${i}`, score: sc - 0.1 });
     });
+    // [catalog] ~200,000 real objects by name and designation (results arrive asynchronously)
+    if (this.objCatalog) {
+      const k = normKey(q);
+      const have = new Set(out.map((o) => normKey(o.label)));
+      for (const r of this.objCatalog.find(q)) {
+        if (have.has(normKey(r.label))) continue;
+        out.push({ ...r, score: normKey(r.label) === k ? 0.05 : 1.5 });
+      }
+    }
     out.sort((a, b) => a.score - b.score);
     return out.slice(0, 14);
+  }
+
+  /** [catalog] The app's own object for a catalogue entry, if it has one under any of these names. */
+  catalogExisting(names: string[]): SpaceObject | null {
+    for (const name of names) {
+      const n = name.toLowerCase(), ns = n.replace(/\s+/g, '');
+      const g = this.galaxies.galaxies.find((x) => x.name.toLowerCase() === n || x.data.simbad.toLowerCase().replace(/\s+/g, '') === ns);
+      if (g) return g;
+      const d = this.deepSky.objects.find((x) => x.name.toLowerCase() === n || x.data.simbad.toLowerCase().replace(/\s+/g, '') === ns);
+      if (d) return d;
+      const h = this.blackHoles.find((x) => x.name.toLowerCase() === n || x.data.aliases.some((a) => a.toLowerCase() === n));
+      if (h) return h;
+      const st = this.named.list.find((s) => s.names.some((x) => x.toLowerCase() === n));
+      if (st) return this.getStar(this.catalog, st.node, st.slot);
+    }
+    return null;
   }
 
   resolveSearchId(id: string): SpaceObject | null {
@@ -729,6 +766,7 @@ export class App {
     if (kind === 'xp') return this.exoPlanet(Number(v), Number(id.split(':')[2]));
     if (kind === 'place' && v === 'rings') return this.findByName("Saturn's rings");
     if (kind === 'lm') return this.landmarks[Number(v)] ?? null;
+    if (kind === 'cat') return this.objCatalog?.resolve(id) ?? null;
     return null;
   }
 
@@ -936,6 +974,12 @@ export class App {
       this.nearestStarDist = Math.min(this.nearestStarDist, h.upos.sub(this.rig.upos, tmp).length() - h.radius);
       const sys = this.systems.of(h);
       if (sys) systems.push(sys);
+    }
+    // [catalog] visited catalogue stars the star tiles lack (brown dwarfs, pulsars, faint white dwarfs)
+    for (const st of this.objCatalog?.nearStars(this.camPc, NEAR_STAR_RADIUS) ?? []) {
+      if (list.includes(st) || list.some((x) => x.upos.sub(st.upos, tmp).length() < 0.03 * PC && Math.abs(x.absMag - st.absMag) < 1.5)) continue;
+      list.push(st);
+      this.nearestStarDist = Math.min(this.nearestStarDist, st.upos.sub(this.rig.upos, tmp).length() - st.radius);
     }
     this.near.stars = list;
     this.nearSystems = systems;

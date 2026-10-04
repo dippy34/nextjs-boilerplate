@@ -124,7 +124,7 @@ export class Hud {
     this.onSearchPick?.(id);
   }
 
-  private refreshSearch(): void {
+  refreshSearch(): void {
     const q = this.searchInput.value.trim();
     const res = q && this.onSearch ? this.onSearch(q) : [];
     this.searchList.innerHTML = res
