@@ -50,6 +50,7 @@ import { Input } from './Input';
 import { Systems } from './Systems';
 import { VRSupport } from './VR';
 import { Walk } from './Walk';
+import { God } from '../god/God';
 
 /** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
 const STAR_KEY = 0.9;
@@ -107,6 +108,8 @@ export class App {
   game!: Game;
   /** walking on the ground (src/app/Walk.ts) */
   walk!: Walk;
+  /** God mode: the N-body sandbox (src/god/) */
+  god!: God;
   /** other galaxies (SIMBAD) */
   galaxies!: GalaxiesLayer;
   /** nebulae and star clusters (SIMBAD) */
@@ -243,6 +246,8 @@ export class App {
     app.vr = new VRSupport(app, xrCapable, DATA);
     app.game = new Game(app);
     app.walk = new Walk(app); // walking hook
+    app.god = new God(app);
+    renderer.scene.add(app.god.layer.group);
     bodies.uploader = (t) => renderer.gl.initTexture(t);
     app.warmupPending = true;
     app.applyUrl();
@@ -331,7 +336,7 @@ export class App {
 
   /** true for the companion star of a black hole (it moves on its orbit). */
   isCompanion(obj: SpaceObject | null): boolean {
-    return !!obj && this.blackHoles.some((b) => b.companion === obj);
+    return !!obj && (this.blackHoles.some((b) => b.companion === obj) || !!this.god?.isGodStar(obj));
   }
 
   private bindKeys(): void {
@@ -353,6 +358,7 @@ export class App {
     this.input.onKey = (e) => {
       if (this.game?.active) this.game.audio.start();
       if (this.hud.searchOpen) return;
+      if (this.god.onKey(e)) return; // God mode: Y, Ctrl+Z, Delete
       if (this.walk.onKey(e)) return; // walking: B, Space jumps, ...
       switch (e.code) {
         case 'Space': this.togglePause(); e.preventDefault(); break;
@@ -954,6 +960,8 @@ export class App {
     for (const h of this.blackHoles) {
       if (h.companion && h.companion.upos.sub(this.rig.upos, new Vector3()).length() < COMPANION_RADIUS * PC) list.push(h.companion);
     }
+    // stars created in God mode
+    for (const st of this.god?.stars() ?? []) list.push(st);
     for (const { star, dist } of this.procStars.nearest(this.camPc, 1, 12)) {
       this.nearestStarDist = Math.min(this.nearestStarDist, dist * PC - star.radius);
       if (dist < NEAR_STAR_RADIUS) list.push(star);
@@ -1020,6 +1028,8 @@ export class App {
       else if (o instanceof CatalogStar && !this.isCompanion(o) && o.upos.sub(this.rig.upos, new Vector3()).length() < 0.5 * PC) sys = this.systems.of(o);
       if (sys && !act.includes(sys)) act.push(sys);
     }
+    // planets created in God mode
+    if (this.god) act.push(...this.god.systems());
     this.activeSystems = act;
   }
 
@@ -1655,8 +1665,14 @@ export class App {
 
     // 1. time and ephemerides
     this.clock.advance(Math.min(rawDt, 1));
+    // God mode: once something was changed, the N-body sandbox moves the bodies instead of the
+    // ephemeris (and holds the clock back if the simulation can't keep up)
+    if (this.god.active) this.clock.jdTdb = this.god.frameTime(this.clock.jdTdb, Math.min(rawDt, 1));
     const jd = this.clock.jdTdb;
-    this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
+    if (!this.god.active) {
+      this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
+      this.god.frameTime(jd, rawDt);
+    }
     for (const h of this.blackHoles) h.update(jd);
     // planets and spacecraft move before the camera follows its anchor (which may be one of them)
     for (const sys of this.activeSystems) sys.update(jd);
@@ -1760,6 +1776,7 @@ export class App {
     this.cometTails.update(this.rig.upos, this.system.sun.upos, this.small.cometObjects, this.selection, jd);
 
     this.game.update(dt);
+    this.god.update(dt);
 
     // 4. draw
     if (this.warmupPending) {
