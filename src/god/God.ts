@@ -480,7 +480,19 @@ export class God {
     if (e) this.sandbox.setRadius(id, e.radius * k);
   }
   setRadius(id: number, r: number): void { this.ensureActive(); this.sandbox.setRadius(id, r); }
-  preset(id: number, what: Parameters<Sandbox['preset']>[1]): void { this.ensureActive(); this.sandbox.preset(id, what); }
+  preset(id: number, what: Parameters<Sandbox['preset']>[1]): void {
+    this.ensureActive();
+    // a body stopped dead falls into what it orbits: only the N-body simulation can let it hit
+    if (what === 'stop') this.needGravity('it falls and hits');
+    this.sandbox.preset(id, what);
+  }
+
+  /** Switch Kepler mode to the N-body simulation for something only gravity can do (with a toast). */
+  needGravity(why: string): void {
+    if (this.sandbox.mode === 'nbody') return;
+    this.sandbox.setMode('nbody');
+    this.app.hud.toast(`Simulating gravity (N-body) so ${why}. Untick "Simulate gravity" for Kepler orbits.`, 3.5);
+  }
   remove(id: number): void {
     this.ensureActive();
     const e = this.sandbox.entityOf(id);
