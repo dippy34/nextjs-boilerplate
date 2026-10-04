@@ -32,6 +32,10 @@ export const SLOPE_LIMIT = (35 * Math.PI) / 180;
 export const JUMP_SPEED = 2.5;
 /** a jump never rises higher than this (m) or faster than a small fraction of the escape velocity */
 export const MAX_JUMP_HEIGHT = 25;
+/** highest step (a rock, a ledge) walked up without jumping (m) */
+export const STEP_UP = 0.4;
+/** the walker's body radius for bumping into rocks (m) */
+export const BODY_RADIUS = 0.25;
 /** gravity below which running becomes a bounding lope (m/s²) */
 export const LOPE_G = 5;
 /** offered within this height of the ground (m); higher up, walking first flies down to land */
@@ -118,11 +122,57 @@ export class WalkBody {
   apex = 0;
   private takeoffR = 0;
   private hopWait = 0;
+  /** rocks near the walker this step (body-fixed centres, bounding radii): walked on, stepped up, bumped into */
+  rocks: { centre: Vector3; radius: number }[] = [];
+  /** the last step was stopped or deflected by a wall (a boulder, a ledge) */
+  blocked = false;
+  private terrainFn: GroundFn | null = null;
+
+  /** Radius of what the feet stand on along unit direction `n`: the ground, or the top of a rock there. */
+  surface(n: Vector3, ground: GroundFn): number {
+    let r = ground(n);
+    for (const k of this.rocks) {
+      // where the ray from the world's centre along n leaves the rock's sphere (if it meets it)
+      const along = n.dot(k.centre);
+      const px = k.centre.x - n.x * along, py = k.centre.y - n.y * along, pz = k.centre.z - n.z * along;
+      const disc = k.radius * k.radius - (px * px + py * py + pz * pz);
+      if (disc > 0) r = Math.max(r, along + Math.sqrt(disc));
+    }
+    return r;
+  }
+
+  /**
+   * A rock taller than a step that the body at feet position `p` would be inside (its slice at
+   * the height of the feet, plus the body radius), unless the feet are already up near its top
+   * (standing on it after a jump). Returns the rock's horizontal direction from `p` (unit, tangent), or null.
+   */
+  private rockWall(p: Vector3, terrain: GroundFn): Vector3 | null {
+    const feetR = p.length();
+    const up = p.clone().divideScalar(feetR);
+    for (const k of this.rocks) {
+      const cR = k.centre.length();
+      const top = cR + k.radius;
+      if (feetR > top - STEP_UP) continue;               // up on it (or above it)
+      if (top - terrain(k.centre.clone().divideScalar(cR)) <= STEP_UP) continue; // low: stepped onto
+      const dz = feetR - cR;
+      const slice = Math.abs(dz) < k.radius ? Math.sqrt(k.radius * k.radius - dz * dz) : 0;
+      const h = k.centre.clone().sub(p);
+      h.addScaledVector(up, -h.dot(up));
+      const dist = h.length();
+      if (dist < slice + BODY_RADIUS) return dist > 1e-9 ? h.divideScalar(dist) : h.set(0, 0, 0);
+    }
+    return null;
+  }
+
+  /** The walked-on surface as a ground function (just the ground when no rocks are near). */
+  private surfaceFn(ground: GroundFn): GroundFn {
+    return this.rocks.length ? (n) => this.surface(n, ground) : ground;
+  }
 
   /** Stand on the ground below body-fixed direction `n`. */
   placeOn(n: Vector3, ground: GroundFn): void {
     const u = _n.copy(n).normalize();
-    this.pos.copy(u).multiplyScalar(ground(u));
+    this.pos.copy(u).multiplyScalar(this.surface(u, ground));
     this.vel.set(0, 0, 0);
     this.onGround = true;
     this.airTime = 0;
@@ -142,29 +192,58 @@ export class WalkBody {
     return _vt.copy(this.vel).addScaledVector(up, -this.vel.dot(up)).length();
   }
 
-  /** Height of the feet above the ground (m). */
+  /** Height of the feet above what they stand on (the ground or a rock) (m). */
   height(ground: GroundFn): number {
     const up = _up.copy(this.pos).normalize();
-    return this.pos.length() - ground(up);
+    return this.pos.length() - this.surface(up, ground);
+  }
+
+  /** Uphill gradient (rise per metre, body-fixed tangent) of `ground` at unit direction `up`, into `out`. */
+  private gradient(up: Vector3, ground: GroundFn, out: Vector3, eps = 0.5): Vector3 {
+    const r0 = ground(up);
+    const t1 = new Vector3(), t2 = new Vector3(), q = new Vector3();
+    tangents(up, t1, t2);
+    const h1 = ground(q.copy(up).multiplyScalar(r0).addScaledVector(t1, eps).normalize()) - r0;
+    const h2 = ground(q.copy(up).multiplyScalar(r0).addScaledVector(t2, eps).normalize()) - r0;
+    return out.copy(t1).multiplyScalar(h1 / eps).addScaledVector(t2, h2 / eps);
+  }
+
+  /**
+   * Horizontal unit direction into a wall met at unit direction `n` (body-fixed tangent): away from
+   * the rock's centre when a rock stands there, else uphill on the terrain.
+   */
+  private wallNormal(n: Vector3, terrain: GroundFn, ground: GroundFn): Vector3 {
+    const out = new Vector3();
+    const t = terrain(n);
+    let best: { centre: Vector3; radius: number } | null = null, top = t;
+    for (const k of this.rocks) {
+      const along = n.dot(k.centre);
+      const perp2 = k.centre.lengthSq() - along * along;
+      const disc = k.radius * k.radius - perp2;
+      if (disc > 0 && along + Math.sqrt(disc) > top) { top = along + Math.sqrt(disc); best = k; }
+    }
+    if (best) out.copy(best.centre).sub(this.pos);
+    else this.gradient(n, ground, out, 0.15);
+    out.addScaledVector(n, -out.dot(n));
+    return out.lengthSq() > 1e-12 ? out.normalize() : out.set(0, 0, 0);
   }
 
   /** Slope of the ground at unit direction `up` (sets `slope`, `uphill`); returns the ground radius there. */
   private sampleSlope(up: Vector3, ground: GroundFn): number {
     const r0 = ground(up);
-    tangents(up, _t1, _t2);
-    const eps = 0.5;
-    const h1 = ground(_n.copy(up).multiplyScalar(r0).addScaledVector(_t1, eps).normalize()) - r0;
-    const h2 = ground(_n.copy(up).multiplyScalar(r0).addScaledVector(_t2, eps).normalize()) - r0;
-    _g.copy(_t1).multiplyScalar(h1 / eps).addScaledVector(_t2, h2 / eps);
+    this.gradient(up, ground, _g);
     const grad = _g.length();
     this.slope = Math.atan(grad);
     if (grad > 1e-9) this.uphill.copy(_g).divideScalar(grad); else this.uphill.set(0, 0, 0);
     return r0;
   }
 
-  step(dt: number, intent: WalkIntent, ground: GroundFn): void {
+  step(dt: number, intent: WalkIntent, terrain: GroundFn): void {
     this.landed = false;
     this.jumped = false;
+    this.blocked = false;
+    this.terrainFn = terrain;
+    const ground = this.surfaceFn(terrain);
     if (dt <= 0) return;
     const r = this.pos.length();
     const up = _up.copy(this.pos).divideScalar(r);
@@ -209,10 +288,31 @@ export class WalkBody {
         return;
       }
       // move along the ground and stay on it, unless it falls away like a cliff edge
-      const d = vt.length() * dt;
-      const np = _n.copy(this.pos).addScaledVector(vt, dt);
-      const nUp = np.clone().normalize();
-      const nR = ground(nUp);
+      let d = vt.length() * dt;
+      let nUp = _n.copy(this.pos).addScaledVector(vt, dt).normalize().clone();
+      let nR = ground(nUp);
+      const wallAt = (u: Vector3, rr: number) => this.rockWall(u.clone().multiplyScalar(rr), terrain);
+      const tooHigh = (rr: number, dd: number) => rr - gR > STEP_UP + dd * Math.tan(SLOPE_LIMIT);
+      let rockHit = wallAt(nUp, Math.min(nR, r));
+      if (rockHit || tooHigh(nR, d)) {
+        // a wall (a boulder, a ledge): no climbing it; slide along it instead
+        this.blocked = true;
+        const wall = rockHit ?? this.wallNormal(nUp, terrain, ground);
+        const into = vt.dot(wall);
+        if (into > 0) vt.addScaledVector(wall, -into);
+        d = vt.length() * dt;
+        // along the wall, kept a hair off it (a curved face would otherwise be met again)
+        nUp = _n.copy(this.pos).addScaledVector(vt, dt).addScaledVector(wall, -(0.5 * d + 1e-3)).normalize().clone();
+        nR = ground(nUp);
+        rockHit = wallAt(nUp, Math.min(nR, r));
+        if (rockHit || tooHigh(nR, d)) {
+          // still into it: stop here
+          vt.set(0, 0, 0);
+          d = 0;
+          nUp = up.clone();
+          nR = gR;
+        }
+      }
       const drop = gR - nR;
       if (d > 1e-6 && drop > Math.max(0.05, d * Math.tan((62 * Math.PI) / 180))) {
         this.onGround = false;
@@ -243,13 +343,22 @@ export class WalkBody {
       if (ctl.length() > lim) ctl.setLength(lim);
     }
     const a = ctl.addScaledVector(up, -g);
+    const prevUp = this.pos.clone().normalize();
     this.pos.addScaledVector(this.vel, dt).addScaledVector(a, 0.5 * dt * dt);
     this.vel.addScaledVector(a, dt);
     this.airTime += dt;
     const r = this.pos.length();
     this.apex = Math.max(this.apex, r - this.takeoffR);
     const nUp = _n.copy(this.pos).divideScalar(r);
-    const gR = ground(nUp);
+    let gR = ground(nUp);
+    if ((r <= gR && gR - r > STEP_UP) || this.rockWall(this.pos, this.terrainFn ?? ground)) {
+      // flew into the side of something (a boulder): back out sideways, keep falling
+      this.blocked = true;
+      this.pos.copy(prevUp).multiplyScalar(r);
+      this.vel.copy(prevUp).multiplyScalar(this.vel.dot(prevUp));
+      nUp.copy(prevUp);
+      gR = ground(nUp);
+    }
     if (r <= gR) {
       // touch down: the downward speed is absorbed by the legs, the horizontal speed kept
       this.impact = Math.max(0, -this.vel.dot(nUp));
@@ -445,7 +554,10 @@ export class Walk {
     this.approachTarget = cand!;
     this.approachWait = 0;
     this.state = 'approach';
-    if (cand instanceof Landmark) {
+    if (cand instanceof Landmark && app.vr.active) {
+      // the headset's own travel (blink, re-aim, vignette), then down from the viewpoint
+      app.vr.travelTo(cand);
+    } else if (cand instanceof Landmark) {
       app.select(cand);
       app.rig.flyTo(cand, 1500, undefined, true, cand.up());
     } else {
@@ -767,6 +879,10 @@ export class Walk {
     // holding Space keeps asking for a jump (a press shorter than a frame still counts via the buffer)
     if (keys.has('Space') && !vrOn) this.jumpBuffer = Math.max(this.jumpBuffer, dt + 1e-3);
     b.lope = this.settings.lope && !(vrOn && !vrRunning);
+    // rocks near the feet are walked on and bumped into (only the ones drawn on this world)
+    const rocks = app.rocks;
+    b.rocks = rocks && rocks.group.visible && app.terrain.owner === this.world
+      ? rocks.rocksNear(b.pos, 3 + b.vel.length() * dt * 2, 0.2) : [];
     const n = Math.max(1, Math.ceil(dt / (1 / 90)));
     let landed = false, impact = 0, jumped = false;
     for (let i = 0; i < n; i++) {
@@ -891,12 +1007,12 @@ export class Walk {
   debug() {
     const b = this.body;
     const up = b.pos.clone().normalize();
-    const g = this.ground(up);
+    const g = b.surface(up, this.ground);
     const eyeR = this.app.rig.upos.sub(this.centre, new Vector3()).length();
     return {
       state: this.state, world: this.world?.name ?? null, gravity: b.gravity, onGround: b.onGround, slope: (b.slope * 180) / Math.PI,
       feetH: b.radius - g, eyeH: eyeR - g, speed: b.groundSpeed, vUp: b.vel.dot(up), airTime: b.airTime, apex: b.apex,
-      finite: Number.isFinite(eyeR) && Number.isFinite(b.pos.x),
+      finite: Number.isFinite(eyeR) && Number.isFinite(b.pos.x), rocks: b.rocks.length, onRock: b.surface(up, this.ground) > this.ground(up) + 0.02, blocked: b.blocked,
       // the view stays upright: its right axis is horizontal (no roll)
       roll: new Vector3(1, 0, 0).applyQuaternion(this.app.rig.quat).dot(up.clone().applyMatrix3(this.R).normalize()),
       pos: b.pos.toArray(),

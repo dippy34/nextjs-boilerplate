@@ -1,7 +1,7 @@
 import { Matrix3, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  EYE_STAND, G_NEWTON, GroundMarks, airDrag, JUMP_SPEED, SLOPE_LIMIT, WALK_SPEED, WalkBody, cannotWalkReason, escapeSpeed, gravityAt, jumpSpeed, runSpeed,
+  EYE_STAND, G_NEWTON, GroundMarks, STEP_UP, airDrag, JUMP_SPEED, SLOPE_LIMIT, WALK_SPEED, WalkBody, cannotWalkReason, escapeSpeed, gravityAt, jumpSpeed, runSpeed,
   type GroundFn, type WalkIntent,
 } from '../src/app/Walk';
 
@@ -206,5 +206,81 @@ describe('bootprints and dust', () => {
     const up = new Vector3(0, 0, 1);
     for (let i = 0; i < 2000; i++) marks.addPrint(new Vector3(i * 0.7, 0, MOON.r), new Vector3(1, 0, 0), up);
     expect(marks.printCount).toBe(500);
+  });
+});
+
+describe('rocks', () => {
+  const R = MOON.r;
+  const flat = sphere(R);
+  /** a rock whose sphere has radius `r`, centred `ahead` metres along +y from the walker and `h` above the ground */
+  const rock = (ahead: number, r: number, h: number) => ({ centre: new Vector3(0, ahead, R + h), radius: r });
+  function walkInto(rocks: { centre: Vector3; radius: number }[], wish: Vector3, seconds: number, gm = MOON.gm) {
+    const b = new WalkBody();
+    b.gm = gm;
+    b.lope = false;
+    b.rocks = rocks;
+    b.placeOn(new Vector3(0, 0, 1), flat);
+    let maxRise = 0, blocked = false;
+    for (let i = 0; i < seconds * 60; i++) {
+      b.step(1 / 60, intent({ wish: wish.clone() }), flat);
+      blocked ||= b.blocked;
+      maxRise = Math.max(maxRise, b.radius - R);
+      expect(Number.isFinite(b.pos.x)).toBe(true);
+    }
+    return { b, maxRise, blocked };
+  }
+  it('a boulder blocks the way: you stop at it, not inside it or on top of it', () => {
+    const boulder = rock(3, 1.2, 0.4); // 1.6 m high, its face 1.8 m ahead
+    const { b, maxRise, blocked } = walkInto([boulder], new Vector3(0, 1, 0), 6);
+    const toCentre = Math.hypot(b.pos.x - boulder.centre.x, b.pos.y - boulder.centre.y);
+    expect(toCentre).toBeGreaterThan(boulder.radius * 0.6);
+    expect(b.pos.y).toBeLessThan(boulder.centre.y);
+    expect(maxRise).toBeLessThan(STEP_UP + 0.1);
+    expect(blocked).toBe(true);
+  });
+  it('a dome-shaped boulder (most of it buried) cannot be walked up in small steps', () => {
+    const dome = rock(3, 0.99, -0.18); // 0.81 m high, gentle on top but steep at its foot
+    const { b, maxRise, blocked } = walkInto([dome], new Vector3(0, 1, 0), 8);
+    expect(blocked).toBe(true);
+    expect(maxRise).toBeLessThan(0.05);
+    expect(b.pos.y).toBeLessThan(3 - 0.9);
+  });
+  it('walking at a boulder at an angle slides you along it and past', () => {
+    const boulder = rock(3, 1.2, 0.4);
+    const dir = new Vector3(0.35, 1, 0).normalize();
+    const { b, maxRise } = walkInto([boulder], dir, 10);
+    expect(b.pos.y).toBeGreaterThan(boulder.centre.y + 1); // got round it
+    expect(maxRise).toBeLessThan(STEP_UP + 0.1);
+  });
+  it('a low rock is stepped onto and off again', () => {
+    const low = rock(2, 0.35, -0.1); // its top 0.25 m above the ground
+    let onTop = 0;
+    const b = new WalkBody();
+    b.gm = MOON.gm; b.lope = false; b.rocks = [low];
+    b.placeOn(new Vector3(0, 0, 1), flat);
+    for (let i = 0; i < 6 * 60; i++) {
+      b.step(1 / 60, intent({ wish: new Vector3(0, 1, 0) }), flat);
+      onTop = Math.max(onTop, b.radius - R);
+    }
+    expect(onTop).toBeGreaterThan(0.15);
+    expect(onTop).toBeLessThan(0.3);
+    expect(b.pos.y).toBeGreaterThan(low.centre.y + 1);
+    expect(Math.abs(b.radius - R)).toBeLessThan(0.02);
+  });
+  it('a jump lands on top of a boulder; standing there you are on the rock', () => {
+    const boulder = rock(1.2, 0.8, 0.1); // 0.9 m high, right ahead
+    const b = new WalkBody();
+    b.gm = MOON.gm; b.lope = false; b.rocks = [boulder];
+    b.placeOn(new Vector3(0, -0.3, R).normalize(), flat);
+    b.vel.set(0, 0.5, 0); // a slow walking start: the arc carries over the rock and comes down on it
+    b.step(1 / 60, intent({ jump: true, wish: new Vector3(0, 1, 0) }), flat);
+    let landedHigh = false;
+    for (let i = 0; i < 6 * 60; i++) {
+      b.step(1 / 60, intent(), flat);
+      if (b.landed && b.radius - R > 0.6) landedHigh = true;
+    }
+    expect(landedHigh).toBe(true);
+    expect(b.onGround).toBe(true);
+    expect(Math.abs(b.height(flat))).toBeLessThan(1e-6);
   });
 });
