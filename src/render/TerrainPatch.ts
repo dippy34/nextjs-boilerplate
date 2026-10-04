@@ -68,8 +68,8 @@ void main() {
 ${FIX_LOGDEPTH}
 }`;
 
-const RINGS = 150;
-const SEGS = 96;
+const RINGS = 176;
+const SEGS = 128;
 /** cell sizes (m) of the shader's fine crater lattices (body.ts uOI0..3 / uOF0..3) */
 const FINE_CELLS = [400, 90, 20, 4.5];
 
@@ -143,6 +143,8 @@ export class TerrainPatch {
   vr = false;
   /** counts the patches swapped in (and shadow updates): things placed on the drawn ground re-place themselves when it changes */
   serial = 0;
+  /** brightness of the map around the patch's centre relative to the map's mean (null: unknown), and the patch it was read for */
+  private local: { albedo: number | null; patch: Built | null; version: number } = { albedo: null, patch: null, version: -1 };
   /** where the ground materials' texture axes are anchored (body-fixed) */
   private anchor = { ground: null as Ground | null, pos: new Vector3(), e: new Vector3(1, 0, 0), n: new Vector3(0, 1, 0), up: new Vector3(0, 0, 1) };
 
@@ -189,6 +191,8 @@ export class TerrainPatch {
         name: 'terrain',
         vertexShader: TERRAIN_VERT,
         fragmentShader: bodyMat.fragmentShader,
+        // (the terrain-only code is compiled into the terrain's program only: the world's sphere stays light)
+        defines: { ...bodyMat.defines, TERRAIN: 1 },
         uniforms: {
           ...bodyMat.uniforms, uTerrain: { value: 1 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3() }, uHoleCos: { value: 2 },
           uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) }, uMatO: { value: new Vector3() },
@@ -270,14 +274,17 @@ export class TerrainPatch {
     this.hScale = Math.min(1, Math.max(0, (th - alt) / (th * 0.35)));
     mat.uniforms.uHScale.value = this.hScale;
 
+    // height above the ground itself (not the reference surface): on a high mountain or plateau the
+    // finest rings must still be at the explorer's feet
+    const altG = Math.max(0, alt - b.height(up, Math.max(1, Math.min(alt, 2000) * 0.05)) * this.hScale);
     // patch size: past the horizon over the highest relief, but well short of a hemisphere
     const outer = Math.min(b.radius * 0.45, 500e3, Math.max(20e3, 1.3 * Math.sqrt(2 * b.radius * (Math.max(alt, 0) + 2 * b.amplitude))));
-    const inner = Math.max(0.25, Math.max(alt, 0) * 0.025);
+    const inner = Math.max(0.25, altG * 0.025);
 
     // start a new patch when this one is off-centre, the wrong size or for another world
     const f = this.front;
     const need = f.ground !== b || !f.mesh.visible || f.version !== (b.version?.() ?? 0)
-      || f.up.angleTo(up) * b.radius > Math.max(2 * Math.max(alt, 0), 25)
+      || f.up.angleTo(up) * b.radius > Math.max(2 * altG, 25)
       || outer > f.outer * 1.3 || outer < f.outer * 0.6 || inner > f.inner * 4 || inner < f.inner * 0.25;
     if (need && (!this.job || !this.jobSwaps)) {
       this.job = this.build(this.back, b, up, outer, inner, c.lonLeft, c.sunBF.clone());
@@ -317,6 +324,7 @@ export class TerrainPatch {
       (mat.uniforms[`uOF${k}`].value as Vector3).set(v[0] - iv[0], v[1] - iv[1], v[2] - iv[2]);
     });
     // the patch's east and north at its centre (texture axes of the ground materials)
+    if (this.local.patch !== fr || this.local.version !== fr.version) this.readLocalAlbedo(fr, mat);
     // ground material axes: a fixed anchor near the explorer (moved only after travelling far), so
     // the textures stay put on the ground when a new patch replaces the old
     const an = this.anchor;
@@ -345,6 +353,63 @@ export class TerrainPatch {
     return { dir: fr.up, cos: Math.cos((fr.outer * 0.96) / b.radius) };
   }
 
+  /**
+   * The albedo the eye adapts to near the ground: the world's mean `mean`, moved most of the way
+   * towards the map's own brightness under the explorer (bright fresh craters, snowfields, salt
+   * flats are not shown blown out, nor dark plains too dark), as the relief fades in.
+   */
+  exposureAlbedo(mean: number): number {
+    const a = this.local.albedo;
+    if (a === null || !this.current || !(a > 0) || !(mean > 0)) return mean;
+    // (the map's brightness here relative to its average over the world, applied to the world's albedo)
+    const ratio = Math.min(6, Math.max(0.2, a));
+    return mean * Math.pow(ratio, 0.75 * this.hScale);
+  }
+
+  /** Read the map's colour around the patch's centre (a small average) as an albedo. */
+  private readLocalAlbedo(fr: Built, mat: ShaderMaterial): void {
+    this.local = { albedo: null, patch: fr, version: fr.version };
+    const u = mat.uniforms;
+    const tex = u.uMap?.value as { image?: CanvasImageSource & { width: number; height: number }; flipY?: boolean } | null;
+    const img = tex?.image;
+    if (!img || !u.uHasMap?.value || !(img.width > 0)) return;
+    const uv = fr.mesh.geometry.attributes.aUv as BufferAttribute;
+    // (a texture uploaded without flipping holds an image already stored bottom row first)
+    const x = ((uv.getX(0) % 1) + 1) % 1, y = tex.flipY === false ? uv.getY(0) : 1 - uv.getY(0);
+    try {
+      const c = TerrainPatch.probe ??= document.createElement('canvas');
+      c.width = c.height = 4;
+      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      const n = Math.max(2, Math.round(img.width / 1024));   // ~0.1 % of the map across: a few km to tens of km
+      ctx.drawImage(img, Math.floor(x * img.width) - n, Math.floor(y * img.height) - n, 2 * n, 2 * n, 0, 0, 4, 4);
+      const d = ctx.getImageData(0, 0, 4, 4).data;
+      const lin = (v: number) => { const a = v / 255; return a <= 0.04045 ? a / 12.92 : ((a + 0.055) / 1.055) ** 2.4; };
+      const lum = (d: Uint8ClampedArray, n: number) => {
+        let sum = 0;
+        for (let i = 0; i < n; i++) sum += 0.2126 * lin(d[i * 4]) + 0.7152 * lin(d[i * 4 + 1]) + 0.0722 * lin(d[i * 4 + 2]);
+        return sum / n;
+      };
+      const here = lum(d, 16);
+      // the whole map's mean (once per map), weighted by area (cos latitude)
+      let mean = TerrainPatch.mapMeans.get(img);
+      if (mean === undefined) {
+        c.width = 64; c.height = 32;
+        ctx.drawImage(img, 0, 0, 64, 32);
+        const dm = ctx.getImageData(0, 0, 64, 32).data;
+        let sum = 0, wsum = 0;
+        for (let yy = 0; yy < 32; yy++) {
+          const w = Math.cos(((yy + 0.5) / 32 - 0.5) * Math.PI);
+          for (let xx = 0; xx < 64; xx++) { const i = yy * 64 + xx; sum += w * (0.2126 * lin(dm[i * 4]) + 0.7152 * lin(dm[i * 4 + 1]) + 0.0722 * lin(dm[i * 4 + 2])); wsum += w; }
+        }
+        mean = sum / wsum;
+        TerrainPatch.mapMeans.set(img, mean);
+      }
+      this.local.albedo = mean > 0 ? here / mean : null;
+    } catch { /* no canvas (tests) or a tainted image: keep the mean */ }
+  }
+  private static probe: HTMLCanvasElement | undefined;
+  private static mapMeans = new WeakMap<object, number>();
+
   hide(): void {
     this.front.mesh.visible = false;
     this.back.mesh.visible = false;
@@ -360,8 +425,9 @@ export class TerrainPatch {
     if (!b) return 0;
     const base = baseRadius(b, n);
     if (!f.mesh.visible) return base;
-    // the mesh only carries features larger than its local vertex spacing
-    const spacing = Math.max(f.inner, f.up.angleTo(n) * b.radius * Math.max(f.q - 1, (2 * Math.PI) / SEGS));
+    // the mesh only carries features larger than its local vertex spacing (as build() sampled them)
+    const rho = f.up.angleTo(n) * b.radius;
+    const spacing = rho < f.inner ? f.inner : rho * Math.max(f.q - 1, (2 * Math.PI) / SEGS);
     return base + b.height(n, spacing) * this.hScale * this.fade(b, n);
   }
 

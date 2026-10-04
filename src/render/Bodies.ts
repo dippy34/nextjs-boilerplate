@@ -17,7 +17,8 @@ import { RING_FRAG, RING_VERT } from './shaders/rings';
 import { StarCorona } from './StarCorona';
 import { RingParticles } from './RingParticles';
 import { ringFrame } from '../universe/RingSpot';
-import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
+import { PlanetTerrain } from './PlanetTerrain';
+import type { TerrainCandidate } from './TerrainPatch';
 import { CloudLayer } from './CloudLayer';
 import { TerrainSource } from '../universe/Terrain';
 import { hashString, starLook, starLookUniforms, type StarLook } from './StarLook';
@@ -348,6 +349,8 @@ export class BodiesLayer {
       name: isStar ? 'sun-surface' : 'body',
       vertexShader: BODY_VERT,
       fragmentShader: isStar ? STAR_FRAG : BODY_FRAG,
+      // Earth's cloud code is compiled into Earth's program only (BODY_FRAG: #ifdef CLOUDS)
+      defines: !isStar && b.name === 'Earth' ? { CLOUDS: 1 } : {},
       uniforms: {
         uMap: { value: null }, uHasMap: { value: 0 }, uMapGray: { value: mapInfo?.channels === 'L' ? 1 : 0 },
         uNight: { value: null }, uHasNight: { value: 0 },
@@ -746,7 +749,7 @@ export class BodiesLayer {
     for (const v of this.views.values()) {
       if (!v.resolved) continue;
       const alt = v.dist - v.body.radius;
-      if (alt < bestAlt && alt < TerrainPatch.threshold(v.body) * 1.2 && this.terrainOk(v.body)) { bestAlt = alt; best = v; }
+      if (alt < bestAlt && alt < PlanetTerrain.reach(v.body) && this.terrainOk(v.body)) { bestAlt = alt; best = v; }
     }
     if (!best) return null;
     const b = best.body;

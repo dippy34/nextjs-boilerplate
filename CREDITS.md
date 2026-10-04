@@ -219,9 +219,12 @@ are used. Mission descriptions summarise public NASA/ESA mission facts.
 | **SIMBAD** astronomical database (CDS, Strasbourg; Wenger et al. 2000, *A&AS* 143, 9), via TAP | Positions, apparent sizes, position angles and morphological types of 47 nearby galaxies; distances (median of the published redshift-independent measurements in SIMBAD's `mesDistance` table); V magnitudes | Free for scientific and educational use with acknowledgement | `public/data/galaxies.json` |
 
 Acknowledgement: *This research has made use of the SIMBAD database, operated at CDS, Strasbourg,
-France.* Each galaxy is drawn procedurally (`src/render/GalaxiesLayer.ts`): a disc with spiral arms,
-bar, dust and star-forming knots chosen from its type, plus a bulge; ellipticals and dwarfs as a
-soft spheroid. The inclination follows from the catalogued axis ratio. No galaxy images are used.
+France.* Total V magnitudes of NGC 4565, M49, the Cartwheel and NGC 5195 (SIMBAD's are partial) come
+from the RC3 (de Vaucouleurs et al. 1991, *Third Reference Catalogue of Bright Galaxies*: B_T and
+(B-V)_T), and published disc inclinations of about 25 galaxies (M31 77°, NGC 891 89.5°, M104 84°, ...)
+from the literature. Each galaxy is drawn procedurally (`src/render/GalaxiesLayer.ts`) as a 3D volume:
+a Sérsic spheroid and a disc (old, thick and young discs, spiral arms, bar, star-forming knots, dust)
+chosen from its type, as bright as its catalogued magnitude and size say. No galaxy images are used.
 
 ## Nebulae and star clusters (`public/data/deepsky.json`, `pipeline/build_deepsky.py`)
 
@@ -290,6 +293,29 @@ Relief finer than these models, and all relief on other solid moons and dwarf pl
 generated: fractal hills and crater fields (bowls with raised rims; depth-to-diameter 0.16 for small
 craters and 0.09 for large ones, somewhat shallower than fresh lunar craters, about 0.2 for simple
 craters in Pike 1977, as most craters are worn). It is plausible, not mapped.
+
+## Global elevation pyramids (`public/data/elevation/`, `pipeline/build_elevation.py`, `src/universe/Elevation.ts`)
+
+Whole-world heights for terrain seen from orbit down to the ground, as cube-face tile pyramids
+(16-bit PNG, 257 x 257 samples per tile). Every level down to about 2.7 km (Moon), 5.2 km (Mars),
+9.8 km (Earth), 3.7 km (Mercury), 1.4 km (Ceres) and 0.8 km (Vesta) covers the whole body; deeper
+levels hold the tiles that add the most detail, plus those around the landmarks, down to the
+resolution of the source. All sources are public domain (U.S. Government works / NASA mission data):
+
+| Body | Source | Finest level | Credit / licence |
+|---|---|---|---|
+| Moon | LRO **LOLA** gridded elevation `LDEM_128` (128 px/deg, ~237 m), PDS Geosciences Node, <https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/> | 333 m | NASA/GSFC/MIT LOLA team — public domain |
+| Mars | MGS **MOLA** global DEM 463 m (`Mars_MGS_MOLA_DEM_mosaic_global_463m.tif`), USGS Astrogeology | 325 m | NASA/JPL/GSFC, via USGS Astrogeology — public domain |
+| Earth | **NOAA NCEI ETOPO 2022** 15 arc-second surface elevation (288 tiles of 15°), DOI 10.25921/fd45-gt74, <https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/15s_surface_elev_gtif/> | 305 m | NOAA — U.S. Government work, no restrictions |
+| Mercury | **MESSENGER** USGS global DEM 665 m v2 (`Mercury_Messenger_USGS_DEM_Global_665m_v2.tif`), USGS Astrogeology | 468 m | NASA/JHUAPL/Carnegie Institution of Washington, USGS — public domain |
+| Ceres | **Dawn** FC HAMO DTM (DLR) 60 px/deg (`Ceres_Dawn_FC_HAMO_DTM_DLR_Global_60ppd_Oct2016.tif`), USGS Astrogeology | 180 m | NASA/JPL-Caltech/UCLA/MPS/DLR/IDA — public domain |
+| Vesta | **Dawn** FC HAMO DTM (DLR) 48 px/deg (`Vesta_Dawn_HAMO_DTM_DLR_Global_48ppd.tif`), USGS Astrogeology | 200 m | NASA/JPL-Caltech/UCLA/MPS/DLR/IDA — public domain |
+
+Heights are converted to the engine's reference surfaces: the IAU ellipsoids for Mercury (from the
+2439.4 km sphere), Ceres (from the 470 km sphere) and Vesta (from radii); the Moon's 1737.4 km
+sphere; Mars and Earth stay relative to the MOLA areoid and the EGM2008 geoid (sea level). On Earth,
+levels finer than 9.8 km store the oceans as -200 m (drawn as flat sea); the coarser levels keep the
+real sea floor.
 
 ## Ground materials (`public/data/materials/`, `pipeline/fetch_materials.py`)
 

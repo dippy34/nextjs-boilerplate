@@ -1,9 +1,11 @@
 import {
-  AdditiveBlending, BackSide, BufferAttribute, BufferGeometry, DataTexture, Group, Mesh, PlaneGeometry, Points, ShaderMaterial, SphereGeometry, Vector3,
+  AdditiveBlending, BackSide, BufferAttribute, BufferGeometry, DataTexture, Group, Matrix3, Mesh, PlaneGeometry, Points, ShaderMaterial, SphereGeometry, Vector3, Vector4,
 } from 'three';
 import { teffToLut } from '../astro/photometry';
+import { raDecToVector } from '../core/frames';
 import type { UPos } from '../core/upos';
 import type { DeepSkyObject } from '../universe/DeepSky';
+import { noise3D } from './Noise3D';
 import { STAR_FRAG, STAR_VERT } from './StarField';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
@@ -25,55 +27,16 @@ ${FIX_LOGDEPTH}
   gl_Position *= uClipScale;
 }`;
 
-const NEB_FRAG = /* glsl */ `
+/** An unresolved globular cluster: a soft yellowish ball of light (gives way to its stars). */
+const GLOW_FRAG = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
-uniform float uType;    // 0 emission cloud, 1 planetary shell, 2 supernova filaments, 3 cluster glow
-uniform float uSeed;
 uniform float uGain;
-uniform float uLite;
-uniform float uFilled;  // supernova remnant filled with filaments (Crab-like pulsar wind nebula) instead of a shell
 varying vec2 vP;
-float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-float n2(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y); }
-float fbm(vec2 p) { float s = 0.0, a = 0.5; int n = uLite > 0.5 ? 3 : 6; for (int i = 0; i < 6; i++) { if (i >= n) break; s += a * n2(p); p = p * 2.07 + 5.3; a *= 0.5; } return s; }
 void main() {
-  vec2 p = vP;
-  float r = length(p);
+  float r = length(vP);
   if (r > 1.0) discard;
-  vec2 q = p * 2.2 + uSeed * 17.0;
-  vec3 c = vec3(0.0);
-  if (uType < 0.5) {
-    // emission nebula: glowing hydrogen (red) with oxygen (teal) near the hot stars, dark dust lanes
-    vec2 w = vec2(fbm(q + 3.1), fbm(q + 8.7)) - 0.5;
-    float cloud = fbm(q + w * 2.2);
-    float dens = smoothstep(0.35, 0.8, cloud) * (1.0 - smoothstep(0.45, 1.0, r));
-    float core = exp(-r * r * 6.0) * smoothstep(0.3, 0.7, fbm(q * 1.7 + 1.0));
-    float dust = smoothstep(0.55, 0.7, fbm(q * 2.3 + 9.0)) * smoothstep(1.0, 0.3, r);
-    c = vec3(1.0, 0.22, 0.32) * dens * 1.3 + vec3(0.35, 0.95, 0.85) * core * 0.9 + vec3(0.6, 0.65, 1.0) * dens * core * 0.6;
-    c *= 1.0 - 0.85 * dust;
-  } else if (uType < 1.5) {
-    // planetary nebula: a bright shell, teal inside, red at the rim
-    float a = atan(p.y, p.x);
-    float wob = 0.06 * (fbm(vec2(a * 2.0, uSeed * 9.0)) - 0.5);
-    float shell = exp(-pow((r - 0.55 - wob) / 0.14, 2.0));
-    float inner = exp(-pow(r / 0.42, 2.0)) * 0.7;
-    float rim = exp(-pow((r - 0.75 - wob) / 0.12, 2.0));
-    float grain = 0.75 + 0.5 * fbm(p * 9.0 + uSeed * 4.0);
-    c = (vec3(0.3, 0.95, 0.9) * (inner + shell * 0.6) + vec3(1.0, 0.3, 0.35) * rim * 1.2) * grain;
-    c += vec3(1.0) * exp(-r * r * 900.0) * 2.0; // the white dwarf
-  } else if (uType < 2.5) {
-    // supernova remnant: tangled filaments in an expanding shell
-    float fil = 1.0 - abs(fbm(q * 1.6) * 2.0 - 1.0);
-    fil = pow(fil, 6.0);
-    float shell = mix(smoothstep(0.4, 0.85, r), 1.0, uFilled) * (1.0 - smoothstep(0.9, 1.0, r));
-    c = mix(vec3(0.4, 0.75, 1.0), vec3(1.0, 0.35, 0.3), smoothstep(0.4, 0.7, fbm(q * 0.8 + 2.0))) * fil * shell * 2.0;
-    c += vec3(0.55, 0.65, 1.0) * exp(-r * r * 5.0) * 0.6 * uFilled; // synchrotron glow around the pulsar
-  } else {
-    // an unresolved globular cluster: a soft yellowish ball of light
-    c = vec3(1.0, 0.9, 0.72) * exp(-pow(r / 0.22, 1.1) * 2.3) * (1.0 - smoothstep(0.7, 1.0, r));
-  }
+  vec3 c = vec3(1.0, 0.9, 0.72) * exp(-pow(r / 0.22, 1.1) * 2.3) * (1.0 - smoothstep(0.7, 1.0, r));
   gl_FragColor = vec4(c * uGain, 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
@@ -111,12 +74,6 @@ function clusterStars(o: DeepSkyObject, n: number): { pos: Float32Array; mt: Flo
 
 export interface DeepSkyView { obj: DeepSkyObject; rel: Vector3; dist: number; pixelRadius: number }
 
-/**
- * Nebulae and star clusters: procedural emission clouds, planetary-nebula shells and supernova
- * filaments at their catalogued size; generated stars for globular clusters (drawn exactly like
- * catalogue stars) plus a glow while they are unresolved. Open clusters need nothing: their stars
- * are in the catalogues.
- */
 const VOL_VERT = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
@@ -133,245 +90,346 @@ ${FIX_LOGDEPTH}
 }`;
 
 /**
- * Inside (or near) a nebula: the same procedural cloud as the billboards, as a volume. The view
- * ray is marched through the nebula's sphere, adding glowing gas and dimming it behind dark dust,
- * so flying in gives depth and parallax instead of a flat picture.
+ * A nebula as a volume, at any distance (no flat pictures): the view ray is marched through the
+ * nebula's bounding sphere in the nebula's own frame (z along our line of sight, x towards the
+ * catalogued position angle on the sky), adding glowing gas and dimming it behind dust. All noise
+ * comes from the shared 3D noise texture, read at the mip level of the pixel's footprint.
+ *
+ * Emission nebulae (H II regions): gas around a young cluster, ionised and lit by it (inverse
+ * square), as clumps and as filaments and sheets (ridged noise); [O III] teal near the stars,
+ * H-alpha red beyond; dust lanes and pillars (noise of the direction only: columns pointing at the
+ * stars, with lit rims). Shapes: a cavity, a thick shell (Rosette), a blister on the far wall of
+ * its cloud (Orion), a nest of loops (Tarantula).
+ * Planetary nebulae: barrel (a ring seen end-on: Ring, Helix with cometary knots), bipolar
+ * (Dumbbell), round with two cavities (Owl), nested bubbles in concentric rings (Cat's Eye).
+ * Supernova remnants: a filled filament web over blue synchrotron light (Crab), a thin wispy shell
+ * (Veil), a shell of bright knots (Cassiopeia A).
  */
 const VOL_FRAG = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_fragment>
+uniform sampler3D uNoise;
 uniform vec3 uCenter;   // camera-relative (m)
 uniform float uRadius;  // m
-uniform float uType;    // 0 emission, 1 planetary shell, 2 supernova remnant
+uniform mat3 uRot;      // world -> nebula frame
+uniform float uType;    // 0 emission, 1 planetary, 2 supernova remnant
+uniform float uShape;
 uniform float uSeed;
 uniform float uGain;
-uniform float uFade;
+uniform float uBright;
 uniform float uLite;
-uniform float uFilled;
-uniform vec3 uAxis;     // symmetry axis (world)
-uniform float uShape;   // planetary: 0 barrel/ring, 1 bipolar, 2 round with cavities
+uniform float uPixAng;
+uniform vec3 uAxes;     // envelope axes (nebula frame, radii)
+uniform vec3 uAxis;     // symmetry axis (nebula frame)
+uniform vec4 uP;        // emission: cavity radius, pillars, lanes, [O III] extent
+uniform vec4 uQ;        // emission: filaments, pillar angular scale, -, reflection
 varying vec3 vPos;
-float h31(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
-float n3(vec3 p) {
-  vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(h31(i), h31(i + vec3(1,0,0)), f.x), mix(h31(i + vec3(0,1,0)), h31(i + vec3(1,1,0)), f.x), f.y),
-             mix(mix(h31(i + vec3(0,0,1)), h31(i + vec3(1,0,1)), f.x), mix(h31(i + vec3(0,1,1)), h31(i + vec3(1,1,1)), f.x), f.y), f.z);
-}
-float fbm3(vec3 p) { float s = 0.0, a = 0.5; int n = uLite > 0.5 ? 3 : 4; for (int i = 0; i < 4; i++) { if (i >= n) break; s += a * n3(p); p = p * 2.07 + 5.3; a *= 0.5; } return s / (1.0 - pow(0.5, float(n))); }
-float ridge(vec3 p) { return 1.0 - abs(2.0 * n3(p) - 1.0); }
-// cellular noise: distances to the nearest and second-nearest feature points (thin sheets where they meet)
-vec2 vor3(vec3 p) {
-  vec3 i = floor(p), f = fract(p);
-  float d1 = 8.0, d2 = 8.0;
-  for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++) for (int z = -1; z <= 1; z++) {
-    vec3 g = vec3(float(x), float(y), float(z));
-    vec3 o = vec3(h31(i + g), h31(i + g + 17.13), h31(i + g + 43.71));
-    vec3 r = g + o - f;
-    float d = dot(r, r);
-    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;
+float sq(float x) { return x * x; }
+vec4 nz(vec3 p, float lod) { return textureLod(uNoise, p, max(lod, 0.0)); }
+float ridge(float n) { return 1.0 - abs(2.0 * n - 1.0); }
+// smoothstep(a, b, n) of noise read at mip level l: blurred noise sits near 0.5, so as it blurs the
+// threshold eases to its mean over sharp noise (features fade into an even glow, not to nothing)
+float thr(float n, float a, float b, float l) { return mix(smoothstep(a, b, n), 1.0 - b + 0.5 * (b - a), clamp(l * 0.5, 0.0, 1.0)); }
+vec3 sd;
+bool hi;
+
+void emission(vec3 p, float lod, out vec3 e, out float dust) {
+  vec3 q = p / uAxes;
+  float r = length(q), rp = length(p);
+  vec4 n0 = nz(p * 0.35 + sd, lod - 1.5);
+  vec3 w = (n0.xyz - 0.5) * 0.45;
+  vec4 n1 = nz((p + w) * 0.9 + sd * 1.3, lod - 0.15);
+  vec4 n2 = hi ? nz((p + w) * 2.6 + sd * 1.7, lod + 1.38) : vec4(0.5);
+  float env, wall = 0.0;
+  if (uShape < 0.5) {
+    // a cavity blown by the cluster, its walls thick and broken
+    env = smoothstep(uP.x * 0.4, uP.x * 1.6, r + 0.3 * (n0.a - 0.5)) * (1.0 - smoothstep(0.55, 1.0, r + 0.25 * (n1.r - 0.5)));
+  } else if (uShape < 1.5) {
+    // a thick shell around an empty middle (Rosette)
+    env = exp(-sq((r - 0.62 - 0.18 * (n0.a - 0.5)) / 0.2)) * smoothstep(uP.x * 0.6, uP.x * 1.3, r);
+  } else if (uShape < 2.5) {
+    // a blister: the cluster sits in front of the far wall of its cloud, which it lights (Orion)
+    float bowl = p.z - 0.15 - 0.7 * dot(p.xy, p.xy) - 0.25 * (n0.a - 0.5);
+    wall = exp(-sq(bowl / 0.12));
+    env = (wall + 0.35 * smoothstep(0.0, 0.3, bowl)) * (1.0 - smoothstep(0.6, 1.0, r + 0.25 * (n1.r - 0.5)));
+  } else {
+    // a nest of loops and bubbles (Tarantula)
+    env = (1.0 - smoothstep(0.45, 1.0, r + 0.2 * (n1.r - 0.5))) * (0.3 + 1.4 * pow(ridge(n0.b), 3.0));
   }
-  return vec2(sqrt(d1), sqrt(d2));
+  float fil = pow(ridge(n1.b), 5.0) * (hi ? 0.5 + 1.0 * pow(ridge(n2.g), 3.0) : 1.0);
+  float dens = env * (0.3 * n1.r * (hi ? 0.6 + 0.8 * n2.r : 1.0) + uQ.x * fil);
+  // lit by the cluster at the centre: inverse square, softened
+  float ion = 1.0 / (0.2 + rp * rp * 3.0);
+  float oiii = 1.0 - smoothstep(uP.w * 0.5, uP.w * 1.4, rp + 0.3 * (n1.a - 0.5));
+  vec3 tint = mix(mix(vec3(1.0, 0.16, 0.26), vec3(1.0, 0.32, 0.38), n0.r), vec3(0.32, 0.95, 0.82), oiii * 0.8);
+  e = tint * dens * ion * 6.0;
+  dust = 0.0;
+  if (uP.y > 0.0) {
+    // pillars: a few short columns of dense dust in the walls, pointing at the stars (noise of the
+    // direction only), widening to their base; the tips facing the stars are lit, the sides a little
+    vec3 u = p / max(rp, 1e-3);
+    vec4 np = nz(u * uQ.y + sd * 0.7, lod + log2(uQ.y / max(rp, 0.1)));
+    // (mostly where they stand side-on to us, silhouetted against the lit gas, as in the famous
+    // pictures; seen end-on they would only be dark spots)
+    float site = smoothstep(0.5, 0.7, n0.g) * smoothstep(0.05, 0.3, env) * (1.0 - smoothstep(0.35, 0.7, abs(u.z)));
+    float tip = uP.x * 1.1 + 0.3 * np.g;
+    float len = 0.08 + 0.14 * np.b;
+    float x = (rp - tip) / len;                         // 0 at the tip, 1 at the base
+    float width = 0.9 - 0.05 * clamp(x, 0.0, 1.0);
+    float inCol = thr(np.r, width, width + 0.025, lod + log2(uQ.y / max(rp, 0.1))) * site;
+    float along = smoothstep(0.0, 0.05, x) * (1.0 - smoothstep(0.7, 1.1, x));
+    dust += inCol * along * uP.y * 90.0 * (0.6 + 0.8 * n1.g);
+    float rim = inCol * exp(-sq(x / 0.07)) + 0.25 * (smoothstep(width - 0.02, width, np.r) * site - inCol) * along;
+    e += vec3(1.0, 0.5, 0.42) * max(rim, 0.0) * ion * uP.y * 3.0;
+  }
+  if (uP.z > 0.0) {
+    // dark lanes and clouds, mostly in front and around
+    float lane = thr(n0.b * 0.6 + n1.g * 0.4, 0.58, 0.7, lod - 0.15) * smoothstep(0.1, 0.4, r) * (1.0 - smoothstep(0.85, 1.0, r));
+    dust += lane * uP.z * 14.0 * (hi ? 0.5 + n2.b : 1.0);
+    // starlight scattered by dust near the stars (reflection nebula, blue)
+    e += vec3(0.35, 0.5, 1.0) * lane * ion * uQ.w * 0.25;
+  }
 }
+
+void planetary(vec3 p, float lod, out vec3 e) {
+  float ca = dot(p, uAxis);
+  vec3 perp = p - uAxis * ca;
+  float rp = length(perp), r = length(p);
+  vec4 n1 = nz(p * 2.0 + sd, lod + 1.0);
+  vec4 n2 = hi ? nz(p * 5.0 + sd * 1.3, lod + 2.32) : vec4(0.5);
+  float wob = 0.07 * (n1.r - 0.5);
+  float re, dens;
+  vec3 u = p / max(r, 1e-3);
+  if (uShape < 0.5 || (uShape > 2.5 && uShape < 3.5)) {
+    // barrel (a ring when seen end-on): prolate, open towards its axis
+    re = length(vec2(rp, ca / 1.5));
+    dens = exp(-sq((re - 0.48 - wob) / 0.065)) * smoothstep(0.1, 0.6, rp / max(re, 1e-3)) * 2.2;
+    dens += 0.12 * smoothstep(0.5, 0.25, re) * smoothstep(0.05, 0.3, re);   // fainter gas filling it
+    if (uShape > 2.5) {
+      // Helix: a second, tilted ring and cometary knots with tails pointing away from the star
+      vec3 ax2 = normalize(uAxis + vec3(0.5, 0.2, 0.0));
+      float ca2 = dot(p, ax2);
+      float re2 = length(vec2(length(p - ax2 * ca2), ca2 / 1.5));
+      dens += exp(-sq((re2 - 0.68 - wob) / 0.09)) * 0.7;
+      vec4 nk = nz(u * 9.0 + sd, lod + log2(9.0 / max(r, 0.1)));
+      float knot = thr(nk.r, 0.8, 0.9, lod + log2(9.0 / max(r, 0.1))) * smoothstep(0.3, 0.38, r) * (1.0 - smoothstep(0.38, 0.62, r));
+      dens += knot * 2.5;
+    }
+  } else if (uShape < 1.5) {
+    // bipolar: an hourglass, its walls brightest, pinched by a dense waist, inside a fainter
+    // ellipsoid of gas (the Dumbbell's apple core and its 'ears')
+    float wHg = 0.14 + 0.75 * abs(ca);                 // radius of the hourglass at height ca
+    float inside = smoothstep(0.85, 0.65, length(vec2(rp / 0.8, ca / 0.9)) + wob);
+    float lobes = (smoothstep(wHg + 0.05, wHg - 0.1, rp + wob) * 0.6 + exp(-sq((rp - wHg - wob) / 0.07))) * inside;
+    float waist = exp(-sq((rp - 0.22) / 0.07) - ca * ca / 0.008);
+    float halo = 0.25 * smoothstep(0.98, 0.7, length(vec2(rp / 0.85, ca / 0.95)));
+    dens = lobes + waist * 1.2 + halo;
+    re = length(vec2(rp, ca * 0.6)) + 0.1;
+  } else if (uShape < 2.5) {
+    // round shell with two dark cavities (the Owl)
+    // (the eyes: two cylinders along our line of sight, the ends of a barrel seen nearly end-on)
+    re = r;
+    vec3 side = normalize(cross(vec3(0.0, 0.0, 1.0), vec3(0.95, 0.31, 0.12)));
+    vec3 q1 = p - side * 0.24, q2 = p + side * 0.24;
+    float e1 = smoothstep(0.1, 0.17, length(q1.xy)), e2 = smoothstep(0.1, 0.17, length(q2.xy));
+    dens = smoothstep(0.78, 0.6, r + wob) * (0.6 + 0.4 * n1.g) * (0.12 + 0.88 * e1 * e2);
+  } else {
+    // Cat's Eye: two tilted elliptical bubbles inside, rings of a faint halo outside
+    vec3 a1 = normalize(uAxis + vec3(0.3, 0.0, 0.0)), a2 = normalize(uAxis - vec3(0.25, 0.15, 0.0));
+    float b1 = length(vec2(length(p - a1 * dot(p, a1)) / 0.2, dot(p, a1) / 0.36));
+    float b2 = length(vec2(length(p - a2 * dot(p, a2)) / 0.24, dot(p, a2) / 0.3));
+    dens = exp(-sq((b1 - 1.0 - wob * 2.0) / 0.07)) * 1.6 + exp(-sq((b2 - 1.0 - wob * 2.0) / 0.07)) * 1.3;
+    dens += 0.15 * pow(0.5 + 0.5 * cos(r * 60.0 + n1.b * 1.5), 4.0) * smoothstep(0.32, 0.45, r) * (1.0 - smoothstep(0.75, 1.0, r));
+    re = r * 0.9;
+  }
+  // knots and radial spokes
+  float spokes = 0.8 + 0.4 * pow(nz(u * 8.0 + sd, lod + log2(8.0 / max(r, 0.1)) + 0.5).g, 2.0);
+  float knots = 0.65 + 0.9 * thr(n2.r, 0.5, 0.85, lod + 2.32);
+  dens *= spokes * knots;
+  vec3 tint = mix(vec3(0.25, 0.95, 0.85), vec3(1.0, 0.22, 0.3), smoothstep(0.42, 0.56, re));
+  float halo = 0.08 * exp(-sq((r - 0.86) / 0.08)) * (0.3 + 1.4 * ridge(n1.a));
+  e = (tint * dens + vec3(1.0, 0.3, 0.35) * halo) * 1.4;
+}
+
+void remnant(vec3 p, float lod, out vec3 e) {
+  vec4 n0 = nz(p * 0.5 + sd, lod - 1.0);
+  vec3 w = (n0.xyz - 0.5) * 0.3;
+  vec4 n1 = nz((p + w) * 1.6 + sd * 1.3, lod + 0.68);
+  vec4 n2 = hi ? nz((p + w) * 4.0 + sd * 1.7, lod + 2.0) : vec4(0.5);
+  float r = length(p);
+  if (uShape < 0.5) {
+    // the Crab: an ellipsoid filled with a web of filaments, glowing blue inside (synchrotron light
+    // of the pulsar wind)
+    float ca = dot(p, uAxis);
+    vec3 pq = p - uAxis * ca * 0.45;               // an ellipsoid stretched along the axis
+    float rq = length(pq);
+    float body = smoothstep(0.95, 0.7, rq + 0.15 * (n0.a - 0.5));
+    // a cage of filaments, densest in the outer half
+    // filaments: sheets a few hundredths of a radius thick (resolved by the steps), brightest
+    // where seen edge-on; two scales
+    float web = smoothstep(0.72, 0.95, ridge(n1.b)) * (0.15 + 1.1 * smoothstep(0.4, 0.75, n0.g))
+      + (hi ? 0.6 * smoothstep(0.78, 0.97, ridge(n2.g)) : 0.0);
+    web *= smoothstep(0.15, 0.6, rq);
+    vec3 fil = mix(vec3(1.0, 0.28, 0.14), vec3(1.0, 0.7, 0.35), smoothstep(0.35, 0.75, n0.r));
+    vec3 sync = vec3(0.48, 0.64, 1.0) * smoothstep(0.85, 0.05, rq) * (0.5 + 0.6 * n1.a);
+    e = fil * web * body * 5.0 + sync * 0.75;
+  } else if (uShape < 1.5) {
+    // the Veil: a thin, wispy shell, bright only along some arcs
+    float shell = exp(-sq((r - 0.88 - 0.1 * (n0.r - 0.5)) / 0.035));
+    float arcs = smoothstep(0.5, 0.8, nz(p / max(r, 1e-3) * 0.5 + sd, lod).g);
+    float web = pow(ridge(n1.b), 9.0) + (hi ? 0.8 * pow(ridge(n2.g), 12.0) : 0.0);
+    vec3 col = mix(vec3(1.0, 0.25, 0.3), vec3(0.3, 0.75, 1.0), smoothstep(0.35, 0.65, n0.b));
+    e = col * shell * (0.1 + arcs) * web * 5.0;
+  } else {
+    // Cassiopeia A: a shell of bright knots of ejecta (sulphur, oxygen, neon) and a faint shock outside
+    float shell = exp(-sq((r - 0.72 - 0.1 * (n0.r - 0.5)) / 0.08));
+    float kn = (hi ? thr(n2.r, 0.72, 0.92, lod + 2.0) : thr(n1.r, 0.72, 0.92, lod + 0.68)) * (0.3 + pow(ridge(n1.b), 3.0)) * smoothstep(0.35, 0.6, n0.a);
+    vec3 col = mix(mix(vec3(0.45, 1.0, 0.55), vec3(1.0, 0.3, 0.25), smoothstep(0.3, 0.6, n1.g)), vec3(0.5, 0.6, 1.0), smoothstep(0.7, 0.9, n0.g));
+    e = col * shell * kn * 9.0 + vec3(0.45, 0.6, 1.0) * exp(-sq((r - 0.95) / 0.04)) * 0.25 * (0.5 + n1.a);
+  }
+}
+
 void main() {
-  vec3 dir = normalize(vPos);
-  // the ray from the eye through the nebula's sphere (unit radius around its centre)
-  vec3 oc = -uCenter / uRadius;
+  vec3 dir = uRot * normalize(vPos);
+  vec3 oc = uRot * (-uCenter / uRadius);
   float b = dot(oc, dir);
   float c = dot(oc, oc) - 1.0;
   float disc = b * b - c;
   if (disc <= 0.0) discard;
-  float sq = sqrt(disc);
-  float t0 = max(-b - sq, 0.0), t1 = -b + sq;
+  float sq_ = sqrt(disc);
+  float t0 = max(-b - sq_, 0.0), t1 = -b + sq_;
   if (t1 <= t0) discard;
-  int N = uLite > 0.5 ? 16 : 40;
+  hi = uLite < 0.5;
+  // (thin shells and filaments of planetary nebulae and remnants get more steps)
+  int N = hi ? (uType > 0.5 ? 96 : 64) : 24;
   float dt = (t1 - t0) / float(N);
-  // per-pixel jitter of the sample positions: no banding from the few steps
-  float jit = h31(vec3(gl_FragCoord.xy, uSeed * 3.1));
+  // interleaved gradient noise: an even jitter of the samples (no banding, no blotches)
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  sd = vec3(uSeed * 17.31, uSeed * 29.17, uSeed * 7.73);
   vec3 col = vec3(0.0);
   float T = 1.0;
-  vec3 sd = vec3(uSeed * 17.0, uSeed * 29.0, uSeed * 7.0);
-  for (int i = 0; i < 40; i++) {
-    if (i >= N || T < 0.02) break;
-    vec3 p = oc + dir * (t0 + (float(i) + jit) * dt);
-    float r = length(p);
-    vec3 e = vec3(0.0);
+  for (int i = 0; i < 96; i++) {
+    if (i >= N || T < 0.01) break;
+    float t = t0 + (float(i) + jit) * dt;
+    vec3 p = oc + dir * t;
+    float lod = log2(max(t * uPixAng * 64.0, 1e-6));
+    vec3 e;
     float dust = 0.0;
-    if (uType < 0.5) {
-      // an H II region: a cavity blown out by the young hot stars at its heart, its walls broken
-      // into glowing filaments and sheets, with dark dust pillars pointing at the stars
-      vec3 q = p * 2.3 + sd;
-      float big = fbm3(q * 0.7);
-      float walls = smoothstep(0.12, 0.4, r + 0.25 * (big - 0.5)) * (1.0 - smoothstep(0.7, 1.0, r));
-      float fil = pow(ridge(q * 1.6 + big), 6.0) + 0.7 * pow(ridge(q * 3.7 + 4.0), 9.0);
-      float dens = walls * (0.06 * smoothstep(0.4, 0.85, fbm3(q)) + 2.2 * fil * smoothstep(0.2, 0.55, big));
-      // lit from the centre: brighter walls facing the stars; teal (oxygen) near them, red (hydrogen) beyond
-      float ion = 0.12 / (0.06 + r * r);
-      vec3 tint = mix(vec3(0.25, 1.0, 0.8), mix(vec3(1.0, 0.16, 0.28), vec3(1.0, 0.38, 0.5), big), smoothstep(0.1, 0.4, r));
-      e = tint * dens * ion * 7.0;
-      // dust: lanes and pillars (dense, with lit rims)
-      vec3 u = normalize(p + 1e-4);
-      float pillar = smoothstep(0.66, 0.8, n3(u * 5.0 + sd)) * smoothstep(0.35, 0.55, r) * (1.0 - smoothstep(0.75, 0.95, r));
-      float lane = smoothstep(0.6, 0.78, fbm3(q * 1.3 + 9.0)) * smoothstep(0.3, 0.6, r);
-      dust = (pillar * 9.0 + lane * 3.5) * (0.6 + 0.8 * n3(q * 4.0));
-      e += vec3(1.0, 0.55, 0.35) * pillar * ion * 0.35;   // bright rims of the pillars
-    } else if (uType < 1.5) {
-      // planetary nebula: a shell of gas thrown off by the dying star, lit by its hot core: teal
-      // [O III] inside, red [N II]/H-alpha outside, knots and radial spokes at the edge, a faint halo
-      float ca = dot(p, uAxis);
-      vec3 perp = p - uAxis * ca;
-      float rp = length(perp);
-      float re, dens;
-      float wob = 0.06 * (fbm3(p * 4.0 + sd) - 0.5);
-      if (uShape < 0.5) {
-        // barrel (a ring when seen end-on): prolate, thinner towards the axis
-        re = length(vec2(rp, ca / 1.45));
-        dens = exp(-pow((re - 0.5 - wob) / 0.1, 2.0)) * smoothstep(0.12, 0.6, rp / max(re, 1e-3)) * 1.6;
-        dens += 0.12 * smoothstep(0.5, 0.2, re);    // fainter gas filling the cavity
-      } else if (uShape < 1.5) {
-        // bipolar: two lobes along the axis, pinched by a dense waist
-        vec3 c1 = uAxis * 0.4;
-        float d1 = length(p - c1), d2 = length(p + c1);
-        float lobes = exp(-pow((d1 - 0.38 - wob) / 0.07, 2.0)) + exp(-pow((d2 - 0.38 - wob) / 0.07, 2.0));
-        lobes += 0.25 * (smoothstep(0.38, 0.1, d1) + smoothstep(0.38, 0.1, d2));
-        float waist = exp(-pow((rp - 0.22) / 0.06, 2.0) - ca * ca / 0.004);
-        dens = lobes * 1.3 + waist * 2.0;
-        re = min(d1, d2) + 0.15;
-      } else {
-        // round shell with two dark cavities (the Owl)
-        re = length(p);
-        vec3 side = normalize(cross(uAxis, vec3(0.31, 0.95, 0.12)));
-        float e1 = smoothstep(0.1, 0.2, length(p - side * 0.2)), e2 = smoothstep(0.1, 0.2, length(p + side * 0.2));
-        dens = smoothstep(0.75, 0.55, re + wob) * (0.6 + 0.4 * fbm3(p * 6.0 + sd)) * e1 * e2;
-      }
-      // knots and radial spokes
-      vec3 u = normalize(p + 1e-4);
-      float spokes = 0.55 + 0.9 * pow(n3(u * 26.0 + sd), 3.0);
-      float knots = 0.7 + 0.8 * smoothstep(0.55, 0.85, n3(p * 22.0 + sd * 2.0));
-      dens *= spokes * knots;
-      vec3 tint = mix(vec3(0.25, 0.95, 0.85), vec3(1.0, 0.22, 0.3), smoothstep(0.4, 0.62, re));
-      float halo = 0.1 * exp(-pow((length(p) - 0.88) / 0.07, 2.0)) * (0.3 + 1.4 * ridge(p * 5.0 + sd));
-      e = (tint * dens + vec3(1.0, 0.3, 0.35) * halo) * 1.4;
-    } else {
-      // supernova remnant: a web of thin filaments (cell walls of the shock), over a blue
-      // synchrotron glow when a pulsar fills it (the Crab), or on a thin shell (Veil, Cas A)
-      float ca = dot(p, uAxis);
-      vec3 q = p - uAxis * ca * 0.3;     // a little elongated along the axis
-      float r = length(q);
-      vec2 v1 = uLite > 0.5 ? vec2(0.0, 1.0) : vor3(p * 3.2 + sd);
-      float web1 = uLite > 0.5 ? pow(ridge(p * 3.2 + sd), 6.0) : 1.0 - smoothstep(0.0, 0.07, v1.y - v1.x);
-      vec2 v2 = uLite > 0.5 ? vec2(0.0, 1.0) : vor3(p * 7.5 + sd * 1.7);
-      float web2 = uLite > 0.5 ? 0.0 : 1.0 - smoothstep(0.0, 0.1, v2.y - v2.x);
-      float web = web1 * 0.8 + web2 * 0.45;
-      float region = fbm3(p * 1.5 + sd + 2.0);
-      if (uFilled > 0.5) {
-        float body = smoothstep(0.95, 0.65, r + 0.1 * (fbm3(p * 3.0 + sd) - 0.5));
-        vec3 fil = mix(vec3(1.0, 0.45, 0.22), vec3(1.0, 0.75, 0.5), smoothstep(0.4, 0.8, region));
-        vec3 sync = vec3(0.55, 0.72, 1.0) * smoothstep(0.85, 0.1, r) * (0.35 + 0.5 * fbm3(p * 9.0 + sd));
-        e = (fil * web * body * 2.6 + sync * 0.9);
-      } else {
-        float shell = exp(-pow((r - 0.82 - 0.1 * (fbm3(p * 2.0 + sd) - 0.5)) / 0.09, 2.0));
-        vec3 fil = mix(vec3(1.0, 0.3, 0.32), vec3(0.35, 0.8, 1.0), smoothstep(0.35, 0.65, region));
-        e = fil * shell * (0.15 + 2.6 * web);
-      }
-    }
+    if (uType < 0.5) emission(p, lod, e, dust);
+    else if (uType < 1.5) planetary(p, lod, e);
+    else remnant(p, lod, e);
     col += T * e * dt;
     T *= exp(-dust * dt);
   }
-  // the young star cluster at the heart of an emission nebula: bright blue-white stars with halos
+  // the young cluster lighting an emission nebula: blue-white stars with soft halos
   if (uType < 0.5) {
-    for (int k = 0; k < 6; k++) {
-      vec3 sp = (vec3(h31(sd + float(k)), h31(sd + float(k) + 11.0), h31(sd + float(k) + 23.0)) - 0.5) * 0.16;
+    for (int k = 0; k < 8; k++) {
+      vec3 sp = (vec3(fract(sin(float(k) * 12.9898 + uSeed * 78.233) * 43758.5453), fract(sin(float(k) * 39.346 + uSeed * 11.135) * 43758.5453),
+        fract(sin(float(k) * 73.156 + uSeed * 52.235) * 43758.5453)) - 0.5) * 0.16;
       float ts = dot(sp - oc, dir);
       if (ts <= 0.0) continue;
-      float d = length(oc + dir * ts - sp) / max(ts, 1e-3);   // angular distance from the star (rad)
-      float L = 0.5 + h31(sd + float(k) * 3.7);
-      col += vec3(0.7, 0.82, 1.0) * L * (exp(-pow(d / 0.003, 2.0)) * 8.0 + 0.06 / (1.0 + pow(d / 0.015, 2.0)));
+      float d = length(oc + dir * ts - sp) / max(ts, 1e-3);   // angle from the star (rad)
+      float L = (0.4 + fract(sin(float(k) * 4.1 + uSeed) * 9631.7)) * (k == 0 ? 2.5 : 1.0);
+      col += vec3(0.72, 0.84, 1.0) * L * (exp(-sq(d / 0.0025)) * 6.0 + 0.03 / (1.0 + sq(d / 0.012))) * T;
     }
   }
-  // the dying star at a planetary nebula's centre, the pulsar in a filled remnant
-  if (uType > 0.5 && (uType < 1.5 || uFilled > 0.5)) {
+  // the dying star at a planetary nebula's centre, the pulsar in the Crab
+  if (uType > 0.5 && uType < 1.5 || uType > 1.5 && uShape < 0.5) {
     float ts = dot(-oc, dir);
     if (ts > 0.0) {
       float d = length(oc + dir * ts) / max(ts, 1e-3);
-      col += vec3(0.8, 0.88, 1.0) * (exp(-pow(d / 0.002, 2.0)) * 10.0 + 0.04 / (1.0 + pow(d / 0.01, 2.0)));
+      col += vec3(0.8, 0.88, 1.0) * (exp(-sq(d / max(0.0015, uPixAng * 0.8))) * 25.0 + 0.04 / (1.0 + sq(d / 0.008)));
     }
   }
-  // a chord through the middle (length 2) gives about the billboards' brightness
-  gl_FragColor = vec4(col * 0.7 * uGain * uFade, 1.0);
+  gl_FragColor = vec4(col * 0.7 * uGain * uBright, 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
-/**
- * Shape and symmetry axis of a nebula's volume: the well-known planetary nebulae as they are seen
- * from Earth (the Ring and the Helix are barrels seen nearly end-on, the Dumbbell a bipolar nebula
- * seen side-on, the Owl a round shell with two cavities); others from their seed.
- */
-function nebulaShape(o: DeepSkyObject): { shape: number; axis: Vector3 } {
-  const los = o.posPc.clone().normalize();
-  const known: Record<string, [number, number]> = {
-    'Ring Nebula': [0, 25], 'Helix Nebula': [0, 18], 'Southern Ring Nebula': [0, 45], 'Eskimo Nebula': [0, 10],
-    'Dumbbell Nebula': [1, 80], "Cat's Eye Nebula": [1, 50], 'Owl Nebula': [2, 0], 'Crab Nebula': [0, 70],
-  };
-  const r = rnd(o.seed + 0.5);
-  const [shape, tiltDeg] = known[o.name] ?? [r() < 0.5 ? 0 : 1, 90 * r()];
-  const ref = Math.abs(los.z) < 0.9 ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0);
-  const perp = new Vector3().crossVectors(los, ref).normalize().applyAxisAngle(los, r() * Math.PI * 2);
-  const t = (tiltDeg * Math.PI) / 180;
-  return { shape, axis: los.multiplyScalar(Math.cos(t)).addScaledVector(perp, Math.sin(t)).normalize() };
+/** How a nebula's volume is built (see VOL_FRAG). */
+interface NebLook {
+  shape: number;
+  axes?: [number, number, number];
+  /** emission: cavity radius, pillars, lanes, [O III] extent */
+  p?: [number, number, number, number];
+  /** emission: filaments, pillar angular scale, -, reflection */
+  q?: [number, number, number, number];
+  bright?: number;
+  /** planetary / remnant: tilt of the symmetry axis from our line of sight (degrees) */
+  tilt?: number;
 }
 
+/**
+ * The famous nebulae as they look from Earth; others from their kind and seed. Emission-nebula
+ * shapes: 0 cavity, 1 shell, 2 blister, 3 loops. Planetary: 0 barrel, 1 bipolar, 2 Owl, 3 Helix,
+ * 4 Cat's Eye. Remnants: 0 filled (Crab), 1 thin shell (Veil), 2 knotty shell (Cas A).
+ */
+const LOOKS: Record<string, NebLook> = {
+  'Orion Nebula': { shape: 2, axes: [1, 1, 0.7], p: [0.15, 0, 0.8, 0.3], q: [1.2, 3, 0, 0.4], bright: 1.6 },
+  'Eagle Nebula': { shape: 0, axes: [1, 1.1, 0.85], p: [0.3, 1.0, 0.3, 0.3], q: [1.0, 2.2, 0, 0] },
+  'Lagoon Nebula': { shape: 0, axes: [1, 0.6, 0.7], p: [0.2, 0.3, 1.1, 0.2], q: [1.0, 3, 0, 0.2] },
+  'Carina Nebula': { shape: 0, axes: [1, 0.85, 0.8], p: [0.25, 0.8, 1.1, 0.35], q: [1.1, 2.6, 0, 0.1], bright: 2.2 },
+  'Rosette Nebula': { shape: 1, axes: [1, 1, 1], p: [0.35, 0.35, 0.3, 0.45], q: [0.9, 5, 0, 0] },
+  'Tarantula Nebula': { shape: 3, axes: [1, 0.9, 0.8], p: [0.15, 0.3, 0.4, 0.3], q: [1.8, 3, 0, 0], bright: 4 },
+  'Trifid Nebula': { shape: 0, axes: [1, 1, 0.9], p: [0.2, 1.4, 0.2, 0.2], q: [0.9, 1.2, 0, 1.2] },
+  'North America Nebula': { shape: 0, axes: [1, 0.9, 0.6], p: [0.3, 0.2, 1.4, 0.15], q: [1.0, 3, 0, 0] },
+  'Omega Nebula': { shape: 0, axes: [1, 0.7, 0.7], p: [0.2, 0.3, 0.6, 0.3], q: [1.2, 3, 0, 0], bright: 1.3 },
+  'California Nebula': { shape: 0, axes: [1, 0.3, 0.4], p: [0.2, 0.2, 0.4, 0.1], q: [1.4, 3, 0, 0] },
+  'Heart Nebula': { shape: 1, axes: [1, 0.9, 0.9], p: [0.4, 0.6, 0.4, 0.2], q: [1.0, 3, 0, 0] },
+  'Ring Nebula': { shape: 0, tilt: 25 },
+  'Helix Nebula': { shape: 3, tilt: 18 },
+  'Southern Ring Nebula': { shape: 0, tilt: 45 },
+  'Eskimo Nebula': { shape: 0, tilt: 10 },
+  'Dumbbell Nebula': { shape: 1, tilt: 80 },
+  "Cat's Eye Nebula": { shape: 4, tilt: 50 },
+  'Owl Nebula': { shape: 2, tilt: 0 },
+  'Crab Nebula': { shape: 0, tilt: 70 },
+  'Veil Nebula (Cygnus Loop)': { shape: 1, tilt: 0 },
+  'Cassiopeia A': { shape: 2, tilt: 0 },
+};
+
+function lookOf(o: DeepSkyObject): NebLook {
+  const known = LOOKS[o.name];
+  if (known) return known;
+  const r = rnd(o.seed + 0.5);
+  if (o.data.kind === 'emission') return { shape: r() < 0.7 ? 0 : 1, axes: [1, 0.7 + 0.3 * r(), 0.7 + 0.3 * r()], p: [0.2 + 0.15 * r(), 0.6 * r(), 0.3 + 0.7 * r(), 0.3], q: [1, 2 + 2 * r(), 0, 0] };
+  if (o.data.kind === 'planetary') return { shape: r() < 0.5 ? 0 : 1, tilt: 90 * r() };
+  return { shape: r() < 0.5 ? 1 : 2, tilt: 0 };
+}
+
+/**
+ * Nebulae and star clusters. Nebulae are volumes at every distance (VOL_FRAG), framed as seen
+ * from Earth; globular clusters are generated stars (drawn exactly like catalogue stars) plus a
+ * glow while they are unresolved. Open clusters need nothing: their stars are in the catalogues.
+ */
 export class DeepSkyLayer {
   readonly group = new Group();
   views: DeepSkyView[] = [];
-  private quads = new Map<DeepSkyObject, Mesh[]>();
+  private glows = new Map<DeepSkyObject, Mesh>();
+  private volumes = new Map<DeepSkyObject, Mesh>();
   private stars = new Map<DeepSkyObject, Points>();
-  private quad = new PlaneGeometry(2, 2);
   readonly gain = { value: 0.6 };
-  /** the nebula volume shown when the explorer is close to (or inside) a nebula */
-  private volume: Mesh;
+  private pixAng = { value: 1e-3 };
 
   constructor(readonly objects: DeepSkyObject[], psf: Record<string, { value: number }>, colorLut: DataTexture, vr = false) {
     this.group.name = 'deep-sky';
-    this.volume = new Mesh(new SphereGeometry(1, 32, 16), new ShaderMaterial({
-      name: 'nebula-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG,
-      uniforms: { uCenter: { value: new Vector3() }, uRadius: { value: 1 }, uType: { value: 0 }, uSeed: { value: 0 }, uGain: this.gain,
-        uFade: { value: 0 }, uLite: LITE.uLite, uFilled: { value: 0 }, uAxis: { value: new Vector3(0, 0, 1) }, uShape: { value: 0 },
-        uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
-      transparent: true, depthWrite: false, blending: AdditiveBlending, side: BackSide,
-    }));
-    this.volume.matrixAutoUpdate = false;
-    this.volume.frustumCulled = false;
-    this.volume.visible = false;
-    this.volume.renderOrder = -1;
-    this.group.add(this.volume);
+    const sphere = new SphereGeometry(1, 32, 16);
+    const quad = new PlaneGeometry(2, 2);
+    const noise = noise3D().tex;
     for (const o of objects) {
       const k = o.data.kind;
       if (k === 'open') continue;
-      const meshes: Mesh[] = [];
-      const make = (type: number, size: number, offset: Vector3, seed: number) => {
-        const m = new Mesh(this.quad, new ShaderMaterial({
-          name: 'nebula', vertexShader: BILL_VERT, fragmentShader: NEB_FRAG,
-          uniforms: { uType: { value: type }, uSeed: { value: seed }, uGain: type === 3 ? { value: 0 } : this.gain, uClipScale: { value: 1 }, uLite: LITE.uLite,
-            uFilled: { value: /Crab/.test(o.name) ? 1 : 0 },
-            uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+      if (k === 'globular') {
+        const m = new Mesh(quad, new ShaderMaterial({
+          name: 'cluster-glow', vertexShader: BILL_VERT, fragmentShader: GLOW_FRAG,
+          uniforms: { uGain: { value: 0 }, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
           transparent: true, depthWrite: false, blending: AdditiveBlending,
         }));
         m.matrixAutoUpdate = false;
         m.frustumCulled = false;
         m.renderOrder = -1;
-        m.userData = { size, offset };
         this.group.add(m);
-        meshes.push(m);
-      };
-      const r = rnd(o.seed);
-      if (k === 'emission') {
-        // a few overlapping cloud layers at different depths: parallax when flying through
-        for (let i = 0; i < 5; i++) make(0, 0.55 + 0.5 * r(), new Vector3(r() - 0.5, r() - 0.5, r() - 0.5).multiplyScalar(0.7), r());
-      } else if (k === 'planetary') make(1, 1.0, new Vector3(), o.seed);
-      else if (k === 'snr') { make(2, 1.0, new Vector3(), o.seed); make(2, 0.9, new Vector3(0, 0, 0.1), (o.seed + 0.37) % 1); }
-      else if (k === 'globular') {
-        make(3, 0.8, new Vector3(), o.seed);
+        this.glows.set(o, m);
         const { pos, mt } = clusterStars(o, vr ? 8000 : 24000);
         const g = new BufferGeometry();
         g.setAttribute('aPos', new BufferAttribute(pos, 3));
@@ -388,72 +446,80 @@ export class DeepSkyLayer {
         pts.matrixAutoUpdate = false;
         this.group.add(pts);
         this.stars.set(o, pts);
+        continue;
       }
-      this.quads.set(o, meshes);
+      // nebula frame: z along our line of sight (away from Earth), x towards the position angle
+      const look = lookOf(o);
+      const L = raDecToVector(o.data.ra, o.data.dec);
+      const a = (o.data.ra * Math.PI) / 180, d = (o.data.dec * Math.PI) / 180, pa = (o.data.paDeg * Math.PI) / 180;
+      const E = new Vector3(-Math.sin(a), Math.cos(a), 0);
+      const N = new Vector3(-Math.sin(d) * Math.cos(a), -Math.sin(d) * Math.sin(a), Math.cos(d));
+      const ex = N.clone().multiplyScalar(Math.cos(pa)).addScaledVector(E, Math.sin(pa)).normalize();
+      const ey = new Vector3().crossVectors(L, ex).normalize();
+      const rot = new Matrix3().set(ex.x, ex.y, ex.z, ey.x, ey.y, ey.z, L.x, L.y, L.z);
+      const tilt = ((look.tilt ?? 0) * Math.PI) / 180;
+      const type = k === 'emission' ? 0 : k === 'planetary' ? 1 : 2;
+      const m = new Mesh(sphere, new ShaderMaterial({
+        name: 'nebula-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG,
+        uniforms: {
+          uNoise: { value: noise }, uCenter: { value: new Vector3() }, uRadius: { value: o.radius }, uRot: { value: rot },
+          uType: { value: type }, uShape: { value: look.shape }, uSeed: { value: o.seed }, uGain: this.gain, uBright: { value: look.bright ?? 1 },
+          uLite: LITE.uLite, uPixAng: this.pixAng, uAxes: { value: new Vector3(...(look.axes ?? [1, 1, 1])) },
+          uAxis: { value: new Vector3(Math.sin(tilt), 0, Math.cos(tilt)) },
+          uP: { value: new Vector4(...(look.p ?? [0.2, 0, 0, 0.3])) }, uQ: { value: new Vector4(...(look.q ?? [1, 3, 0, 0])) },
+          uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+        },
+        transparent: true, depthWrite: false, blending: AdditiveBlending, side: BackSide,
+      }));
+      m.matrixAutoUpdate = false;
+      m.frustumCulled = false;
+      m.renderOrder = -1;
+      m.name = o.name;
+      this.group.add(m);
+      this.volumes.set(o, m);
     }
   }
 
-  /** The nebula volume, for compiling its shader ahead of time. */
+  /** One nebula volume, for compiling its shader ahead of time. */
   warmupObjects(): Mesh[] {
-    return [this.volume];
+    const v = this.volumes.values().next().value;
+    return v ? [v] : [];
   }
 
   /** `camPc`: camera position (pc); `adapt`: dark adaptation (1 = dark-adapted). */
   update(cam: UPos, camPc: Vector3, pixelAngle: number, adapt: number): void {
     this.views = [];
     this.gain.value = 0.55 * Math.pow(Math.max(adapt, 0), 0.55);
+    this.pixAng.value = pixelAngle;
     const rel = new Vector3();
-    // the nearest nebula (in its radii) gets the volume when the explorer is close
-    let near: DeepSkyObject | null = null, nearK = Infinity;
-    for (const o of this.objects) {
-      if (o.data.kind === 'open' || o.data.kind === 'globular') continue;
-      const k = o.upos.sub(cam, rel).length() / o.radius;
-      if (k < nearK) { nearK = k; near = o; }
-    }
-    const volW = near ? Math.min(1, Math.max(0, (8 - nearK) / 3)) : 0;   // fades in from 8 to 5 radii
-    this.volume.visible = volW > 0.01;
-    if (near && this.volume.visible) {
-      near.upos.sub(cam, rel);
-      const u = (this.volume.material as ShaderMaterial).uniforms;
-      (u.uCenter.value as Vector3).copy(rel);
-      u.uRadius.value = near.radius;
-      u.uType.value = near.data.kind === 'emission' ? 0 : near.data.kind === 'planetary' ? 1 : 2;
-      u.uSeed.value = near.seed;
-      u.uFilled.value = /Crab/.test(near.name) ? 1 : 0;
-      const sh = nebulaShape(near);
-      u.uShape.value = sh.shape;
-      (u.uAxis.value as Vector3).copy(sh.axis);
-      u.uFade.value = volW;
-      u.uClipScale.value = 1 / Math.max(rel.length(), near.radius);
-      this.volume.matrix.makeScale(near.radius, near.radius, near.radius).setPosition(rel);
-      this.volume.matrixWorldNeedsUpdate = true;
-    }
     for (const o of this.objects) {
       o.upos.sub(cam, rel);
       const dist = rel.length();
       const pr = Math.atan2(o.radius, dist) / pixelAngle;
       this.views.push({ obj: o, rel: rel.clone(), dist, pixelRadius: pr });
-      const meshes = this.quads.get(o);
-      if (meshes) {
-        // a globular cluster's glow gives way to its stars as they resolve
-        const fade = o.data.kind === 'globular' ? Math.min(1, Math.max(0, (dist / o.radius - 1.5) / 6)) : 1;
-        for (const m of meshes) {
-          const { size, offset } = m.userData as { size: number; offset: Vector3 };
-          // (the billboards give way to the volume up close)
-          const billW = o === near ? 1 - volW : 1;
-          m.visible = pr > 0.8 && fade > 0.01 && billW > 0.01;
-          if (!m.visible) continue;
-          const p = rel.clone().addScaledVector(offset, o.radius);
-          const s = o.radius * size;
-          m.matrix.makeScale(s, s, s).setPosition(p);
-          m.matrixWorldNeedsUpdate = true;
-          const u = (m.material as ShaderMaterial).uniforms;
-          u.uClipScale.value = 1 / Math.max(p.length(), 1);
-          if (o.data.kind === 'globular') u.uGain.value = this.gain.value * fade * 1.4;
-          else if (o === near && billW < 1) {
-            if (u.uGain === this.gain) u.uGain = { value: 0 };
-            u.uGain.value = this.gain.value * billW;
-          } else if (u.uGain !== this.gain) u.uGain = this.gain;
+      const vol = this.volumes.get(o);
+      if (vol) {
+        vol.visible = pr > 0.6;
+        if (vol.visible) {
+          const u = (vol.material as ShaderMaterial).uniforms;
+          (u.uCenter.value as Vector3).copy(rel);
+          u.uClipScale.value = 1 / Math.max(dist, o.radius);
+          vol.matrix.makeScale(o.radius, o.radius, o.radius).setPosition(rel);
+          vol.matrixWorldNeedsUpdate = true;
+        }
+      }
+      const glow = this.glows.get(o);
+      if (glow) {
+        // the glow gives way to the cluster's stars as they resolve
+        const fade = Math.min(1, Math.max(0, (dist / o.radius - 1.5) / 6));
+        glow.visible = pr > 0.8 && fade > 0.01;
+        if (glow.visible) {
+          const s = o.radius * 0.8;
+          glow.matrix.makeScale(s, s, s).setPosition(rel);
+          glow.matrixWorldNeedsUpdate = true;
+          const u = (glow.material as ShaderMaterial).uniforms;
+          u.uClipScale.value = 1 / Math.max(dist, 1);
+          u.uGain.value = this.gain.value * fade * 1.4;
         }
       }
       const pts = this.stars.get(o);

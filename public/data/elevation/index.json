@@ -1,0 +1,35 @@
+{
+ "tileSize": 256,
+ "bodies": {
+  "ceres": {
+   "maxLevel": 4,
+   "bytes": 7569974,
+   "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA Dawn FC HAMO DTM (DLR) 60 px/deg, via USGS Astrogeology"
+  },
+  "earth": {
+   "maxLevel": 7,
+   "bytes": 79999861,
+   "credit": "NOAA NCEI ETOPO 2022 15 arc-second Global Relief Model (surface), DOI 10.25921/fd45-gt74"
+  },
+  "mars": {
+   "maxLevel": 6,
+   "bytes": 104994716,
+   "credit": "NASA/JPL/GSFC MGS MOLA global DEM 463 m, via USGS Astrogeology"
+  },
+  "mercury": {
+   "maxLevel": 5,
+   "bytes": 24978259,
+   "credit": "NASA/JHUAPL/CIW MESSENGER, USGS global DEM 665 m v2, via USGS Astrogeology"
+  },
+  "moon": {
+   "maxLevel": 5,
+   "bytes": 114974517,
+   "credit": "NASA/GSFC/MIT LRO LOLA gridded elevation LDEM_128 (128 px/deg), PDS Geosciences Node"
+  },
+  "vesta": {
+   "maxLevel": 3,
+   "bytes": 6996336,
+   "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA Dawn FC HAMO DTM (DLR) 48 px/deg, via USGS Astrogeology"
+  }
+ }
+}

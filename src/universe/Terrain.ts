@@ -158,10 +158,15 @@ export function craterField(px: number, py: number, pz: number, cell: number, s:
     const rc = 0.1 + 0.32 * t * t;
     const d = Math.sqrt((x - ox) ** 2 + (y - oy) ** 2 + (z - oz) ** 2) / rc;
     if (d > 1.7) continue;
+    // most craters are old (shallow, worn-down rims), a few fresh
+    const age = hash3(cx, cy, cz, s + 7);
+    const k = 1 - 0.7 * age * age * (3 - 2 * age);
+    const rw = 0.28 + 0.2 * age;
     // bowl (parabolic floor), rim crest at d = 1 and an ejecta apron outside
     const bowl = d < 1 ? d * d - 1 : 0;
-    const rim = 0.32 * Math.exp(-(((d - 1) / 0.28) ** 2));
-    h += (bowl + rim) * depth * rc * cell;
+    const ft = Math.min(1, Math.max(0, (d - 1.45) / 0.25));
+    const rim = 0.32 * k * Math.exp(-(((d - 1) / rw) ** 2)) * (1 - ft * ft * (3 - 2 * ft));
+    h += (bowl * k + rim) * depth * rc * cell;
   }
   return h;
 }
@@ -189,6 +194,14 @@ export class TerrainSource {
   private patches = new Map<string, Patch[]>();          // loaded, by body key
   private patchRequested = new Set<string>();
   private versions = new Map<string, number>();
+  /**
+   * Optional sharper global elevation (universe/Elevation.ts), plugged in by the tile worker:
+   * returns the ground height (m above this source's reference surface, already reconciled) and the
+   * sample spacing (m) of the data used, or null where no loaded tile covers the direction. When it
+   * answers, it replaces the coarse global map as the base and generated relief fills in below its
+   * resolution; otherwise the global map (or pure generated relief) is used, unchanged.
+   */
+  elevSample: ((n: Vector3, spacing: number) => { h: number; mpp: number } | null) | null = null;
 
   constructor(private base: string) {
     fetch(`${base}/terrain/terrain.json`).then((r) => (r.ok ? r.json() : null)).then((j) => { this.manifest = j; }).catch(() => undefined);
@@ -308,7 +321,13 @@ export class TerrainSource {
     // a sharper regional patch takes over (blended in at its edges), and generated relief
     // between its resolution and the global map's fades out there
     let wP = 0, topP = Infinity;
-    if (m) {
+    // sharper global elevation tiles (universe/Elevation.ts), when the worker has them loaded here:
+    // the real base, generated relief only below the data's own sample spacing
+    const elev = this.elevSample ? this.elevSample(n, spacing) : null;
+    if (elev) {
+      h = elev.h;
+      top = Math.max(elev.mpp * 3, spacing * 2.5);
+    } else if (m) {
       h = this.dem(m, n, spacing);
       top = m.pixelM * 3;
       const pl = this.patches.get(k!);
@@ -345,7 +364,7 @@ export class TerrainSource {
       const mtn = t * t * (3 - 2 * t);
       if (mtn > 0) {
         const L0 = Math.min(top, 2400);
-        let a = 0.16;
+        let a = 0.27;
         for (let L = L0, k = 0; L > minL && k < 10; L *= 0.5, k++) {
           const wx = (vnoise(px / L + 3.1, py / L, pz / L, s + 500 + k) - 0.5) * 0.9;
           const wy = (vnoise(px / L, py / L + 5.3, pz / L, s + 520 + k) - 0.5) * 0.9;
@@ -353,7 +372,7 @@ export class TerrainSource {
           const r = 1 - Math.abs(2 * n - 1);
           h += (r * r - 0.42) * a * L * mtn * (L > topP ? 1 - wP : 1);
           // finer octaves a little gentler (scree and snow soften the smallest forms)
-          if (L < 40) a = 0.1;
+          if (L < 40) a = 0.14;
         }
       }
     }

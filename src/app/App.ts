@@ -5,7 +5,8 @@ import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/un
 import { AtmospheresLayer, type AtmosphereData } from '../render/Atmospheres';
 import { BlackHoleLayer } from '../render/BlackHoleLayer';
 import { BodiesLayer } from '../render/Bodies';
-import { TerrainPatch } from '../render/TerrainPatch';
+import { PlanetTerrain } from '../render/PlanetTerrain';
+import type { TerrainPatch } from '../render/TerrainPatch';
 import { RingSpot } from '../universe/RingSpot';
 import { Landmark, LANDMARKS } from '../universe/Landmarks';
 import { CometTails } from '../render/CometTails';
@@ -117,7 +118,7 @@ export class App {
   photoMode = false;
   private labelsBeforePhoto = true;
   /** real 3D ground under the explorer near solid worlds */
-  readonly terrain = new TerrainPatch();
+  readonly terrain = new PlanetTerrain();
   /** the Milky Way drawn per pixel from outside it */
   readonly mwVolume = new MilkyWayVolume();
   /** rocks on the ground around the explorer (on the landing terrain) */
@@ -209,7 +210,8 @@ export class App {
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
     // scanned ground materials for close-up surfaces (loaded in the background)
     void loadMaterials(DATA, xrCapable).catch((e) => console.warn('materials', e));
-    app.rocks = new Rocks(app.terrain, xrCapable);
+    app.rocks = new Rocks(app.terrain as unknown as TerrainPatch, xrCapable);
+    app.terrain.source = bodies.terrainSource;
     app.cometTails = new CometTails(bodies.surfaceExposure);
     const earthBody = system.byId.get(399)!;
     const craft = await loadSpacecraft(DATA, system.sun, earthBody).catch((e) => { console.warn('spacecraft', e); return [] as Spacecraft[]; });
@@ -859,8 +861,17 @@ export class App {
       cs.exact = true;
       const shift = cs.upos.sub(before, new Vector3());
       const away = before.sub(this.rig.upos, new Vector3()).length();
-      // (an anchored explorer already follows its anchor: rig.followAnchor)
-      if (this.rig.anchor !== cs && shift.lengthSq() > 0 && away < Math.max(1000 * cs.radius, 50 * shift.length())) this.rig.upos.addVec(shift, 1);
+      // (an explorer anchored to the star, or to anything that moves with it — its planets and
+      // their moons — already follows its anchor: rig.followAnchor; shifting again moved it twice)
+      const movesWithStar = (o: unknown): boolean => {
+        let x = o as { system?: { host?: unknown }; parentObject?: unknown } | null;
+        for (let i = 0; x && i < 6; i++) {
+          if (x === cs) return true;
+          x = (x.system?.host ?? x.parentObject ?? null) as typeof x;
+        }
+        return false;
+      };
+      if (!movesWithStar(this.rig.anchor) && shift.lengthSq() > 0 && away < Math.max(1000 * cs.radius, 50 * shift.length())) this.rig.upos.addVec(shift, 1);
     }
     return cs;
   }
@@ -1005,6 +1016,11 @@ export class App {
     return Math.max(0, Math.min(1, (ar + hv - th) / (2 * hv)));
   }
 
+  /** A body's albedo for the exposure: near its ground, the eye adapts to the ground around (TerrainPatch.exposureAlbedo). */
+  private surfaceAlbedo(b: Body): number {
+    return this.terrain.owner === b ? this.terrain.exposureAlbedo(b.albedo) : b.albedo;
+  }
+
   private updateExposure(dt: number): { xStar: number; xSurf: number; mLim: number; xDark: number } {
     const pixSA = (this.view.pixelAngle * this.view.pixelRatio) ** 2; // per CSS pixel
     const xDark = (0.01 * pixSA) / magToIrradiance(this.starMagLimit);
@@ -1029,7 +1045,7 @@ export class App {
       const b = v.body;
       const L = b.kind === 'star'
         ? (AU / SUN_RADIUS) ** 2
-        : ((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
+        : ((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
       wBest = w;
       lBest = L;
       keyBest = b.kind === 'star' ? STAR_KEY : 0.45;
@@ -1106,7 +1122,7 @@ export class App {
       if (!v.resolved || v.pixelRadius <= 1.5 || (!onScreen(v.rel) && this.bigCoverage(v.rel, v.body.radius) < 0.02)) continue;
       const b = v.body;
       if (b.kind === 'star') lightCap = Math.min(lightCap, 1.8 / (AU / SUN_RADIUS) ** 2);
-      else diskCap = Math.min(diskCap, 1.6 / (((Math.min(1, 1.5 * b.albedo) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1)));
+      else diskCap = Math.min(diskCap, 1.6 / (((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1)));
     }
     for (const cv of this.craft.views) {
       if (cv.pixelRadius <= 1.5 || !onScreen(cv.rel)) continue;
@@ -1646,6 +1662,7 @@ export class App {
       const c = cands[0] ?? null;
       if (c) c.air = this.atmospheres.material(c.ground.owner);
       this.terrain.vr = this.vr.active;
+      this.terrain.view = this.view;
       this.terrain.update(c);
       this.rocks.update(this.rig.upos, this.renderer.gl);
     }

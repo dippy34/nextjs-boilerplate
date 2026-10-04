@@ -1,4 +1,4 @@
-import { DataArrayTexture, LinearFilter, LinearMipmapLinearFilter, Matrix4, RepeatWrapping, RGBAFormat, type Texture, UnsignedByteType } from 'three';
+import { DataArrayTexture, LinearFilter, LinearMipmapLinearFilter, Matrix4, RepeatWrapping, RGBAFormat, type Texture, UnsignedByteType, Vector2 } from 'three';
 
 /**
  * Ground materials for close-up surfaces (public/data/materials, pipeline/fetch_materials.py:
@@ -15,14 +15,16 @@ export const MATERIALS = {
   uMatCol: { value: null as DataArrayTexture | null },
   uMatNrm: { value: null as DataArrayTexture | null },
   uMatOn: { value: 0 },
-  // rock shadows and contact shading on the ground (render/Rocks.ts): R = the rocks' depth towards
-  // the Sun, G = darkening around their bases (seen from above); matrices take camera-relative
-  // world positions to (u, v, depth)
+  // rock shadows and contact shading on the ground (render/Rocks.ts): two cascades side by side
+  // (near, far), R = the rocks' depth towards the Sun (exp-encoded), G = darkening around their
+  // bases (seen from above); the matrices take camera-relative world positions to (u, v, depth)
   uRockMap: { value: null as Texture | null },
   uRockShM: { value: new Matrix4() },
+  uRockShM1: { value: new Matrix4() },
   uRockAOM: { value: new Matrix4() },
+  uRockAOM1: { value: new Matrix4() },
   uRockOn: { value: 0 },
-  uRockTexel: { value: 1 / 2048 },
+  uRockTexel: { value: new Vector2(1 / 4096, 1 / 2048) },
 };
 
 /**
@@ -32,46 +34,61 @@ export const MATERIALS = {
 export const ROCK_SHADOW_GLSL = /* glsl */ `
 uniform sampler2D uRockMap;
 uniform mat4 uRockShM;
+uniform mat4 uRockShM1;
 uniform mat4 uRockAOM;
+uniform mat4 uRockAOM1;
 uniform float uRockOn;
-uniform float uRockTexel;
-float rockShadow(vec3 p, float bias, float lite, out float ao) {
+uniform vec2 uRockTexel;
+// percentage-closer filtering of one cascade (u in [lo, lo + 0.5]); -1 outside it
+float rockPcf(vec3 s, float lo, float bias, float lite) {
+  vec2 e2 = vec2(min(s.x - lo, lo + 0.5 - s.x) * 2.0, min(s.y, 1.0 - s.y));
+  if (min(e2.x, e2.y) < 0.002) return -1.0;
   // (R holds exp(depth / 16 m): positive, with the same relative precision everywhere)
+  float ref = exp((s.z + bias) / 16.0);
+  float sum = 0.0;
+  if (lite > 0.5) {
+    for (int i = 0; i < 4; i++) {
+      vec2 o = vec2(float(i & 1), float(i >> 1)) - 0.5;
+      sum += step(texture2D(uRockMap, s.xy + o * uRockTexel).r, ref);
+    }
+    sum *= 0.25;
+  } else {
+    // 3x3 texels, bilinearly weighted: smooth edges without blur
+    vec2 tc = s.xy / uRockTexel - 0.5;
+    vec2 f = fract(tc);
+    vec2 base = (floor(tc) + 0.5) * uRockTexel;
+    for (int y = -1; y <= 2; y++) for (int x = -1; x <= 2; x++) {
+      float wx = x == -1 ? 1.0 - f.x : x == 2 ? f.x : 1.0;
+      float wy = y == -1 ? 1.0 - f.y : y == 2 ? f.y : 1.0;
+      sum += wx * wy * step(texture2D(uRockMap, base + vec2(float(x), float(y)) * uRockTexel).r, ref);
+    }
+    sum /= 9.0;
+  }
+  return mix(1.0, sum, smoothstep(0.002, 0.05, min(e2.x, e2.y)));
+}
+// contact darkening of one cascade, bilinear (the map is sampled nearest); -1 outside it
+float rockAoAt(vec2 a, float lo) {
+  vec2 e2 = vec2(min(a.x - lo, lo + 0.5 - a.x) * 2.0, min(a.y, 1.0 - a.y));
+  if (min(e2.x, e2.y) < 0.002) return -1.0;
+  vec2 tc = a / uRockTexel - 0.5;
+  vec2 f = fract(tc);
+  vec2 b = (floor(tc) + 0.5) * uRockTexel;
+  float g = mix(mix(texture2D(uRockMap, b).g, texture2D(uRockMap, b + vec2(uRockTexel.x, 0.0)).g, f.x),
+                mix(texture2D(uRockMap, b + vec2(0.0, uRockTexel.y)).g, texture2D(uRockMap, b + uRockTexel).g, f.x), f.y);
+  return g * smoothstep(0.002, 0.05, min(e2.x, e2.y));
+}
+/**
+ * Shadows of the rocks at a camera-relative world point p (1 lit .. 0 shadowed), and the contact
+ * darkening around their bases in ao (0 .. 1): the near cascade where it reaches, the far one beyond.
+ */
+float rockShadow(vec3 p, float bias, float lite, out float ao) {
   ao = 0.0;
   if (uRockOn < 0.5) return 1.0;
-  vec3 s = (uRockShM * vec4(p, 1.0)).xyz;
-  float lit = 1.0;
-  vec2 e2 = min(s.xy, 1.0 - s.xy);
-  float edge = smoothstep(0.0, 0.05, min(e2.x, e2.y));
-  if (edge > 0.0) {
-    // percentage-closer filtering over a few texels (the Sun's disk softens shadows little: hard edges)
-    float sum = 0.0;
-    float ref = exp((s.z + bias) / 16.0);
-    if (lite > 0.5) {
-      for (int i = 0; i < 4; i++) {
-        vec2 o = vec2(float(i & 1), float(i >> 1)) - 0.5;
-        sum += step(texture2D(uRockMap, s.xy + o * uRockTexel).r, ref);
-      }
-      sum *= 0.25;
-    } else {
-      vec2 tc = s.xy / uRockTexel - 0.5;
-      vec2 f = fract(tc);
-      vec2 base = (floor(tc) + 0.5) * uRockTexel;
-      // 3x3 texels, bilinearly weighted: smooth edges without blur
-      float acc = 0.0;
-      for (int y = -1; y <= 2; y++) for (int x = -1; x <= 2; x++) {
-        float wx = x == -1 ? 1.0 - f.x : x == 2 ? f.x : 1.0;
-        float wy = y == -1 ? 1.0 - f.y : y == 2 ? f.y : 1.0;
-        acc += wx * wy * step(texture2D(uRockMap, base + vec2(float(x), float(y)) * uRockTexel).r, ref);
-      }
-      sum = acc / 9.0;
-    }
-    lit = mix(1.0, sum, edge);
-  }
-  vec2 a = (uRockAOM * vec4(p, 1.0)).xy;
-  vec2 ea = min(a, 1.0 - a);
-  if (min(ea.x, ea.y) > 0.0) ao = texture2D(uRockMap, a).g * smoothstep(0.0, 0.05, min(ea.x, ea.y));
-  return lit;
+  float lit = rockPcf((uRockShM * vec4(p, 1.0)).xyz, 0.0, bias, lite);
+  if (lit < 0.0) lit = rockPcf((uRockShM1 * vec4(p, 1.0)).xyz, 0.5, bias * 3.0, lite);
+  ao = rockAoAt((uRockAOM * vec4(p, 1.0)).xy, 0.0);
+  if (ao < 0.0) ao = rockAoAt((uRockAOM1 * vec4(p, 1.0)).xy, 0.5);
+  return lit < 0.0 ? 1.0 : lit;
 }
 `;
 
@@ -161,8 +178,14 @@ uniform vec3 uTanN;
 uniform vec3 uMatO;      // the patch origin in the anchor's frame (m)
 vec2 mrot(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(c * v.x - s * v.y, s * v.x + c * v.y); }
 vec2 mhash2(vec2 p) { p = mod(p, 289.0); return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
+float gMatLite;   // headset tier: one tap per material and scale instead of three (cheaper, the tiling shows more)
 // one material at one scale, hex-tiled: colour (rgb), normal slope in the projection's axes (xy) and height
 void hexMat(vec2 uv, vec2 gx, vec2 gy, float layer, out vec3 col, out vec2 nrm, out float hgt) {
+  if (gMatLite > 0.5) {
+    vec4 c1 = textureGrad(uMatCol, vec3(uv, layer), gx, gy), n1 = textureGrad(uMatNrm, vec3(uv, layer), gx, gy);
+    col = c1.rgb * 2.0; nrm = n1.rg * 2.0 - 1.0; hgt = n1.a;
+    return;
+  }
   vec2 st = uv * 3.4641016;
   vec2 sk = vec2(st.x - 0.57735027 * st.y, 1.15470054 * st.y);
   vec2 id = floor(sk);
@@ -214,6 +237,7 @@ float hexH(vec2 uv, vec2 gx, vec2 gy, float layer) {
 }
 vec3 groundDetailS(vec3 g, vec3 up, vec3 tn, float mpp, vec4 sel, float mix2, float snowW, float lite, vec3 sunB, out vec3 nOut, out float shadow, out float cliff) {
   vec3 e = uTanE, nr = uTanN, u3 = cross(e, nr);
+  gMatLite = lite;
   shadow = 1.0;
   cliff = 0.0;
   // flat ground: the horizontal projection; cliffs: the two vertical ones, blended by the slope's direction

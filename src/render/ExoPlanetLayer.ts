@@ -12,7 +12,7 @@ import { EXO_FRAG, RING_GLSL } from './shaders/planet';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 import { ExoPlanet as ExoPlanetClass, PlanetarySystem as SystemClass } from '../universe/Planets';
 import { CatalogStar } from '../universe/Stars';
-import { ExoGround, exoCraterSeed, exoQuantile, ROCKY_TYPES } from '../universe/ExoTerrain';
+import { ExoGround, exoCraterSeed, exoQuantile, exoQuantiles, ROCKY_TYPES } from '../universe/ExoTerrain';
 import { MATERIALS } from './Materials';
 import { earthLikeAtmosphere, type AtmosphereSpec, type ExoAtmosphere } from './Atmospheres';
 import { TerrainPatch, type TerrainCandidate } from './TerrainPatch';
@@ -69,7 +69,11 @@ function paletteFor(p: ExoPlanet): Record<string, number | V3> {
     }
     case 'terran': case 'ocean': {
       // vegetation of other worlds needn't be green, but it stays dark (it absorbs starlight)
-      const veg = jit(pick<V3>([[0.035, 0.06, 0.025], [0.035, 0.06, 0.025], [0.06, 0.065, 0.03], [0.025, 0.05, 0.04], [0.08, 0.04, 0.025], [0.06, 0.035, 0.05], [0.09, 0.075, 0.03]]));
+      const veg = jit(pick<V3>([
+        [0.035, 0.06, 0.025], [0.035, 0.06, 0.025], [0.03, 0.055, 0.025], [0.045, 0.065, 0.03],   // green
+        [0.055, 0.06, 0.03], [0.025, 0.05, 0.04],                                                   // olive, teal
+        [0.06, 0.032, 0.025], [0.05, 0.032, 0.045], [0.07, 0.06, 0.025],                            // red, purple, ochre
+      ]));
       const soil = jit(pick<V3>([[0.42, 0.31, 0.18], [0.36, 0.3, 0.22], [0.45, 0.26, 0.14], [0.4, 0.36, 0.28]]));
       const clouds = t === 'ocean' ? 0.55 + 0.35 * r() : 0.4 + 0.4 * r();
       return {
@@ -215,6 +219,9 @@ export class ExoPlanetLayer {
       const rc = rng(hashKey(p.key + '/climate'));
       const t = p.spec.type;
       if (t === 'terran' || t === 'ocean') pal.uSeaLevel = exoQuantile(seed, t === 'ocean' ? 0.85 + 0.11 * rc() : 0.4 + 0.35 * rc());
+      const [q10, q50, q90] = ROCKY_TYPES.has(TYPE_ID[t]) ? exoQuantiles(seed, [0.1, 0.5, 0.9]) : [0.3, 0.4, 0.5];
+      pal.uHMid = q50;
+      pal.uHSpan = Math.max(0.02, q90 - q10);
       pal.uTeq = p.spec.teqK;
       pal.uDry = t === 'ocean' ? 0.1 * rc() : t === 'terran' ? 0.1 + 0.5 * rc() : 1;
       pal.uRelief = Math.min(20e3, p.radius * 0.002) / p.radius;
@@ -231,7 +238,7 @@ export class ExoPlanetLayer {
       uSunDir: { value: new Vector3(1, 0, 0) }, uSunColor: { value: new Vector3(1, 1, 1) }, uSunIrr: { value: Math.PI },
       uExposure: this.exposure, uTime: { value: 0 }, uBodyToWorld: { value: new Matrix3() },
       uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK, uLite: LITE.uLite, uCSeed: { value: exoCraterSeed(p.name) },
-      uTerrain: { value: 0 }, uHScale: { value: 0 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
+      uTerrain: { value: 0 }, uHScale: { value: 0 }, uCamAlt: { value: 1e9 }, uHoleDir: { value: new Vector3(0, 0, 1) }, uHoleCos: { value: 2 },
       ...MATERIALS, uTanE: { value: new Vector3(1, 0, 0) }, uTanN: { value: new Vector3(0, 1, 0) },
     };
     for (const [k, v] of Object.entries(pal)) u[k] = { value: Array.isArray(v) ? new Vector3(...v) : v };
@@ -267,13 +274,14 @@ export class ExoPlanetLayer {
     orbit.renderOrder = 5;
     this.group.add(orbit);
     const type = TYPE_ID[p.spec.type];
-    const ground = ROCKY_TYPES.has(type) ? new ExoGround(p, type, p.spec.seed % 97, Number(pal.uSeaLevel ?? 0), Number(pal.uCraters ?? 0)) : null;
+    const ground = ROCKY_TYPES.has(type)
+      ? new ExoGround(p, type, p.spec.seed % 97, Number(pal.uSeaLevel ?? 0), Number(pal.uCraters ?? 0), Number(pal.uHMid), Number(pal.uHSpan)) : null;
     // temperate and ocean worlds get an Earth-like atmosphere (pressure varies from planet to planet)
     let air: AtmosphereSpec | null = null;
     if (type === 3 || type === 4) {
       const ra = rng(hashKey(p.key + '/air'));
       const g = (G * p.spec.massKg) / (p.radius * p.radius);
-      air = earthLikeAtmosphere(0.4 + 2.2 * ra(), Math.min(400, Math.max(180, p.spec.teqK)), Math.max(2, g));
+      air = earthLikeAtmosphere(0.6 + 1.2 * ra(), Math.min(400, Math.max(180, p.spec.teqK)), Math.max(2, g));
       // the shell draws the limb glow: keep only a little of the surface shader's own haze
       u.uAtmo.value = Number(u.uAtmo.value) * 0.3;
     }
@@ -383,6 +391,7 @@ export class ExoPlanetLayer {
           (u.uSunColor.value as Vector3).set(sc[0] / sl, sc[1] / sl, sc[2] / sl);
           u.uSunIrr.value = E;
           u.uTime.value = time;
+          u.uCamAlt.value = dist - p.radius;
           (u.uBodyToWorld.value as Matrix3).setFromMatrix4(d.mesh.matrix.clone().makeRotationFromQuaternion(q));
         } else if (ns < 64) {
           // reflected light as a point: albedo * E * (R / d)^2 * phase
