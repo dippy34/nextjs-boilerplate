@@ -314,6 +314,11 @@ export class CometTails {
     }
   }
 
+  /** One of each mesh (tail, nucleus, jet) to compile the shaders with before a comet is near. */
+  warmupObjects(): Mesh[] {
+    return [this.meshes[0], this.nucleus, this.jets[0]];
+  }
+
   /** The nucleus and its jets, for the active comet `c` within reach of the camera. */
   private updateNucleus(c: Comet | null, cam: UPos, sun: UPos, sunIrr: number, jetL0: number): void {
     const show = !!c && c.upos.sub(cam, new Vector3()).length() < 3e7;

@@ -22,6 +22,13 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   EXT_clip_control, else log depth; the console says which): `Renderer.reverseXrProjections`
   rebuilds the runtime's eye projections as reversed-Z each frame (three has no reversed-Z path for
   XR cameras), and the far-geometry pull-in is off in that mode. For an A/B on the device.
+* Volume pass (`Renderer.ts`, `VOLUMES`): ray-marched volumes are drawn at reduced resolution
+  (desktop 0.75, headset 0.5) into their own target, then added to the frame by a full-screen quad
+  in the scene at the far plane with the volumes' old draw order (after everything opaque, sky
+  included; whatever opaque is in front still covers it, also in a headset). A layer joins by putting
+  its meshes on `VOLUMES.layer` only and adding them to `VOLUMES.meshes`; DeepSkyLayer's nebulae
+  do. Inside a nebula (SwiftShader, 800x450) frames went from 5.7-8.3 s to 3.1-3.5 s at half
+  resolution; in the emulated headset the cost of being inside Orion fell from 2.7 s to 1.0 s.
 * Visuals: NASA SVS Milky Way, atmospheres, relief maps (LOLA/MOLA/MESSENGER/ETOPO), 8k maps (desktop
   only), Hubble OPAL giants, spectral colours.
 * Earlier: autopilot uses a two-stretch log-distance Hermite curve (`src/app/CameraRig.ts`,
@@ -174,7 +181,14 @@ procedural generation for the rest. Never use SpaceEngine's own files.
 
 `pipeline/build_elevation.py` (sources and resumable downloads in `pipeline/elevation_sources.py`,
 raw files and int16 work grids in `data-raw/elevation/`, ~25 GB while building) ->
-`public/data/elevation/<body>/<level>/<face>-<x>-<y>.png` + `manifest.json`, and `index.json`.
+`public/data/elevation/<body>/<level>/<face>-<s>-<bx>-<by>.pak` (small spatial packs: the tiles of a
+4x4 block of siblings, or 2x2 where 4x4 would pass 1.5 MB, one face at levels 0-1; 977 packs instead
+of 6,617 PNGs) + `manifest.json` (each level's `packs`: tiles in file order with byte lengths), and
+`index.json`. Elevation.ts reads a tile with an HTTP range request (GitHub Pages answers 206); a host
+that ignores ranges (Cloudflare Pages, `python3 -m http.server`: 200 with the whole file) gets the
+whole pack once and every tile in it is kept, and from then on whole packs are fetched directly
+(concurrent first requests for one pack share one download). The build writes loose PNGs, then
+`pack()` packs them (`python3 build_elevation.py pack` re-packs).
 Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/elevation.test.ts`
 (fixture `tests/fixtures/elevation_points.json` is written by the build).
 

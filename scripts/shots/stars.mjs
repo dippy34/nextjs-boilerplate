@@ -23,6 +23,8 @@ export const SCENES = [
   { name: 'c4-rigel-close', query: `target=Rigel&dist=2.5&fov=60` },
   { name: 'c5-vega-close', query: `target=Vega&dist=2.5&fov=60` },
   { name: 'c6-sirius-b-close', query: `target=Sirius B&dist=2.5&fov=60` },
+  { name: 'c7-sun-surface', query: `target=Sun&dist=1.04&el=10&fov=60` },
+  { name: 'c8-betelgeuse-surface', query: `target=Betelgeuse&dist=1.15&el=10&fov=60` },
 ];
 const only = new Set((process.env.ONLY ?? '').split(',').filter(Boolean));
 const lite = process.env.LITE === '1';
@@ -48,5 +50,37 @@ for (const sc of SCENES) {
   await page.screenshot({ path: `${out}-${sc.name}.png`, timeout: 300000 });
   console.log('shot', sc.name, sel);
 }
+// d1: star tiles streaming over a slow connection (as on a headset on weak Wi-Fi): the first frame
+// with Vega's disk, while the eye is still adapted to the dark, must not be black (an additive layer
+// over a disk shown far above white overflowed half-float and turned into NaN blocks in the bloom)
+let failed = false;
+if (!only.size || only.has('d1-vega-streaming')) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 100, downloadThroughput: 5e6 / 8, uploadThroughput: 1e6 / 8 });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Vega&dist=4&az=40&el=10`, { waitUntil: 'load', timeout: 600000 });
+  await page.waitForFunction(() => window.app && window.app.frameCount >= 2, null, { timeout: 900000 });
+  // stop the loop right after the first frame that draws Vega's disk
+  await page.evaluate(() => {
+    const a = window.app; const r = a.renderer; const rr = r.render.bind(r);
+    r.render = () => { rr(); if (!window.__vegaFrame && a.near.stars.length) { window.__vegaFrame = a.frameCount; a.renderer.gl.setAnimationLoop(null); } };
+  });
+  await page.waitForFunction(() => window.__vegaFrame, null, { timeout: 900000 });
+  const png = await page.screenshot({ path: `${out}-d1-vega-streaming.png` });
+  const black = await page.evaluate(async (b64) => {
+    const img = new Image(); img.src = `data:image/png;base64,${b64}`; await img.decode();
+    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+    const d = x.getImageData(img.width / 4, img.height / 4, img.width / 2, img.height / 2).data;
+    let n = 0; for (let i = 0; i < d.length; i += 4) if (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2] < 8) n++;
+    return n / (d.length / 4);
+  }, png.toString('base64'));
+  const ok = black < 0.3;
+  failed ||= !ok;
+  console.log(`${ok ? 'PASS' : 'FAIL'} d1-vega-streaming: central half black ${(black * 100).toFixed(1)} % (frame ${await page.evaluate(() => window.__vegaFrame)})`);
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+}
 console.log('errors', errors.length, errors.slice(0, 3).join(' | '));
+if (failed) process.exitCode = 1;
 await browser.close();

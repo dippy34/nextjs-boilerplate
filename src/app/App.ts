@@ -50,6 +50,7 @@ import { Input } from './Input';
 import { Systems } from './Systems';
 import { VRSupport } from './VR';
 import { Walk } from './Walk';
+import { God } from '../god/God';
 
 /** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
 const STAR_KEY = 0.9;
@@ -107,6 +108,8 @@ export class App {
   game!: Game;
   /** walking on the ground (src/app/Walk.ts) */
   walk!: Walk;
+  /** God mode: the N-body sandbox (src/god/) */
+  god!: God;
   /** other galaxies (SIMBAD) */
   galaxies!: GalaxiesLayer;
   /** nebulae and star clusters (SIMBAD) */
@@ -244,6 +247,8 @@ export class App {
     app.game = new Game(app);
     app.game.flight.setAtmospheres(atmoData);
     app.walk = new Walk(app); // walking hook
+    app.god = new God(app);
+    renderer.scene.add(app.god.layer.group);
     bodies.uploader = (t) => renderer.gl.initTexture(t);
     app.warmupPending = true;
     app.applyUrl();
@@ -332,7 +337,7 @@ export class App {
 
   /** true for the companion star of a black hole (it moves on its orbit). */
   isCompanion(obj: SpaceObject | null): boolean {
-    return !!obj && this.blackHoles.some((b) => b.companion === obj);
+    return !!obj && (this.blackHoles.some((b) => b.companion === obj) || !!this.god?.isGodStar(obj));
   }
 
   private bindKeys(): void {
@@ -354,6 +359,7 @@ export class App {
     this.input.onKey = (e) => {
       if (this.game?.active) this.game.audio.start();
       if (this.hud.searchOpen) return;
+      if (this.god.onKey(e)) return; // God mode: Y, Ctrl+Z, Delete
       if (this.walk.onKey(e)) return; // walking: B, Space jumps, ...
       switch (e.code) {
         case 'Space': this.togglePause(); e.preventDefault(); break;
@@ -554,7 +560,7 @@ export class App {
     const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
     const air = this.atmospheres.warmupObjects()[0];
     if (air) terrain.push(this.terrain.warmupHaze(air.material as ShaderMaterial));
-    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh];
+    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh, ...this.cometTails.warmupObjects(), ...this.jets.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     // (into the HDR target the scene is drawn to: programs differ per output target)
@@ -966,6 +972,8 @@ export class App {
     for (const h of this.blackHoles) {
       if (h.companion && h.companion.upos.sub(this.rig.upos, new Vector3()).length() < COMPANION_RADIUS * PC) list.push(h.companion);
     }
+    // stars created in God mode
+    for (const st of this.god?.stars() ?? []) list.push(st);
     for (const { star, dist } of this.procStars.nearest(this.camPc, 1, 12)) {
       this.nearestStarDist = Math.min(this.nearestStarDist, dist * PC - star.radius);
       if (dist < NEAR_STAR_RADIUS) list.push(star);
@@ -1032,6 +1040,8 @@ export class App {
       else if (o instanceof CatalogStar && !this.isCompanion(o) && o.upos.sub(this.rig.upos, new Vector3()).length() < 0.5 * PC) sys = this.systems.of(o);
       if (sys && !act.includes(sys)) act.push(sys);
     }
+    // planets created in God mode
+    if (this.god) act.push(...this.god.systems());
     this.activeSystems = act;
   }
 
@@ -1115,7 +1125,7 @@ export class App {
         : ((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
       wBest = w;
       lBest = L;
-      keyBest = b.kind === 'star' ? STAR_KEY : 0.45;
+      keyBest = b.kind === 'star' ? STAR_KEY * (1 - 0.15 * smoothstep(0.3, 0.9, coverage)) : 0.45;
     }
     for (const cv of this.craft.views) {
       if (cv.pixelRadius < 2) continue;
@@ -1171,7 +1181,9 @@ export class App {
       if (w > wBest && this.project(rel)) {
         wBest = w;
         lBest = (magToIrradiance(s.absMag + 5 * Math.log10(d / PC) - 5) * d * d) / (Math.PI * s.radius * s.radius);
-        keyBest = STAR_KEY;
+        // a disk filling the view is shown a little darker, so its surface keeps its contrast and
+        // colour below the tone curve's shoulder
+        keyBest = STAR_KEY * (1 - 0.15 * smoothstep(0.3, 0.9, coverage));
       }
     }
     const lx = Math.log(xDark);
@@ -1666,13 +1678,21 @@ export class App {
     // 1. time and ephemerides
     // (in the ship, physics picks the universe step: time warp limits, dilation; the ship moves first)
     const flight = this.game.flight;
+    const jd0 = this.clock.jdTdb;
+    if (flight.on) this.clock.jdTdb += flight.before(rawDt, dt) / DAY;
+    else this.clock.advance(Math.min(rawDt, 1));
+    // God mode: once something was changed, the N-body sandbox moves the bodies instead of the
+    // ephemeris (and holds the clock back if the simulation can't keep up)
+    if (this.god.active) this.clock.jdTdb = this.god.frameTime(this.clock.jdTdb, Math.min(rawDt, 1));
     if (flight.on) {
-      const sdt = flight.before(rawDt, dt);
+      flight.simDt = Math.max(0, (this.clock.jdTdb - jd0) * DAY);
       flight.step();
-      this.clock.jdTdb += sdt / DAY;
-    } else this.clock.advance(Math.min(rawDt, 1));
+    }
     const jd = this.clock.jdTdb;
-    this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
+    if (!this.god.active) {
+      this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
+      this.god.frameTime(jd, rawDt);
+    }
     for (const h of this.blackHoles) h.update(jd);
     // planets and spacecraft move before the camera follows its anchor (which may be one of them)
     for (const sys of this.activeSystems) sys.update(jd);
@@ -1765,6 +1785,8 @@ export class App {
     const dpr = this.view.pixelRatio;
     psf.uPixelSA.value = (this.view.pixelAngle * dpr) ** 2;
     psf.uDpr.value = dpr;
+    // a headset's pixels are large and the head never still: slightly wider cores keep faint stars from shimmering
+    if (psf.uMinSigma) psf.uMinSigma.value = this.vr.active ? 0.8 : 0.6;
     this.bodies.surfaceExposure.value = xSurf;
     for (const c of this.catalogs) c.update(this.camPc, mLim, this.fieldMinDistPc);
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);
@@ -1776,6 +1798,7 @@ export class App {
     this.cometTails.update(this.rig.upos, this.system.sun.upos, this.small.cometObjects, this.selection, jd);
 
     this.game.update(dt);
+    this.god.update(dt);
 
     // 4. draw
     if (this.warmupPending) {

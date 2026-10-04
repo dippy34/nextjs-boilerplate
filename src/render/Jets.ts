@@ -135,6 +135,11 @@ export class JetsLayer {
     }
   }
 
+  /** A jet to compile the shader with before one is first needed. */
+  warmupObjects(): Mesh[] {
+    return this.pairs.length ? [this.pairs[0].meshes[0]] : [];
+  }
+
   update(cam: UPos, pixelAngle: number, time: number): void {
     const rel = new Vector3();
     const q = new Quaternion();

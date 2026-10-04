@@ -330,7 +330,8 @@ export class BodiesLayer {
   warmupObjects(): Mesh[] {
     const out: Mesh[] = [];
     const sat = this.system.bodies.find((b) => b.name === 'Saturn');
-    for (const b of [this.system.sun, sat]) {
+    const earth = this.system.bodies.find((b) => b.name === 'Earth');
+    for (const b of [this.system.sun, sat, earth]) {
       if (!b) continue;
       const m = this.meshes.get(b) ?? this.createMesh(b);
       out.push(m);
@@ -340,6 +341,7 @@ export class BodiesLayer {
     if (this.glare) out.push(this.glare);
     if (this.sunCorona) out.push(this.sunCorona.mesh);
     if (this.ringParticles) out.push(this.ringParticles.mesh, this.ringParticles.slab);
+    if (this.clouds) out.push(this.clouds.mesh);
     return out;
   }
 
@@ -417,11 +419,14 @@ export class BodiesLayer {
       }
       if (b.name === 'Earth') {
         this.texture('earth_night').then(({ tex }) => { u.uNight.value = tex; u.uHasNight.value = 1; });
+        // (the layer exists before its map loads, so the shader warm-up compiles it)
+        const clouds = new CloudLayer(null, this.surfaceExposure);
+        this.clouds = clouds;
+        this.group.add(clouds.mesh);
         this.texture('earth_clouds').then(({ tex }) => {
           u.uClouds.value = tex;
           u.uHasClouds.value = 1;
-          this.clouds = new CloudLayer(tex, this.surfaceExposure);
-          this.group.add(this.clouds.mesh);
+          clouds.setMap(tex);
         });
       }
       const ring = this.rings_[b.name.toLowerCase()];
@@ -575,8 +580,13 @@ export class BodiesLayer {
     const rot3 = new Matrix3();
     const tmp = new Vector3();
     for (const b of this.system.bodies) {
-      if (!b.valid) {
+      if (!b.valid || b.hidden) {
+        // (deleted in God mode, or drawn by another layer)
         this.views.delete(b);
+        const m = this.meshes.get(b);
+        if (m) m.visible = false;
+        const ring = this.rings.get(b);
+        if (ring) ring.visible = false;
         continue;
       }
       const view = this.views.get(b) ?? { body: b, rel: new Vector3(), dist: 0, pixelRadius: 0, irradiance: 0, apparentMag: 99, resolved: false };

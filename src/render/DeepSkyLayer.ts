@@ -7,6 +7,7 @@ import type { UPos } from '../core/upos';
 import type { DeepSkyObject } from '../universe/DeepSky';
 import { noise3D } from './Noise3D';
 import { STAR_FRAG, STAR_VERT } from './StarField';
+import { VOLUMES } from './Renderer';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const BILL_VERT = /* glsl */ `
@@ -528,6 +529,9 @@ export class DeepSkyLayer {
       m.frustumCulled = false;
       m.renderOrder = -1;
       m.name = o.name;
+      // drawn in the renderer's reduced-resolution volume pass
+      m.layers.set(VOLUMES.layer);
+      VOLUMES.meshes.add(m);
       this.group.add(m);
       this.volumes.set(o, m);
       // its far glow (about the volume's light when a few pixels across)
@@ -556,7 +560,8 @@ export class DeepSkyLayer {
   /** `camPc`: camera position (pc); `adapt`: dark adaptation (1 = dark-adapted). */
   update(cam: UPos, camPc: Vector3, pixelAngle: number, adapt: number): void {
     this.views = [];
-    this.pixAng.value = pixelAngle;
+    // (a pixel of the volume pass, which runs at reduced resolution: the noise's level of detail)
+    this.pixAng.value = pixelAngle / Math.min(1, LITE.uLite.value > 0.5 ? VOLUMES.scaleXr : VOLUMES.scale);
     const rel = new Vector3();
     // inside a bright nebula the eye adapts to the glowing gas all around (no wash-out to white)
     let inside = 0;

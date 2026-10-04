@@ -1,9 +1,10 @@
 import {
-  CustomToneMapping, DepthTexture, FloatType, Group, HalfFloatType, LinearFilter, Mesh, NoBlending, NoToneMapping,
-  OrthographicCamera, PerspectiveCamera, PlaneGeometry, Quaternion, RGBAFormat, Scene, ShaderMaterial, Vector2,
+  AdditiveBlending, CustomToneMapping, DepthTexture, FloatType, Group, HalfFloatType, LinearFilter, Mesh, NoBlending, NoToneMapping,
+  type Object3D, OrthographicCamera, PerspectiveCamera, PlaneGeometry, Quaternion, RGBAFormat, Scene, ShaderMaterial, Vector2,
   Vector3, WebGLCoordinateSystem, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { installToneMapping, TONE_GLSL } from './shaders/tone';
+import { OUTPUT_FRAGMENT } from './shaders/xr';
 
 /**
  * HDR renderer.
@@ -39,6 +40,24 @@ const FULLSCREEN_VERT = /* glsl */ `
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 
+/**
+ * Volumes (ray-marched nebulae, and any layer that adds glowing gas) drawn in a pass of their own at
+ * reduced resolution, then added to the frame before the rest of the scene. A full-screen volume
+ * marched per pixel is the heaviest thing the renderer draws (inside a nebula: every pixel of both
+ * eyes); at half resolution it costs a quarter, and volumes are soft enough to upsample. They are
+ * additive and never write depth, and everything opaque drawn afterwards still covers them, so
+ * the result matches drawing them in the scene. Meshes go on `layer` only (the main camera does
+ * not see it) and into `meshes`; `scale` 1 draws them in the main pass instead.
+ */
+export const VOLUMES = {
+  layer: 4,
+  meshes: new Set<Object3D>(),
+  /** desktop: three quarters keeps a remnant's finest filaments (half resolution softens them) */
+  scale: 0.75,
+  /** headset: half (the cost there is two eyes of full-screen marching) */
+  scaleXr: 0.5,
+};
+
 export class Renderer {
   readonly gl: WebGLRenderer;
   readonly depthMode: DepthMode;
@@ -56,6 +75,26 @@ export class Renderer {
   private hdr: WebGLRenderTarget;
   private bloomTargets: WebGLRenderTarget[] = [];
   private quad: Mesh;
+  private volTarget: WebGLRenderTarget | null = null;
+  /**
+   * The volume pass added to the frame: a full-screen quad in the scene, drawn where the volumes
+   * were (transparent, renderOrder -1: after everything opaque, sky included) at the far plane, so
+   * that whatever opaque lies in front still covers it (also in a headset, with no depth to read)
+   */
+  private volMat = new ShaderMaterial({
+    vertexShader: /* glsl */ `
+      uniform float uFarZ;
+      void main() { gl_Position = vec4(position.xy, uFarZ, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D tVol; uniform vec2 uInvFb;
+      void main() {
+        gl_FragColor = vec4(texture2D(tVol, gl_FragCoord.xy * uInvFb).rgb, 1.0);
+${OUTPUT_FRAGMENT}
+      }`,
+    uniforms: { tVol: { value: null }, uInvFb: { value: new Vector2(1, 1) }, uFarZ: { value: 1 } },
+    transparent: true, depthTest: true, depthWrite: false, blending: AdditiveBlending,
+  });
+  private volQuad = new Mesh(new PlaneGeometry(2, 2), this.volMat);
   private quadScene = new Scene();
   private quadCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private downMat: ShaderMaterial;
@@ -131,7 +170,8 @@ export class Renderer {
                  + 4.0 * texture2D(tSrc, vUv).rgb + 2.0 * texture2D(tSrc, vUv + vec2(o.x, 0.0)).rgb
                  + texture2D(tSrc, vUv + vec2(-o.x, -o.y)).rgb + 2.0 * texture2D(tSrc, vUv + vec2(0.0, -o.y)).rgb
                  + texture2D(tSrc, vUv + vec2(o.x, -o.y)).rgb;
-          gl_FragColor = vec4(s / 16.0 + texture2D(tPrev, vUv).rgb, 1.0);
+          // (clamped: the sum of the levels can exceed half-float range and turn into infinity)
+          gl_FragColor = vec4(min(s / 16.0 + texture2D(tPrev, vUv).rgb, vec3(6.0e4)), 1.0);
         }`,
       uniforms: { tSrc: { value: null }, tPrev: { value: null }, uTexel: { value: new Vector2() }, uRadius: { value: 1 } },
       depthTest: false, depthWrite: false, blending: NoBlending,
@@ -144,7 +184,7 @@ export class Renderer {
         vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
         float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main() {
-          vec3 hdr = texture2D(tScene, vUv).rgb + uBloom * texture2D(tBloom, vUv).rgb;
+          vec3 hdr = min(texture2D(tScene, vUv).rgb, vec3(6.0e4)) + uBloom * min(texture2D(tBloom, vUv).rgb, vec3(6.0e4));
           vec3 c = toSRGB(spTone(hdr * uExposure));
           c += (hash(gl_FragCoord.xy) - 0.5) / 255.0; // dither
           gl_FragColor = vec4(c, 1.0);
@@ -155,6 +195,13 @@ export class Renderer {
     this.quad = new Mesh(new PlaneGeometry(2, 2), this.compositeMat);
     this.quad.frustumCulled = false;
     this.quadScene.add(this.quad);
+    this.volQuad.frustumCulled = false;
+    this.volQuad.renderOrder = -1;
+    this.volQuad.visible = false;
+    this.volQuad.name = 'volume pass';
+    // far plane: NDC depth 0 with reversed-Z, 1 otherwise
+    this.volMat.uniforms.uFarZ.value = this.depthMode === 'reversed-z' ? 0 : 1;
+    this.scene.add(this.volQuad);
   }
 
   static supportsClipControl(): boolean {
@@ -258,6 +305,50 @@ export class Renderer {
   }
 
   /**
+   * The volume layer at `scale` of the frame (`fbW` x `fbH` pixels) into its own target, for adding
+   * to the frame first (see VOLUMES). False when nothing is to be added: no volume visible, or
+   * `scale` 1, when the main camera draws the layer itself.
+   */
+  private volumePass(fbW: number, fbH: number, scale: number): boolean {
+    const L = VOLUMES.layer;
+    if (scale >= 1) { this.camera.layers.enable(L); return false; }
+    this.camera.layers.disable(L);
+    let any = false;
+    for (const m of VOLUMES.meshes) if (m.visible && m.parent?.visible !== false) { any = true; break; }
+    if (!any) return false;
+    const w = Math.max(1, Math.round(fbW * scale)), h = Math.max(1, Math.round(fbH * scale));
+    if (!this.volTarget) {
+      this.volTarget = new WebGLRenderTarget(w, h, { type: HalfFloatType, depthBuffer: false, minFilter: LinearFilter, magFilter: LinearFilter });
+    } else if (this.volTarget.width !== w || this.volTarget.height !== h) this.volTarget.setSize(w, h);
+    const gl = this.gl;
+    gl.setRenderTarget(this.volTarget);
+    gl.setClearColor(0x000000, 0);
+    gl.clear(true, false, false);
+    const mask = this.camera.layers.mask;
+    this.camera.layers.set(L);
+    // a headset: both eyes into the smaller target, their viewports scaled to it (three copies the
+    // camera's layers to the eye cameras only when it updates them itself)
+    const xc = this.presenting ? this.gl.xr.getCamera() : null;
+    const saved = xc ? [xc, ...xc.cameras].map((c) => c.layers.mask) : [];
+    if (xc) {
+      xc.layers.mask = (1 << L) | 0b110;
+      xc.cameras.forEach((c, i) => { c.layers.mask = xc.layers.mask & ~(i === 0 ? 0b100 : 0b010); c.viewport?.multiplyScalar(scale); });
+    }
+    try {
+      gl.render(this.scene, this.camera);
+    } finally {
+      this.camera.layers.mask = mask;
+      if (xc) {
+        [xc, ...xc.cameras].forEach((c, i) => { c.layers.mask = saved[i]; });
+        for (const c of xc.cameras) c.viewport?.multiplyScalar(1 / scale);
+      }
+    }
+    this.volMat.uniforms.tVol.value = this.volTarget.texture;
+    (this.volMat.uniforms.uInvFb.value as Vector2).set(1 / fbW, 1 / fbH);
+    return true;
+  }
+
+  /**
    * Reversed-Z in a headset (?xrdepth=reversed): three copies each view's projection from the
    * runtime as is (OpenGL depth, finite far plane) and has no reversed-Z path for XR cameras. So
    * the XR camera is updated here, then each eye's projection (and the combined one used for
@@ -301,9 +392,13 @@ export class Renderer {
       gl.setClearColor(0x000000, 1);
       gl.clear(true, true, true);
       if (this.depthMode === 'reversed-z') this.reverseXrProjections();
+      const xrTarget = gl.getRenderTarget();
+      this.volQuad.visible = xrTarget ? this.volumePass(xrTarget.width, xrTarget.height, VOLUMES.scaleXr) : false;
+      gl.setRenderTarget(xrTarget);
       gl.render(this.scene, this.camera);
       return;
     }
+    this.volQuad.visible = this.volumePass(this.width, this.height, VOLUMES.scale);
     gl.setRenderTarget(this.hdr);
     gl.setClearColor(0x000000, 1);
     gl.clear(true, true, true);

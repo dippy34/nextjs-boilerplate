@@ -42,6 +42,8 @@ const HELP: [string, string][] = [
   ['K / N', 'Missions & discoveries / ship sound on-off'],
   ['T', 'Tour: places worth a visit'],
   ['U', 'Photo mode: hide panels and labels'],
+  ['Y', 'God mode: change, move, delete and create anything'],
+  ['Ctrl+Z / Delete', 'God mode: undo / delete the selection'],
   ['H', 'Toggle this help'],
 ];
 

@@ -14,6 +14,7 @@ import { DeepSkyObject } from '../universe/DeepSky';
 import { CatalogStar } from '../universe/Stars';
 import type { CatCode } from '../universe/CatalogSearch';
 import { COLORS, Panel } from './Panel';
+import { paintGodTab } from '../god/GodTab';
 
 export interface VRSettings {
   travel: 'smooth' | 'blink';
@@ -30,8 +31,8 @@ export interface MenuHost {
   exitVR(): void;
 }
 
-type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'exo' | 'nebulae' | 'holes' | 'craft' | 'places' | 'search' | 'settings';
-const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small'], ['stars', 'Stars'], ['exo', 'Exoplanets'], ['nebulae', 'Nebulae'], ['holes', 'Galaxies'], ['craft', 'Craft'], ['places', 'Places'], ['search', 'Search'], ['settings', 'Settings']];
+type Tab = 'planets' | 'moons' | 'small' | 'stars' | 'exo' | 'nebulae' | 'holes' | 'craft' | 'places' | 'search' | 'god' | 'settings';
+const TABS: [Tab, string][] = [['planets', 'Planets'], ['moons', 'Moons'], ['small', 'Small'], ['stars', 'Stars'], ['exo', 'Exoplanets'], ['nebulae', 'Nebulae'], ['holes', 'Galaxies'], ['craft', 'Craft'], ['places', 'Places'], ['search', 'Search'], ['god', 'God'], ['settings', 'Settings']];
 const NEBULAE = ['Orion Nebula', 'Carina Nebula', 'Eagle Nebula', 'Lagoon Nebula', 'Ring Nebula', 'Helix Nebula', 'Crab Nebula', 'Veil Nebula (Cygnus Loop)',
   'Tarantula Nebula', 'Pleiades', 'Omega Centauri', 'Hercules Cluster (M13)'];
 /** famous confirmed planets of other stars (NASA Exoplanet Archive names) */
@@ -130,6 +131,7 @@ export class VRMenu {
       case 'holes': this.paintGrid(p, area, [app.milkyWay, ...GALAXIES.map((n) => app.findByName(n)).filter(nonNull), ...HOLES.slice(0, 6).map((n) => app.blackHoles.find((h) => h.name === n)).filter(nonNull)], 4, 4); break;
       case 'search': this.paintSearch(p, area); break;
       case 'settings': this.paintSettings(p, area); break;
+      case 'god': paintGodTab(p, area, app, () => this.host.closeMenu()); break;
     }
   }
 

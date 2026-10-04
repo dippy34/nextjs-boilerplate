@@ -187,7 +187,8 @@ void main() {
     esc = 0.0;
     for (int i = 0; i < 400; i++) {
       if (i >= uMaxSteps || tr < 0.01) break;
-      float h = uStepK * mix(0.12, 0.035, smoothstep(0.02, 0.45, u));
+      // far out the orbit is nearly a sinusoid in phi, which RK4 follows closely in long steps
+      float h = uStepK * mix(0.3, 0.035, smoothstep(0.02, 0.45, u));
       // RK4 on (u, du/dphi)
       float k1u = du,                   k1v = -u + 1.5 * u * u;
       float uu = u + 0.5 * h * k1u;

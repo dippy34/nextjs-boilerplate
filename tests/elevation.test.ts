@@ -7,12 +7,16 @@ const ROOT = join(__dirname, '..', 'public', 'data', 'elevation');
 const POINTS = join(__dirname, 'fixtures', 'elevation_points.json');
 
 /** fetch from public/data/elevation on disk */
-const diskFetch = async (url: string) => {
+let ranged = 0;
+const diskFetch = async (url: string, init?: { headers?: Record<string, string> }) => {
   const p = join(ROOT, url.replace(/^disk:\/\/elevation\//, ''));
   if (!existsSync(p)) return { ok: false, status: 404, arrayBuffer: async () => new ArrayBuffer(0), json: async () => null };
-  const b = readFileSync(p);
+  let b = readFileSync(p);
+  // HTTP range requests (pack files), like a static file server
+  const m = /^bytes=(\d+)-(\d+)$/.exec(init?.headers?.Range ?? '');
+  if (m) { b = b.subarray(Number(m[1]), Number(m[2]) + 1); ranged++; }
   return {
-    ok: true, status: 200,
+    ok: true, status: m ? 206 : 200,
     arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer,
     json: async () => JSON.parse(b.toString('utf8')) as unknown,
   };
@@ -86,11 +90,42 @@ const points = existsSync(POINTS) ? (JSON.parse(readFileSync(POINTS, 'utf8')) as
 describe.skipIf(!bodies.length)('elevation tiles', () => {
   const store = new ElevationStore({ base: 'disk://elevation', fetch: diskFetch, maxBytes: 512 * 2 ** 20 });
 
-  it('decodes a tile', async () => {
-    const b = readFileSync(join(ROOT, bodies[0], '0', '0-0-0.png'));
+  it('reads tiles from small spatial packs: one range request, or (host without ranges) the whole pack once', async () => {
+    const man = (await store.load(bodies[0])) as ElevationManifest;
+    const pk = man.levels[1].packs![0];
+    expect(pk.tiles.length / 4).toBeGreaterThan(1);
+    const b = readFileSync(join(ROOT, bodies[0], pk.file)).subarray(0, pk.tiles[3]);
     const t = await decodePng16(b);
     expect(t.width).toBe(TILE + 3);
     expect(t.height).toBe(TILE + 3);
+    const [f, x, y] = pk.tiles;
+    let calls = 0;
+    ranged = 0;
+    const counting = async (u: string, init?: { headers?: Record<string, string> }) => { calls++; return diskFetch(u, init); };
+    const s2 = new ElevationStore({ base: 'disk://elevation', fetch: counting });
+    await s2.request(bodies[0], f, 1, x, y);
+    expect(ranged).toBe(1);
+    expect(s2.loaded(bodies[0], pk.tiles[4], 1, pk.tiles[5], pk.tiles[6])).toBe(false);   // only the tile asked for
+    // a host that ignores Range (Cloudflare Pages, python -m http.server): status 200, whole pack
+    calls = 0;
+    const noRange = async (url: string) => { calls++; return diskFetch(url); };
+    const s3 = new ElevationStore({ base: 'disk://elevation', fetch: noRange });
+    await s3.load(bodies[0]);
+    calls = 0;
+    // concurrent first requests for tiles of one pack: one download, every tile of the pack kept
+    const all = [];
+    for (let i = 0; i < pk.tiles.length; i += 4) all.push(s3.request(bodies[0], pk.tiles[i], 1, pk.tiles[i + 1], pk.tiles[i + 2]));
+    await Promise.all(all);
+    expect(calls).toBe(1);
+    for (let i = 0; i < pk.tiles.length; i += 4) expect(s3.loaded(bodies[0], pk.tiles[i], 1, pk.tiles[i + 1], pk.tiles[i + 2])).toBe(true);
+    // later tiles of another pack: fetched whole, without a range header
+    const pk2 = man.levels[1].packs![1];
+    calls = 0;
+    await s3.request(bodies[0], pk2.tiles[0], 1, pk2.tiles[1], pk2.tiles[2]);
+    expect(calls).toBe(1);
+    expect(s3.loaded(bodies[0], pk2.tiles[4], 1, pk2.tiles[5], pk2.tiles[6])).toBe(true);
+    const d = faceToDir(f, 0.3, 0.3);
+    expect(s3.sample(bodies[0], d, man.levels[1].metresPerSample)).toBeCloseTo(s2.sample(bodies[0], d, man.levels[1].metresPerSample)!, 6);
   });
 
   for (const body of bodies) {

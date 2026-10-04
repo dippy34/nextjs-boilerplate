@@ -77,6 +77,21 @@ export class Panel {
     return null;
   }
 
+  /** Is there a button with this id (tests)? */
+  has(id: string): boolean {
+    this.update();
+    return this.regions.some((x) => x.id === id);
+  }
+
+  /** Press a button by id (tests); false when it isn't on the panel. */
+  click(id: string): boolean {
+    this.update();
+    const r = this.regions.find((x) => x.id === id);
+    r?.onClick?.();
+    this.dirty = true;
+    return !!r;
+  }
+
   setHover(id: string | null): void {
     if (id === this.hover) return;
     this.hover = id;
