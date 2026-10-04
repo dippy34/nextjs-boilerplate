@@ -9,6 +9,7 @@ import { GodAudio } from './GodAudio';
 import { GodLayer } from './GodLayer';
 import { GodPanel } from './GodPanel';
 import { GodVR } from './GodVR';
+import { GodConsole } from './script/ConsoleUI';
 import { equilibriumTemp, L_SUN, mainSequence as physicsMainSequence } from './physics';
 import { CLIMATE, starLuminosity } from './BodyView';
 import { SUN_LIGHT } from '../astro/photometry';
@@ -98,6 +99,8 @@ export class God {
   readonly audio = new GodAudio();
   /** headset: grip grab-and-throw, laser placement */
   readonly vr: GodVR;
+  /** the universe console (backquote) */
+  readonly console: GodConsole;
   private proxies = new Map<number, Proxy>();
   private lights = new Map<number, CatalogStar>();
   /** desktop tool in use */
@@ -116,6 +119,7 @@ export class God {
     };
     this.panel = new GodPanel(this);
     this.vr = new GodVR(this);
+    this.console = new GodConsole(this);
     this.bindPointer();
   }
 
@@ -403,11 +407,11 @@ export class God {
   }
 
   /** Create something on a circular orbit of radius `a` (m) about the selection (or the Sun), at a random place on it. */
-  spawnOnOrbit(type: SpawnType, mass: number, a: number): number | null {
+  spawnOnOrbit(type: SpawnType, mass: number, a: number, centerId?: number, name?: string): number | null {
     this.ensureActive();
     const app = this.app;
     const selE = this.entityOf(app.selection);
-    const center = selE ?? this.sandbox.entityOf(10);
+    const center = centerId !== undefined ? this.sandbox.entityOf(centerId) : selE ?? this.sandbox.entityOf(10);
     if (!center) return null;
     // in the plane of the centre's own orbit (the ecliptic for the Sun)
     const pp = this.sandbox.primaryOf(center);
@@ -420,7 +424,7 @@ export class God {
     const gm = type === 'star' || type === 'hole' ? mass * GM_SUN : mass * GM_EARTH;
     const vc = Math.sqrt((center.gm + gm) / a);
     const vel = center.vel.clone().addScaledVector(n.clone().cross(pos.clone().sub(center.pos)).normalize(), vc);
-    const id = this.spawn(type, mass, pos, vel, center.id);
+    const id = this.spawn(type, mass, pos, vel, center.id, name);
     if (id !== null) this.selectEntity(id);
     return id;
   }
@@ -537,7 +541,7 @@ export class God {
    * Create something at `pos` (barycentric m): moving `vel` if given, else on a circular orbit
    * about the dominant body there. Returns the new entity's id.
    */
-  spawn(type: SpawnType, massValue: number, pos: Vector3, vel?: Vector3, parentId?: number): number | null {
+  spawn(type: SpawnType, massValue: number, pos: Vector3, vel?: Vector3, parentId?: number, givenName?: string): number | null {
     this.ensureActive();
     const sb = this.sandbox;
     const info = SPAWN_TYPES.find((t) => t.type === type)!;
@@ -574,7 +578,7 @@ export class God {
     if (type === 'star') { radius = mainSequence(massValue).radius; kind = 'star'; flags = FLAG_STAR; }
     else if (type === 'hole') { radius = (2 * gm) / (299_792_458 ** 2); kind = 'hole'; flags = FLAG_BLACK_HOLE | FLAG_RIGID; }
     else { radius = planetRadius(type, massValue); kind = 'planet'; }
-    const name = `${type === 'hole' ? 'Black hole' : type === 'star' ? 'Star' : info.label} ${count}`;
+    const name = givenName ?? `${type === 'hole' ? 'Black hole' : type === 'star' ? 'Star' : info.label} ${count}`;
     const spec: SpawnSpec = { type, seed, rings: type === 'giant' && Math.random() < 0.5 };
     if (type === 'star') { const ms = mainSequence(massValue); spec.teff = ms.teff; spec.lum = ms.lum; }
     const id = sb.spawn(kind, name, spec, gm, radius, pos, v, flags, parentId);
@@ -777,6 +781,7 @@ export class God {
   /** Keys while God mode's panel is open (true when handled). */
   onKey(e: KeyboardEvent): boolean {
     if (e.code === 'KeyY') { this.panel.toggle(); return true; }
+    if (e.code === 'Backquote') { this.console.toggle(); e.preventDefault(); return true; }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { this.undo(); e.preventDefault(); return true; }
     if (!this.panel.open) return false;
     const id = this.selectedId();

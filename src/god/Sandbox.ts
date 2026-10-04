@@ -709,11 +709,22 @@ export class Sandbox {
   // ---------------------------------------------------------------- edits
 
   /** Apply a change: undo snapshot, change, restart the simulation from it. */
+  private batchDepth = 0;
+  private batchPushed = false;
+  /** Several edits as one undo step (a console loop). */
+  batch(fn: () => void): void {
+    this.batchDepth++;
+    try { fn(); } finally { if (--this.batchDepth === 0) this.batchPushed = false; }
+  }
+
   edit(fn: (st: WorldState) => void, jdNow?: number): void {
     if (!this.active) this.start(jdNow ?? this.jd);
     const before = this.capture();
-    this.undoStack.push(before);
-    if (this.undoStack.length > UNDO_DEPTH) this.undoStack.shift();
+    if (!(this.batchDepth > 0 && this.batchPushed)) {
+      this.undoStack.push(before);
+      if (this.undoStack.length > UNDO_DEPTH) this.undoStack.shift();
+      if (this.batchDepth > 0) this.batchPushed = true;
+    }
     const st = structuredClone(before);
     fn(st);
     this.applyState(st);

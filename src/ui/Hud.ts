@@ -43,6 +43,7 @@ const HELP: [string, string][] = [
   ['U', 'Photo mode: hide panels and labels'],
   ['Y', 'God mode: change, move, delete and create anything'],
   ['Ctrl+Z / Delete', 'God mode: undo / delete the selection'],
+  ['`', 'Universe console: Earth.mass = 2 Mearth, for p in planets: p.e = 0, help'],
   ['H', 'Toggle this help'],
 ];
 
