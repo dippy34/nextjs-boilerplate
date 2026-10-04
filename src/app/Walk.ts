@@ -581,8 +581,8 @@ export class Walk {
 
   private beginDescend(h: number): void {
     this.state = 'descend';
+    if (h > WALK_REACH) this.say(`Coming down to walk on ${this.worldName()}…`);
     this.descend = { h0: h, pitch0: Math.asin(Math.max(-1, Math.min(1, this.app.rig.forward(new Vector3()).dot(this.app.rig.upos.sub(this.centre, new Vector3()).normalize())))) };
-    this.say(`Landing on ${this.worldName()}…`);
   }
 
   worldName(): string {
@@ -774,7 +774,8 @@ export class Walk {
       if (b.landed) { landed = true; impact = Math.max(impact, b.impact); }
     }
     b.sanitize(up, this.ground);
-    void jumped;
+    if (jumped && vrOn) this.app.vr.pulse(0.3, 15);
+    if (landed && vrOn && impact > 0.6) this.app.vr.pulse(Math.min(0.6, impact * 0.25), 25);
 
     // eye: crouch, landing dip (desktop), footstep bob (desktop, optional)
     const eyeWant = crouch ? EYE_CROUCH : EYE_STAND;
