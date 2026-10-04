@@ -28,6 +28,7 @@ VR (`src/app/VR.ts`):
 | right thumbstick | snap turn (or smooth turn — Settings) |
 | `A` / `X` | jump |
 | `Y` | the menu, as always; the laser and the panels keep working |
+| Places tab → **Walk there** | choosing a place then travels there, glides down onto the site and walks |
 
 Settings (VR menu → Settings): comfort vignette on/off, standing / seated height.
 Seated (or a headset without floor-level tracking) lifts the view to a standing eye height;
@@ -53,6 +54,9 @@ standing uses the headset's own height above the floor, so you really are as tal
 * **Ground following** moves along the surface and re-projects onto it each step; the drawn feet
   radius is smoothed (and clamped to 0.4 m) so a terrain LOD rebuild cannot jolt the view, while a
   real jump is not smoothed away. Walking off a cliff edge becomes a fall.
+* **Rocks** (`Rocks.rocksNear`, bounding spheres) are part of what you stand on: rocks up to a
+  0.4 m step are walked onto and off, you can land on top of bigger ones, and a rock taller than a
+  step is solid all the way up — it stops you (body radius 0.25 m) and you slide along it.
 * **Eye height** is 1.7 m standing, 1.05 m crouched, with a small landing dip and an optional
   footstep bob (desktop only, never in VR).
 
