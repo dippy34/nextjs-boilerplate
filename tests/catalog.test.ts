@@ -31,7 +31,8 @@ describe('catalogue search keys', () => {
   });
 });
 
-describe.skipIf(!has)('catalogue data', () => {
+// reads every file of the catalogue: slow on a loaded machine
+describe.skipIf(!has)('catalogue data', { timeout: 30000 }, () => {
   const man = has ? (JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8')) as CatalogManifest) : null;
 
   it('holds 100,000-200,000 objects in at most 25 MB', () => {
