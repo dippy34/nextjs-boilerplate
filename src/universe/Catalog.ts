@@ -129,6 +129,15 @@ export class Catalog {
     return { label, detail: `${this.detail(h.code, r)}${other}`, id: `cat:${h.code}:${h.row}` };
   }
 
+  /** The object for a name or designation (exact match preferred, else the best prefix match), or null. */
+  async lookup(name: string): Promise<SpaceObject | null> {
+    const hits = await this.search.query(name, 5);
+    if (!hits.length) return null;
+    const h = hits.find((x) => x.exact) ?? hits[0];
+    await this.search.ensure([h]);
+    return this.resolve(`cat:${h.code}:${h.row}`);
+  }
+
   /** One-line description for lists. */
   detail(code: CatCode, r: CatalogRecord): string {
     const d = num(r.distPc) ?? 0;
@@ -277,7 +286,7 @@ export class Catalog {
         const d: GalaxyData = {
           name: r.name, simbad: nm.find((n) => /^(NGC|IC|PGC|UGC) /.test(n)) ?? r.name, ra, dec, distPc: dist, nDist: 1,
           majArcmin: maj, minArcmin: num(r.minArcmin) ?? maj * 0.6, paDeg: num(r.paDeg) ?? 0, morph: r.morph || '', otype: 'G',
-          vmag: num(r.bmag),
+          vmag: num(r.vmag),
         };
         const note = `${cat.credit.split(';')[0]}; distance: ${r.method}${r.distFlag === 'z' ? ' (from the redshift)' : ''}${num(r.majArcmin) === null ? '; size assumed (30,000 ly)' : ''}`;
         return this.host.addGalaxy(d, (dd, i) => {

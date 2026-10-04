@@ -135,6 +135,16 @@ describe.skipIf(!has)('catalogue data', () => {
     expect(bh.massSun).toBeGreaterThan(1e6);
   });
 
+  it('looks objects up by name for deep links (?target=3C 273)', async () => {
+    const holes: BlackHole[] = [];
+    const cat = new Catalog('disk://catalog', host(holes), diskFetch);
+    const o = await cat.lookup('3C 273');
+    expect(o).toBeInstanceOf(BlackHole);
+    expect(o!.name).toBe('3C 273');
+    expect((await cat.lookup('Gliese 581'))!.name).toBe('Gl 581');
+    expect(await cat.lookup('no such object zzz')).toBeNull();
+  });
+
   it('browsing lists the notable objects of each category', async () => {
     const cat = new Catalog('disk://catalog', host(), diskFetch);
     await cat.search.load();
