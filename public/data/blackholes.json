@@ -478,6 +478,66 @@
     "sepM": 2476677526873.52,
     "incDeg": 110.6
    }
+  },
+  {
+   "name": "M31*",
+   "aliases": [
+    "M  31"
+   ],
+   "kind": "supermassive",
+   "raDeg": 10.684708333333333,
+   "decDeg": 41.268750000000004,
+   "distPc": 779500.0,
+   "massSun": 140000000.0,
+   "ref": "Bender et al. 2005, ApJ 631, 280 (mass); position and distance: galaxies.json (SIMBAD)"
+  },
+  {
+   "name": "M32*",
+   "aliases": [
+    "M  32"
+   ],
+   "kind": "supermassive",
+   "raDeg": 10.67427,
+   "decDeg": 40.86517,
+   "distPc": 780000.0,
+   "massSun": 2500000.0,
+   "ref": "van den Bosch & de Zeeuw 2010, MNRAS 401, 1770 (mass); position and distance: galaxies.json (SIMBAD)"
+  },
+  {
+   "name": "M81*",
+   "aliases": [
+    "M  81"
+   ],
+   "kind": "supermassive",
+   "raDeg": 148.88821939854,
+   "decDeg": 69.06529514038,
+   "distPc": 3610000.0,
+   "massSun": 70000000.0,
+   "ref": "Devereux et al. 2003, AJ 125, 1226 (mass); position and distance: galaxies.json (SIMBAD)"
+  },
+  {
+   "name": "Centaurus A*",
+   "aliases": [
+    "NAME Centaurus A"
+   ],
+   "kind": "supermassive",
+   "raDeg": 201.36506337683332,
+   "decDeg": -43.019112508083325,
+   "distPc": 3715000.0,
+   "massSun": 55000000.0,
+   "ref": "Cappellari et al. 2009, MNRAS 394, 660 (mass); position and distance: galaxies.json (SIMBAD)"
+  },
+  {
+   "name": "M104*",
+   "aliases": [
+    "M 104"
+   ],
+   "kind": "supermassive",
+   "raDeg": 189.99763274591663,
+   "decDeg": -11.623054494444448,
+   "distPc": 11270000.0,
+   "massSun": 660000000.0,
+   "ref": "Kormendy & Ho 2013, ARA&A 51, 511 (mass); position and distance: galaxies.json (SIMBAD)"
   }
  ],
  "sources": [

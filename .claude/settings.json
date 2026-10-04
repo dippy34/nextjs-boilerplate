@@ -1,0 +1,22 @@
+{
+  "extraKnownMarketplaces": {
+    "cloudflare": {
+      "source": {
+        "source": "github",
+        "repo": "cloudflare/skills"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "cloudflare@cloudflare": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(bash scripts/_deploy.sh)",
+      "Bash(SKIP_BUILD=1 bash scripts/_deploy.sh)",
+      "Bash(SKIP_BUILD=1 SRC_OVERRIDE=* bash scripts/_deploy.sh)",
+      "Bash(bash scripts/deploy-cloudflare.sh)",
+      "Bash(SKIP_BUILD=1 bash scripts/deploy-cloudflare.sh)"
+    ]
+  }
+}

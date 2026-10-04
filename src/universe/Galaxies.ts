@@ -5,7 +5,7 @@ import { UPos } from '../core/upos';
 import type { SpaceObject } from './Body';
 
 /** public/data/galaxies.json (pipeline/build_galaxies.py, SIMBAD). */
-interface GalaxyData {
+export interface GalaxyData {
   name: string; simbad: string; ra: number; dec: number; distPc: number; nDist: number;
   majArcmin: number; minArcmin: number; paDeg: number; morph: string; otype: string; vmag: number | null;
 }
@@ -106,6 +106,15 @@ export class Galaxy implements SpaceObject {
     if (from && from.dot(side) < 0) side.negate();
     const a = (35 * Math.PI) / 180;
     return n.multiplyScalar(Math.cos(a)).addScaledVector(side, Math.sin(a)).normalize();
+  }
+
+  /** Direction (from the centre) to a viewpoint inside the disc: just above the plane, on the side of `from`. */
+  insideDir(from?: Vector3): Vector3 {
+    const n = this.normal.clone();
+    if (from && from.dot(n) < 0) n.negate();
+    const side = this.major.clone();
+    if (from && from.dot(side) < 0) side.negate();
+    return side.multiplyScalar(0.99).addScaledVector(n, 0.12).normalize();
   }
 
   info(): [string, string][] {
