@@ -5,7 +5,7 @@ import { UPos } from '../core/upos';
 import type { SpaceObject } from './Body';
 
 /** public/data/galaxies.json (pipeline/build_galaxies.py, SIMBAD). */
-interface GalaxyData {
+export interface GalaxyData {
   name: string; simbad: string; ra: number; dec: number; distPc: number; nDist: number;
   majArcmin: number; minArcmin: number; paDeg: number; morph: string; otype: string; vmag: number | null;
 }
