@@ -91,6 +91,19 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   await page.keyboard.press('Control+KeyZ');
   await frames(2);
 
+  // climate drawn: 5 bar on Earth thickens its air; a heavier Sun shines brighter (main sequence)
+  await page.evaluate(() => { const g = window.app.god; g.sandbox.setPhys(399, { pressure: 5.065, molar: 0.02897 }); g.setPhysical(10, { massKg: 1.2 * 1.98847e30 }); });
+  await frames(30);
+  st = await page.evaluate(() => {
+    const a = window.app, tw = a.atmospheres.tweaks?.get(a.system.byId.get(399));
+    return { density: tw?.density, h: tw?.hScale };
+  });
+  const lum = await page.evaluate(() => window.app.god.debugState().sunLight);
+  check('5 bar thickens Earth\'s drawn atmosphere; a 1.2 M☉ Sun is ~2x brighter', st.density > 3 && st.density < 7 && lum > 1.9 && lum < 2.3, JSON.stringify({ ...st, lum }));
+  await page.keyboard.press('Control+KeyZ');
+  await page.keyboard.press('Control+KeyZ');
+  await frames(3);
+
   // 5. delete the Earth: the Moon wanders off round the Sun
   await page.keyboard.press('Delete');
   await frames(3);

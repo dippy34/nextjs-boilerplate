@@ -130,14 +130,27 @@ export class AtmospheresLayer {
     this.group.name = 'atmospheres';
   }
 
+  /**
+   * God mode's changes to a world's air: density (x, from pressure and temperature) and scale
+   * height (x, from temperature, molar mass and gravity), or a whole atmosphere for a world that
+   * had none. null restores the real one.
+   */
+  private tweaks = new Map<Body, { density: number; hScale: number; spec?: AtmosphereSpec }>();
+  setTweak(b: Body, t: { density: number; hScale: number; spec?: AtmosphereSpec } | null): void {
+    if (t) this.tweaks.set(b, t); else this.tweaks.delete(b);
+    const s = this.shells.get(b);
+    // a shell made for an atmosphere that is gone (or replaced) is rebuilt on demand
+    if (s && (!t || t.spec) && !atmosphereFor(b, this.data)) { this.group.remove(s.mesh); s.mat.dispose(); this.shells.delete(b); }
+  }
+
   spec(b: Body): AtmosphereSpec | null {
-    return this.shells.get(b)?.spec ?? atmosphereFor(b, this.data);
+    return this.shells.get(b)?.spec ?? atmosphereFor(b, this.data) ?? this.tweaks.get(b)?.spec ?? null;
   }
 
   private shell(b: Body): Shell | null {
     const s = this.shells.get(b);
     if (s) return s;
-    const spec = atmosphereFor(b, this.data);
+    const spec = atmosphereFor(b, this.data) ?? this.tweaks.get(b)?.spec;
     return spec ? this.makeShell(b, b.name, b.radii[0], spec) : null;
   }
 
@@ -233,6 +246,16 @@ export class AtmospheresLayer {
       const zs = a / c; // scale making the ellipsoid a sphere
       const u = s.mat.uniforms;
       u.uSteps.value = this.steps;
+      // (God mode: density and height of the air, the world's size)
+      const tw = this.tweaks.get(b);
+      const dk = tw && !tw.spec ? tw.density : 1, hk = tw && !tw.spec ? tw.hScale : 1;
+      (u.uBetaR.value as Vector3).set(...s.spec.betaR).multiplyScalar(dk);
+      (u.uBetaMs.value as Vector3).set(...s.spec.betaMs).multiplyScalar(dk);
+      (u.uBetaMe.value as Vector3).set(...s.spec.betaMe).multiplyScalar(dk);
+      u.uHR.value = s.spec.HR * hk;
+      u.uHM.value = s.spec.HM * hk;
+      u.uRp.value = a;
+      u.uRt.value = a + s.spec.top * hk;
       rot.setFromMatrix4(b.orientation);
       const toBody = rot.clone().transpose();
       // scaled frame: body frame with z multiplied by a/c
@@ -243,7 +266,7 @@ export class AtmospheresLayer {
       const rSun = toSun.length();
       (u.uSun.value as Vector3).copy(toSun).divideScalar(rSun).applyMatrix3(u.uToBody.value).normalize();
       u.uSunIrr.value = sunIrradianceAt(rSun);
-      const Rt = a + s.spec.top;
+      const Rt = a + s.spec.top * hk;
       const inside = (u.uO.value as Vector3).length() < Rt * 1.002;
       if (s.mat.side !== (inside ? BackSide : FrontSide)) {
         s.mat.side = inside ? BackSide : FrontSide;

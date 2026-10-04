@@ -42,7 +42,10 @@ export function reflectedIrradiance(
   return sunIrradianceAtBody * albedo * ratio * ratio * lambertPhase(phaseAngle);
 }
 
-export const sunIrradianceAt = (distFromSunMeters: number, sunLuminosityRel = 1) =>
+/** The Sun's luminosity relative to the real one (God mode can change its mass, and so its light). */
+export const SUN_LIGHT = { lum: 1 };
+
+export const sunIrradianceAt = (distFromSunMeters: number, sunLuminosityRel = SUN_LIGHT.lum) =>
   (SOLAR_IRRADIANCE_1AU * sunLuminosityRel * AU * AU) / (distFromSunMeters * distFromSunMeters);
 
 // ---------------------------------------------------------------------------- colour

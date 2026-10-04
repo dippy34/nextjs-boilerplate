@@ -730,6 +730,12 @@ export class Sandbox {
 
   entityOf(id: number): Entity | null { return this.entities.get(id) ?? null; }
 
+  /** A Solar System body's real mass (G·M) and radius, before any edit. */
+  baselineOf(b: Body): { gm: number; radius: number } | null {
+    const x = this.baseline.get(b);
+    return x ? { gm: x.gm, radius: x.radius } : null;
+  }
+
   /** Make a test particle or rider a full N-body participant (it is being edited). */
   static promote(r: EntityRecord): void {
     if (r.mode !== 'massive') { r.mode = 'massive'; r.parent = undefined; }
