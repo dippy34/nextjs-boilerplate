@@ -57,10 +57,17 @@ standing uses the headset's own height above the floor, so you really are as tal
 * **Rocks** (`Rocks.rocksNear`, bounding spheres) are part of what you stand on: rocks up to a
   0.4 m step are walked onto and off, you can land on top of bigger ones, and a rock taller than a
   step is solid all the way up — it stops you (body radius 0.25 m) and you slide along it.
+* **Water**: the edge of open water (`PlanetTerrain.isSea`: Earth's oceans and lakes, ocean
+  planets) is a wall — you stop at the shoreline and slide along it, also when jumping — and
+  walking will not start or land on open water ("That's open water: fly to dry land").
 * **Eye height** is 1.7 m standing, 1.05 m crouched, with a small landing dip and an optional
   footstep bob (desktop only, never in VR).
 
 ## Extras
+
+Footsteps (`ShipAudio.step`, Web Audio): on airless worlds only a muffled low thump, as the suit
+would carry it; where there is air, also a short gravelly crunch (faint in Mars' thin air). A
+harder landing thumps louder. In VR a short controller buzz on a jump and a hard landing.
 
 `GroundMarks` (same file) leaves bootprints in regolith behind you — one per step, both feet on
 landing — and kicks up dust when you land or run. The dust is ballistic (no air on the Moon;
@@ -72,7 +79,7 @@ under its haze. Earth keeps no prints (grass, water, cities).
 
 * `tests/walk.test.ts` — the physics on its own: gravity per world, jump heights and times,
   frame-rate independence, the lope, slopes, ground that rises under the feet, NaN recovery, dust.
-* `scripts/walk.mjs` — the real app in headless Chromium: walking at Apollo 17 and in Gale Crater,
+* `scripts/walk.mjs` (`sea` mode runs only the shoreline check at Nazaré) — the real app in headless Chromium: walking at Apollo 17 and in Gale Crater,
   eye height 1.7 ± 0.1 m, jumps, running, leaving and re-entering free flight, a generated planet,
   the refusal on Jupiter, the spaceship; then the same in an emulated Quest 3 (IWER): the wrist
   button, the thumbsticks, snap turn, `A` to jump, the comfort vignette, the menu.
