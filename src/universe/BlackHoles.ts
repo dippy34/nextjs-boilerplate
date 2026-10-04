@@ -151,7 +151,8 @@ export class BlackHole implements SpaceObject {
         : `quiet (between outbursts): ~${Math.round(this.diskTmax / 100) * 100} K at its hottest, ${((2 * this.diskOuter) / 1e9).toPrecision(2)} million km across`]);
     if (this.jet) rows.push(['Jets', this.jet === 'optical' ? 'relativistic jet, visible light (synchrotron); the counter-jet is too faint to see'
       : 'relativistic radio jets (drawn faintly: invisible to the eye)']);
-    if (d.aliases.length) rows.push(['Also known as', d.aliases.join(', ')]);
+    // shown without SIMBAD's identifier prefixes and padding ("NAME Sgr A*" -> "Sgr A*", "M  87" -> "M 87")
+    if (d.aliases.length) rows.push(['Also known as', d.aliases.map((a) => a.replace(/^NAME\s+/, '').replace(/\s+/g, ' ')).join(', ')]);
     rows.push(['Data', d.ref]);
     return rows;
   }
