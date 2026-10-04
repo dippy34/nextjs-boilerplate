@@ -74,13 +74,7 @@ export function solarInitialState(system: SolarSystem, jd: number): { massive: P
       const el = stateToElements(b.pos.clone().sub(p.pos), b.vel.clone().sub(p.vel), p.gm + b.gm, jd);
       // keep the ephemeris' mean motion (the planet's oblateness speeds inner moons up, which a
       // point-mass Kepler orbit lacks): same shape, the mean rate of longitude
-      const n = meanAngularRate(system, b, jd);
-      if (n > 0 && el.e < 1) {
-        const aO = el.q / (1 - el.e);
-        const tpShift = (jd - el.tp) * (1 - Math.sqrt(el.mu / (aO * aO * aO)) / n);
-        el.mu = n * n * aO * aO * aO;
-        el.tp += tpShift;
-      }
+      scaleMeanMotion(el, riderMuScale(system, b, el, jd), jd);
       riders.push({ id: b.id, parent: p.id, gm: b.gm, el });
       const list = ridersOf.get(p.id) ?? [];
       list.push(b);
@@ -99,6 +93,23 @@ export function solarInitialState(system: SolarSystem, jd: number): { massive: P
     Object.assign(s, { gm, x: x / gm, y: y / gm, z: z / gm, vx: vx / gm, vy: vy / gm, vz: vz / gm });
   }
   return { massive, tests, riders };
+}
+
+/**
+ * Factor on a rider's Kepler G·M that gives it the ephemeris' mean motion (1 when unknown).
+ */
+export function riderMuScale(system: SolarSystem, b: Body, el: OrbitalElements, jd: number): number {
+  const n = meanAngularRate(system, b, jd);
+  if (!(n > 0) || el.e >= 1) return 1;
+  const a = el.q / (1 - el.e);
+  return (n * n * a * a * a) / el.mu;
+}
+
+/** Change an orbit's G·M by `scale` keeping the body where it is at `jd` (mean motion x sqrt(scale)). */
+export function scaleMeanMotion(el: OrbitalElements, scale: number, jd: number): void {
+  if (scale === 1 || !(scale > 0) || el.e >= 1) return;
+  el.tp += (jd - el.tp) * (1 - 1 / Math.sqrt(scale));
+  el.mu *= scale;
 }
 
 /** Mean angular rate (rad/s) of a moon about its planet in the ephemeris, over ~20 orbits. */

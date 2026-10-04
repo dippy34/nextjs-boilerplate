@@ -580,8 +580,13 @@ export class BodiesLayer {
     const rot3 = new Matrix3();
     const tmp = new Vector3();
     for (const b of this.system.bodies) {
-      if (!b.valid) {
+      if (!b.valid || b.hidden) {
+        // (deleted in God mode, or drawn by another layer)
         this.views.delete(b);
+        const m = this.meshes.get(b);
+        if (m) m.visible = false;
+        const ring = this.rings.get(b);
+        if (ring) ring.visible = false;
         continue;
       }
       const view = this.views.get(b) ?? { body: b, rel: new Vector3(), dist: 0, pixelRadius: 0, irradiance: 0, apparentMag: 99, resolved: false };

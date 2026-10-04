@@ -196,7 +196,8 @@ export class SolarSystem {
 
     // 1) Sun and planet (barycentre) positions
     for (const b of this.bodies) {
-      const e = this.ephemOf.get(b)!;
+      const e = this.ephemOf.get(b);
+      if (!e) continue; // (God mode's spawned bodies)
       if (e.kind !== 'spk') continue;
       b.valid = true;
       if (de) {
@@ -226,7 +227,8 @@ export class SolarSystem {
     // (velocities relative to the planet, kept for the planet's own velocity below)
     const moonRelVel = new Map<Body, Vector3>();
     for (const b of this.bodies) {
-      const e = this.ephemOf.get(b)!;
+      const e = this.ephemOf.get(b);
+      if (!e) continue;
       if (e.kind !== 'satellite') continue;
       if (b.id === 301 && de) {
         // DE442S: Moon relative to Earth = (EMB->Moon) - (EMB->Earth)
@@ -253,7 +255,8 @@ export class SolarSystem {
 
     // 3) Planet body = barycentre - sum(m_i/M) r_i ; then moons absolute
     for (const p of this.bodies) {
-      const e = this.ephemOf.get(p)!;
+      const e = this.ephemOf.get(p);
+      if (!e) continue;
       if (e.kind !== 'spk' || !e.barycenter || !p.systemGm) continue;
       for (const m of p.children) {
         const r = moonRel.get(m);
