@@ -138,7 +138,10 @@ async function desktopSite(page, id, landmark, world, gExpect) {
   await page.waitForFunction(() => window.app.walk.body.onGround && window.app.walk.body.groundSpeed < 0.05, null, { timeout: 120000 });
 
   // jump and land
-  await page.keyboard.press('Space');
+    // hold Space until the walker leaves the ground (a press can fall between frames at 2 fps)
+  await page.keyboard.down('Space');
+  await page.waitForFunction(() => !window.app.walk.body.onGround, null, { timeout: 900000 });
+  await page.keyboard.up('Space');
   const jump = [];
   for (let i = 0; i < 40 && !(jump.length > 3 && jump[jump.length - 1].onGround); i++) jump.push(...await sample(page, 5));
   const air = jump.filter((s) => !s.onGround);

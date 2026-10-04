@@ -764,6 +764,8 @@ export class Walk {
 
     // physics, in small steps
     this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    // holding Space keeps asking for a jump (a press shorter than a frame still counts via the buffer)
+    if (keys.has('Space') && !vrOn) this.jumpBuffer = Math.max(this.jumpBuffer, dt + 1e-3);
     b.lope = this.settings.lope && !(vrOn && !vrRunning);
     const n = Math.max(1, Math.ceil(dt / (1 / 90)));
     let landed = false, impact = 0, jumped = false;
