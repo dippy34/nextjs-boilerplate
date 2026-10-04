@@ -12,6 +12,7 @@ import { ExoPlanet, type PlanetType } from '../universe/Planets';
 import { Spacecraft } from '../universe/Spacecraft';
 import { DeepSkyObject } from '../universe/DeepSky';
 import { CatalogStar } from '../universe/Stars';
+import type { CatCode } from '../universe/CatalogSearch';
 import { COLORS, Panel } from './Panel';
 
 export interface VRSettings {
@@ -65,6 +66,9 @@ export class VRMenu {
   private thumbIndex: { cell: number; bodies: Record<string, [number, number]> } | null = null;
   private refreshTimer = 0;
   private exoList: SpaceObject[] | null = null;
+  /** [catalog] category browsed in the Search tab (no query), and its page */
+  private browse: CatCode | null = null;
+  private browsePage = 0;
 
   constructor(private host: MenuHost, dataBase: string) {
     this.panel = new Panel(1600, 1000, 1.3, (p) => this.paint(p));
@@ -317,13 +321,51 @@ export class VRMenu {
     // results
     const rx = a.x + 950, rw = a.w - 950;
     const results = this.query.trim() ? app.searchItems(this.query.trim()).slice(0, 8) : [];
-    if (!this.query.trim()) p.text('Planets, 459 moons, asteroids, comets, 12,585 named stars, 6,333 exoplanets, spacecraft, nebulae, clusters, 47 galaxies, 23 black holes', rx + 10, a.y + 40, 24, COLORS.dim, 400, 'left', rw - 20);
+    if (!this.query.trim()) this.paintBrowse(p, rx, a.y, rw, a.h);
     results.forEach((r, i) => {
       p.button(`res:${r.id}`, rx, a.y + i * 92, rw, 82, r.label, () => {
         const o = app.resolveSearchId(r.id);
         if (o) this.host.travelTo(o);
       }, { sub: r.detail, align: 'left', size: 30 });
     });
+  }
+
+  /** [catalog] Browse the real-object catalogue by category (Search tab, empty query). */
+  private paintBrowse(p: Panel, x: number, y: number, w: number, h: number): void {
+    const app = this.host.app;
+    const cat = app.objCatalog;
+    const man = cat?.search.manifest;
+    if (!cat || !man) {
+      p.text('Planets, moons, comets, named stars, exoplanets, spacecraft, nebulae, galaxies, black holes… loading the catalogue', x + 10, y + 40, 24, COLORS.dim, 400, 'left', w - 20);
+      void cat?.search.load().then(() => { p.dirty = true; });
+      return;
+    }
+    if (!this.browse) {
+      p.text(`Browse ${man.objects.toLocaleString()} real objects`, x + 10, y + 30, 28, COLORS.text, 600, 'left', w - 20);
+      const codes = Object.keys(man.categories) as CatCode[];
+      const bw = (w - 12) / 2, bh = 112;
+      codes.forEach((c, i) => {
+        const m = man.categories[c];
+        p.button(`browse:${c}`, x + (i % 2) * (bw + 12), y + 70 + Math.floor(i / 2) * (bh + 12), bw, bh, m.label,
+          () => { this.browse = c; this.browsePage = 0; p.dirty = true; }, { sub: m.count.toLocaleString(), size: 28 });
+      });
+      return;
+    }
+    const m = man.categories[this.browse];
+    const per = 6;
+    const pages = Math.max(1, Math.ceil(m.featured.length / per));
+    p.button('browse:back', x, y, 150, 70, '◀ Back', () => { this.browse = null; p.dirty = true; }, { size: 26 });
+    p.text(`${m.label} · ${m.count.toLocaleString()}`, x + 170, y + 36, 28, COLORS.text, 600, 'left', w - 180);
+    const list = cat.featured(this.browse, this.browsePage, per);
+    if (!list) p.text('Loading…', x + 10, y + 120, 26, COLORS.dim);
+    else list.forEach((o, i) => {
+      p.button(`res:${o.key}`, x, y + 86 + i * 92, w, 82, o.name, () => this.host.travelTo(o), { sub: this.subtitle(o), align: 'left', size: 30 });
+    });
+    const by = y + 86 + per * 92 + 4;
+    p.button('browse:prev', x, by, 160, 66, '◀', () => { this.browsePage = Math.max(0, this.browsePage - 1); p.dirty = true; }, { size: 30, disabled: this.browsePage === 0 });
+    p.text(`${this.browsePage + 1} / ${pages}`, x + w / 2, by + 33, 26, COLORS.dim, 500, 'center');
+    p.button('browse:next', x + w - 160, by, 160, 66, '▶', () => { this.browsePage = Math.min(pages - 1, this.browsePage + 1); p.dirty = true; }, { size: 30, disabled: this.browsePage >= pages - 1 });
+    p.text(m.credit, x, Math.min(by + 100, y + h - 10), 18, COLORS.dim, 400, 'left', w);
   }
 
   private type(ch: string): void {

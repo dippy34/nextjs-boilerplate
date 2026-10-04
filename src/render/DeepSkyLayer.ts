@@ -616,4 +616,24 @@ export class DeepSkyLayer {
       }
     }
   }
+
+  /**
+   * [catalog] Add a nebula or cluster after construction (a catalogue destination), built like the
+   * others (with the same psf / colour table / VR flag as the constructor got).
+   */
+  add(o: DeepSkyObject, psf: Record<string, { value: number }>, colorLut: DataTexture, vr = false): void {
+    if (this.objects.includes(o)) return;
+    const t = new DeepSkyLayer([o], psf, colorLut, vr);
+    for (const c of [...t.group.children]) {
+      const u = ((c as Mesh).material as ShaderMaterial | undefined)?.uniforms;
+      if (u?.uGain === t.gain) u.uGain = this.gain;
+      if (u?.uPixAng === t.pixAng) u.uPixAng = this.pixAng;
+      this.group.add(c);
+    }
+    t.glows.forEach((v, k) => this.glows.set(k, v));
+    t.volumes.forEach((v, k) => this.volumes.set(k, v));
+    t.far.forEach((v, k) => this.far.set(k, v));
+    t.stars.forEach((v, k) => this.stars.set(k, v));
+    this.objects.push(o);
+  }
 }

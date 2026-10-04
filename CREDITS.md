@@ -320,6 +320,36 @@ sphere; Mars and Earth stay relative to the MOLA areoid and the EGM2008 geoid (s
 levels finer than 9.8 km store the oceans as -200 m (drawn as flat sea); the coarser levels keep the
 real sea floor.
 
+## The catalogue of real objects (`public/data/catalog/`, `pipeline/build_catalog.py`, `src/universe/Catalog.ts`)
+
+199,988 real objects to search, browse and fly to, each with a 3D position from a published
+distance (flagged as measured, estimated or from the redshift):
+
+| Category | Objects | Source | Licence / terms |
+|---|---|---|---|
+| Stars (Hipparcos and Gliese stars within 900 pc, with HD, HR, HIP, Gliese, Bayer and Flamsteed designations) | 112,879 | AT-HYG v4.0 (David Nash, astronexus; Tycho-2, Gaia DR3, Hipparcos, Yale BSC, Gliese) | CC BY-SA 4.0 |
+| Galaxies with distances | 62,301 | **Cosmicflows-4** (Tully et al. 2023, ApJ 944, 94; VizieR J/ApJ/944/94); names, sizes, types and redshifts from **OpenNGC** (Mattia Verga, <https://github.com/mattiaverga/OpenNGC>); nearby galaxies from the **Updated Nearby Galaxy Catalog** (Karachentsev, Makarov & Kaisina 2013, AJ 145, 101; VizieR J/AJ/145/101) | Cosmicflows-4 and UNGC: VizieR (cite); OpenNGC: CC BY-SA 4.0 |
+| Star clusters | 7,186 | Hunt & Reffert 2023, A&A 673, A114 (Gaia DR3; VizieR J/A+A/673/A114); Harris 1996, AJ 112, 1487 (2010 edition; VizieR VII/202) | VizieR (cite) |
+| White dwarfs within 50 pc | 2,132 | Gentile Fusillo et al. 2021, MNRAS 508, 3877 (Gaia EDR3; VizieR J/MNRAS/508/3877), P(WD) > 0.75 | VizieR (cite) |
+| TESS planet candidates (by host star) | 6,266 | NASA Exoplanet Archive, TESS Objects of Interest table (false positives left out) | public; acknowledgement below |
+| Pulsars | 4,319 | ATNF Pulsar Catalogue (Manchester, Hobbs, Teoh & Hobbs 2005, AJ 129, 1993), <https://www.atnf.csiro.au/research/pulsar/psrcat/>; best distances from the catalogue software (parallax / association, else the YMW16 dispersion-measure model) | free with citation |
+| Nebulae | 2,336 | planetary nebulae: Chornay & Walton 2021, A&A 656, A110 (Gaia EDR3 central-star distances; VizieR J/A+A/656/A110); supernova remnants: Green 2019, J. Astrophys. Astron. 40, 36 (VizieR VII/297) with distances from Ranasinghe & Leahy 2023, ApJS 265, 53 (J/ApJS/265/53); H II regions: Anderson et al. 2014, ApJS 212, 1 (WISE catalogue, the regions with distances; J/ApJS/212/1), named after Sharpless 1959, ApJS 4, 257 (VII/20) | VizieR (cite) |
+| Quasars with black-hole masses (the 1,900 nearest) | 1,900 | Shen et al. 2011, ApJS 194, 45 (SDSS DR7 quasars, fiducial virial masses; VizieR J/ApJS/194/45); comoving distances from the redshift with Planck 2018 parameters (Planck Collaboration 2020, A&A 641, A6) | VizieR (cite) |
+| X-ray binaries | 419 | XRBcats: Avakyan et al. 2023, A&A 675, A199 (LMXB); Neumann et al. 2023, A&A 677, A134 (HMXB) | VizieR (cite) |
+| Brown dwarfs (L, T, Y within 20 pc) | 250 | Kirkpatrick et al. 2021, ApJS 253, 7 (VizieR J/ApJS/253/7) | VizieR (cite) |
+
+*This research has made use of the VizieR catalogue access tool, CDS, Strasbourg, France (DOI
+10.26093/cds/vizier).* *This research has made use of the NASA Exoplanet Archive, which is operated
+by the California Institute of Technology, under contract with the National Aeronautics and Space
+Administration under the Exoplanet Exploration Program.* The files under `public/data/catalog/`
+that contain AT-HYG or OpenNGC data are shared under CC BY-SA 4.0.
+
+Derived values (the engine's, not the catalogues'): the radii of catalogue stars (from absolute
+magnitude and temperature), white-dwarf radii (Nauenberg 1972 mass-radius relation), brown-dwarf
+radii (0.1 R☉ assumed), the companions of black-hole X-ray binaries (mass assumed by class, orbit
+from the period, Roche-lobe size from Eggleton 1983), 8 M☉ for black holes without a measured mass,
+and the sizes of galaxies or nebulae the catalogues give none for (stated on their info cards).
+
 ## Ground materials (`public/data/materials/`, `pipeline/fetch_materials.py`)
 
 Scanned surface materials from [Poly Haven](https://polyhaven.com), released under **CC0** (public

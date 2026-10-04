@@ -919,5 +919,27 @@ export class GalaxiesLayer {
       u.uYoungW.value = (1 - STAR_SHARE * ws - (this.models.get(g)!.look.cloudShare ?? CLOUD_SHARE) * wc) / (1 - STAR_SHARE * ws);
     }
   }
+
+  /** [catalog] Add a galaxy after construction (a catalogue destination), set up like the others. */
+  add(g: Galaxy): void {
+    if (this.models.has(g)) return;
+    const model = new GalaxyModel(g, lookFor(g, this.galaxies), noise3D().data);
+    this.models.set(g, model);
+    const m = new Mesh(this.box, new ShaderMaterial({
+      name: 'galaxy-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG, side: BackSide,
+      uniforms: {
+        ...model.u, uCam: { value: new Vector3() }, uExt: { value: model.ext }, uPixAng: this.pixAng,
+        uGain: this.gain, uWeight: { value: 1 }, uYoungW: { value: 1 }, uLite: LITE.uLite, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+      },
+      transparent: true, depthWrite: false, blending: AdditiveBlending,
+    }));
+    m.matrixAutoUpdate = false;
+    m.frustumCulled = false;
+    m.renderOrder = -1;
+    m.name = g.name;
+    this.group.add(m);
+    this.volumes.set(g, m);
+    this.galaxies.push(g);
+  }
 }
 
