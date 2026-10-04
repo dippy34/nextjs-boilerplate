@@ -1,416 +1,3 @@
-IC 5280	g	6io	5
-IC 5282	g	4nw	5
-IC 5283	g	450	5
-IC 5284	g	2fp	5
-IC 5285	g	3nb	5
-IC 5286	g	6ob	5
-IC 5287	g	73j	5
-IC 5288	g	6om	5
-IC 5289 NED02	g	7hi	5
-IC 529	g	1wi	5
-IC 5290	g	5tl	5
-IC 5291	g	7o2	5
-IC 5292	g	3yh	5
-IC 5293	g	6aw	5
-IC 5295	g	6ef	5
-IC 5296	g	58d	5
-IC 5297	g	6ej	5
-IC 5298	g	6g5	5
-IC 5299	g	7kq	5
-IC 53	g	7l5	5
-IC 530	g	4r5	5
-IC 5300	g	7k0	5
-IC 5302	g	70j	5
-IC 5304	g	6d8	5
-IC 5305	g	7c3	5
-IC 5306	g	64m	5
-IC 5307	g	7oy	5
-IC 5309	g	2vr	5
-IC 531	g	3u2	5
-IC 5310	g	68r	5
-IC 5312	g	7g5	5
-IC 5314	g	7hq	5
-IC 5315	g	3sb	5
-IC 5316	g	7k9	5
-IC 5317	g	7ju	5
-IC 5319	g	7nl	5
-IC 5320	g	39c	5
-IC 5321	g	2g4	5
-IC 5322	g	3n0	5
-IC 5323	g	3bu	5
-IC 5324	g	3ab	5
-IC 5325	g	ko	3
-IC 5326	g	67b	5
-IC 5328	g	2df	5
-IC 5329	g	4jp	5
-IC 533	g	4wp	5
-IC 5331	g	4wd	5
-IC 5332	g	b8	3
-IC 5334	g	2kj	5
-IC 5335	g	38x	5
-IC 5336 NED01	g	808	5
-IC 5336 NED02	g	7yv	5
-IC 5337	g	7zt	5
-IC 5338	g	80f	5
-IC 5339	g	7su	5
-IC 534	g	2rp	5
-IC 5341	g	6t6	5
-IC 5342	g	6v7	5
-IC 5343	g	6eh	5
-IC 5345	g	6cn	5
-IC 5346	g	7ix	5
-IC 5347	g	7l4	5
-IC 5349 NED01	g	4nc	5
-IC 5349 NED02	g	6p6	5
-IC 535	g	7zo	5
-IC 5350	g	5xe	5
-IC 5351	g	5ag	5
-IC 5352	g	5i5	5
-IC 5353	g	6kx	5
-IC 5354	g	6t0	5
-IC 5355	g	3ar	5
-IC 5356	g	54g	5
-IC 5357	g	5rc	5
-IC 5358	g	6fl	5
-IC 5359	g	5s7	5
-IC 536	g	6ft	5
-IC 5362	g	5tt	5
-IC 5364 NED01	g	6ur	5
-IC 5364 NED02	g	6us	5
-IC 5367	g	7cx	5
-IC 5369	g	788	5
-IC 537	g	38k	5
-IC 5370	g	7bf	5
-IC 5371	g	6zc	5
-IC 5372	g	7cn	5
-IC 5373	g	76o	5
-IC 5374	g	6s5	5
-IC 5375	g	6y6	5
-IC 5376	g	4r3	5
-IC 5377	g	14g	5
-IC 5378 NED01	g	5bc	5
-IC 5378 NED02	g	4z2	5
-IC 5379	g	572	5
-IC 5381	g	7t8	5
-IC 5382	g	6p5	5
-IC 539	g	5rl	5
-IC 540	g	21p	5
-IC 542	g	6sd	5
-IC 544	g	4le	5
-IC 545	g	55p	5
-IC 546	g	3zr	5
-IC 548	g	4tj	5
-IC 549	g	1o0	5
-IC 55	g	4ij	5
-IC 550	g	3wk	5
-IC 551	g	6v1	5
-IC 552	g	54i	5
-IC 553	g	4pz	5
-IC 554	g	6lt	5
-IC 557	g	550	5
-IC 558	g	6yh	5
-IC 559	g	cw	3
-IC 56	g	55e	5
-IC 560	g	1rc	5
-IC 561	g	50q	5
-IC 562	g	3nx	5
-IC 563	g	53e	5
-IC 564	g	50u	5
-IC 565 NED01	g	574	5
-IC 565 NED02	g	6o3	5
-IC 566	g	7fi	5
-IC 568	g	64c	5
-IC 569	g	7bl	5
-IC 57	g	7le	5
-IC 570	g	6k9	5
-IC 571	g	6ld	5
-IC 572	g	6l2	5
-IC 574	g	57r	5
-IC 575	g	4z0	5
-IC 576	g	7n4	5
-IC 577	g	6tk	5
-IC 578	g	6rw	5
-IC 579	g	77v	5
-IC 58	g	5bh	5
-IC 581	g	5ch	5
-IC 582	g	66l	5
-IC 583	g	6an	5
-IC 584	g	4mk	5
-IC 585	g	5n3	5
-IC 586	g	530	5
-IC 587	g	5fr	5
-IC 588	g	5rm	5
-IC 589	g	7cz	5
-IC 590 NED01	g	59u	5
-IC 590 NED02	g	5bz	5
-IC 591	g	1qf	5
-IC 592	g	541	5
-IC 593	g	54l	5
-IC 594	g	63r	5
-IC 595	g	75b	5
-IC 596	g	70r	5
-IC 597	g	48y	5
-IC 598	g	21m	5
-IC 599	g	4gx	5
-IC 6	g	4v2	5
-IC 60	g	80p	5
-IC 600	g	1df	5
-IC 601	g	32o	5
-IC 602	g	4yn	5
-IC 603	g	4q3	5
-IC 605	g	5e8	5
-IC 607	g	4sr	5
-IC 608	g	6n6	5
-IC 609	g	42h	5
-IC 61	g	7hk	5
-IC 610	g	1u5	5
-IC 612	g	76d	5
-IC 613	g	743	5
-IC 614	g	7as	5
-IC 615	g	7gn	5
-IC 616	g	4xp	5
-IC 619	g	63v	5
-IC 62	g	7jp	5
-IC 620	g	792	5
-IC 621	g	6p2	5
-IC 623	g	4i4	5
-IC 624	g	3q8	5
-IC 625	g	11u	5
-IC 626	g	6kd	5
-IC 627	g	6z7	5
-IC 628	g	6m1	5
-IC 630	g	1zw	5
-IC 631	g	6mz	5
-IC 632	g	4ve	5
-IC 633	g	4si	5
-IC 634	g	6j9	5
-IC 635	g	6fg	5
-IC 636	g	5pk	5
-IC 637	g	7vy	5
-IC 638	g	7lt	5
-IC 639	g	331	5
-IC 64	g	76b	5
-IC 642	g	531	5
-IC 643	g	5b8	5
-IC 645	g	5go	5
-IC 646	g	7uj	5
-IC 647	g	3wr	5
-IC 648	g	7dm	5
-IC 649 NED01	g	7jq	5
-IC 649 NED02	g	7lp	5
-IC 65	g	20m	5
-IC 650	g	6dt	5
-IC 651	g	3v6	5
-IC 653	g	4ps	5
-IC 654	g	6t9	5
-IC 655	g	7o9	5
-IC 657	g	74b	5
-IC 658	g	7bh	5
-IC 659	g	7ff	5
-IC 66	g	4u4	5
-IC 660	g	7ms	5
-IC 661	g	6z0	5
-IC 662	g	7jn	5
-IC 663	g	7em	5
-IC 664	g	6xm	5
-IC 665	g	3xq	5
-IC 666	g	7q4	5
-IC 667	g	6lf	5
-IC 668	g	763	5
-IC 669	g	7v7	5
-IC 670	g	6mg	5
-IC 671	g	7lj	5
-IC 672	g	6bf	5
-IC 673	g	44f	5
-IC 674	g	6bm	5
-IC 676	g	1fg	5
-IC 677	g	2x9	5
-IC 678	g	7vh	5
-IC 679	g	43d	5
-IC 680	g	7pl	5
-IC 681	g	4oo	5
-IC 683	g	7xk	5
-IC 685	g	87s	5
-IC 686	g	7w6	5
-IC 687	g	7cc	5
-IC 688	g	1mn	5
-IC 69	g	4cb	5
-IC 690	g	5rb	5
-IC 691	g	19k	5
-IC 692	g	17y	5
-IC 693	g	7d2	5
-IC 694	g	3bm	5
-IC 695	g	5fi	5
-IC 696	g	59y	5
-IC 697	g	7qn	5
-IC 698	g	597	5
-IC 699	g	5j9	5
-IC 7	g	4nd	5
-IC 70	g	82g	5
-IC 700 NED01	g	1fm	5
-IC 700 NED02	g	1f4	5
-IC 700 NED03	g	1fv	5
-IC 700 NED04	g	1mf	5
-IC 701	g	56s	5
-IC 702	g	6vb	5
-IC 705	g	2jc	5
-IC 706	g	3hg	5
-IC 707	g	5hg	5
-IC 708	g	71p	5
-IC 709	g	730	5
-IC 710	g	6zs	5
-IC 711	g	6mh	5
-IC 712	g	731	5
-IC 715NW	g	6v8	5
-IC 716	g	4i5	5
-IC 718	g	1io	5
-IC 719	g	1r5	5
-IC 720 NED01	g	5gc	5
-IC 720 NED02	g	5e3	5
-IC 721	g	3wf	5
-IC 722	g	55w	5
-IC 723	g	2o5	5
-IC 724	g	3zk	5
-IC 725	g	809	5
-IC 726	g	721	5
-IC 727	g	656	5
-IC 728	g	62d	5
-IC 729	g	7vk	5
-IC 73	g	5a7	5
-IC 731	g	5sm	5
-IC 732N	g	5wz	5
-IC 732S	g	5ye	5
-IC 733	g	5is	5
-IC 734 NED01	g	86h	5
-IC 735	g	2j4	5
-IC 736	g	3az	5
-IC 737	g	3i3	5
-IC 738	g	2b5	5
-IC 739	g	5sj	5
-IC 74	g	4bg	5
-IC 741	g	2v7	5
-IC 742	g	2g2	5
-IC 743	g	2mg	5
-IC 744	g	5jm	5
-IC 745	g	1dc	5
-IC 746	g	3kt	5
-IC 747	g	4vy	5
-IC 748	g	72n	5
-IC 749	g	10l	5
-IC 75	g	7o8	5
-IC 750	g	1g0	5
-IC 751	g	705	5
-IC 752	g	6vc	5
-IC 753	g	5cf	5
-IC 754	g	4nb	5
-IC 756	g	5f0	5
-IC 758	g	1bj	5
-IC 76	g	693	5
-IC 760	g	213	5
-IC 761	g	4b5	5
-IC 762	g	5vr	5
-IC 763	g	5on	5
-IC 764	g	1ic	5
-IC 766	g	3ni	5
-IC 767	g	1si	5
-IC 768	g	30d	5
-IC 769	g	26q	5
-IC 77	g	81k	5
-IC 770	g	1a6	5
-IC 771	g	4zx	5
-IC 772	g	5s4	5
-IC 773	g	4ro	5
-IC 774	g	6w3	5
-IC 775	g	5ym	5
-IC 776	g	20b	5
-IC 777	g	28e	5
-IC 779	g	hs	3
-IC 78	g	7mp	5
-IC 780	g	5n5	5
-IC 781	g	1do	5
-IC 782	g	26h	5
-IC 783	g	1bc	5
-IC 784	g	3jq	5
-IC 785	g	3t6	5
-IC 786	g	3qu	5
-IC 787	g	6xd	5
-IC 789	g	61w	5
-IC 79	g	70z	5
-IC 791	g	5ms	5
-IC 792	g	5eb	5
-IC 794	g	1tf	5
-IC 795	g	4wx	5
-IC 796	g	1jb	5
-IC 797	g	1xm	5
-IC 798	g	16s	5
-IC 8	g	578	5
-IC 800	g	23v	5
-IC 801	g	5h1	5
-IC 803 NED02	g	69w	5
-IC 804	g	2ja	5
-IC 806	g	57l	5
-IC 807	g	7bq	5
-IC 809	g	16u	5
-IC 80 NED02	g	7zf	5
-IC 81	g	3cx	5
-IC 812	g	3o8	5
-IC 813	g	5rn	5
-IC 814	g	7wt	5
-IC 815	g	80s	5
-IC 816	g	5uu	5
-IC 817	g	5zo	5
-IC 818	g	4s1	5
-IC 82	g	7o5	5
-IC 821	g	5kg	5
-IC 822	g	86l	5
-IC 825	g	1is	5
-IC 826	g	5n0	5
-IC 827	g	4fb	5
-IC 828	g	3gk	5
-IC 829	g	4a2	5
-IC 83	g	7ss	5
-IC 830	g	4v6	5
-IC 831	g	5c6	5
-IC 832	g	6ar	5
-IC 833	g	816	5
-IC 834	g	5ij	5
-IC 835	g	64q	5
-IC 836	g	2f5	5
-IC 837	g	5x2	5
-IC 838	g	84w	5
-IC 839	g	62t	5
-IC 84	g	4b9	5
-IC 840	g	7ej	5
-IC 841	g	5v6	5
-IC 842	g	5o2	5
-IC 844	g	2io	5
-IC 845	g	7t1	5
-IC 846	g	7pm	5
-IC 848	g	7yd	5
-IC 849	g	4od	5
-IC 850	g	4pv	5
-IC 851	g	2ij	5
-IC 852	g	6as	5
-IC 853	g	5vd	5
-IC 854	g	5tx	5
-IC 855	g	681	5
-IC 856	g	3q9	5
-IC 857	g	5kv	5
-IC 858	g	5r7	5
-IC 859	g	69m	5
-IC 86	g	7t7	5
-IC 860	g	391	5
-IC 861	g	7if	5
-IC 862	g	6tb	5
-IC 863	g	28x	5
-IC 864	g	7ki	5
-IC 865	g	4qt	5
-IC 866	g	5nb	5
-IC 867	g	5nz	5
-IC 868	g	5iw	5
-IC 869 NED01	g	5tf	5
-IC 869 NED02	g	886	5
-IC 87	g	7ql	5
 IC 870	g	5i8	5
 IC 871	g	5a2	5
 IC 872	g	5tg	5
@@ -605,26 +192,11 @@ IGR J19498+2534	x	6o	5
 IGR J20006+3210	x	9r	5
 IGR J21343+4738	x	7v	5
 IGR J22534+6243	x	ai	5
-III	g	pe	4
 Iklil	s	dh	0
 IKN	g	55	3
 IL Lup	x	1o	2
 Illyrian	s	cz	0
 Imai	s	dn	0
-Ind	s	g3	1
-Ind	s	iv	1
-Ind	s	j4	1
-Ind	s	jh	1
-Ind	s	k1	1
-Ind	s	k2	1
-Ind	s	qs	1
-Ind	s	sf	1
-Ind	s	12b	1
-Ind	s	13d	1
-Ind	s	14d	1
-Ind	s	14o	1
-Ind	s	15l	1
-Ind	s	16l	1
 Inquill	s	8t	0
 Intan	s	7k	0
 INTEGRAL1 105	x	7o	5
@@ -1180,7 +752,6 @@ Kui	s	aj	0
 Kulou	s	2s	0
 Kurhah	s	57	0
 L 1641S	c	122	6
-Lac	s	pa	1
 Lacaille 8760	s	m	0
 Lacaille 9352	s	b	0
 Lalande 21185	s	5	0
@@ -1286,19 +857,6 @@ LeG 27	g	x5	4
 LeG 28	g	x6	4
 LeG 33	g	xb	4
 Lembu	s	68	0
-Leo	s	iq	1
-Leo	s	jm	1
-Leo	s	kk	1
-Leo	s	q1	1
-Leo	s	qv	1
-Leo	s	rj	1
-Leo	s	tg	1
-Leo	s	u0	1
-Leo	s	13r	1
-Leo	s	147	1
-Leo	s	15n	1
-Leo	s	172	1
-Leo	s	1bj	1
 LeoA	g	2k	3
 LeoI	g	3	0
 LeoII	g	1z	3
@@ -1306,29 +864,10 @@ LeoIV	g	p2	4
 LeoP	g	pn	4
 LeoT	g	p7	4
 LeoV	g	p4	4
-Lep	s	gf	1
-Lep	s	h3	1
-Lep	s	l0	1
-Lep	s	p3	1
-Lep	s	tj	1
-Lep	s	zr	1
-Lep	s	13z	1
-Lep	s	1a6	1
 Lesath	s	ek	0
 LGS 3	g	24	3
-Lib	s	jk	1
-Lib	s	n6	1
-Lib	s	p5	1
-Lib	s	qq	1
-Lib	s	s3	1
-Lib	s	ue	1
-Lib	s	wy	1
-Lib	s	zn	1
-Lib	s	10c	1
-Lib	s	130	1
-Lib	s	179	1
 Libertas	s	91	0
-Lich (PSR B1257+12, the first planets found)	p	2	1
+Lich (PSR B1257+12)	p	2	1
 Liesma	s	b4	0
 Lilii Borea	s	8f	0
 Liller 1	c	4v	2
@@ -1399,7 +938,6 @@ LISC-III 3783	c	v8	6
 LK 10	c	2bc	6
 LLA 1	c	s	2
 LMC	g	0	0
-LMi	s	o7	1
 Lo 1	n	vs	6
 Lo 11	n	133	6
 Lo 12	n	10c	6
@@ -1464,23 +1002,6 @@ LTNF 1	n	wx	6
 Lucilinburhuc	s	7g	0
 Luginbuhl-Skiff 1	c	4iu	6
 Lumbung	s	f7	0
-Lup	s	kv	1
-Lup	s	rx	1
-Lup	s	sb	1
-Lup	s	ys	1
-Lup	s	zj	1
-Lup	s	zl	1
-Lup	s	10x	1
-Lup	s	11h	1
-Lup	s	11t	1
-Lup	s	129	1
-Lup	s	12i	1
-Lup	s	134	1
-Lup	s	144	1
-Lup	s	14g	1
-Lup	s	156	1
-Lup	s	17k	1
-Lup	s	19y	1
 Lupus Loop	n	11	3
 Lusitânia	s	5s	0
 Luyten's Star	s	k	0
@@ -1523,7 +1044,6 @@ LV J1342+4840	g	su	4
 LV J1354+5438	g	sr	4
 LV J1952+1428	g	9v	3
 LV J2335-3713	g	bb	3
-Lyn	s	t0	1
 Lynga 1	c	35m	6
 Lynga 14	c	3p9	6
 Lynga 15	c	2m0	6
@@ -1535,11 +1055,6 @@ Lynga 6	c	ig	4
 Lynga 7	c	38	2
 Lynga 7	c	1r6	6
 Lynga 9	c	hn	4
-Lyr	s	us	1
-Lyr	s	12m	1
-Lyr	s	191	1
-Lyr	s	1a4	1
-Lyr	s	1b1	1
 MESSIER 031	g	6	0
 MESSIER 032	g	4	0
 MESSIER 033	g	8	0
@@ -3998,3 +3513,488 @@ MCG +02-32-156	g	fv	3
 MCG +02-32-157	g	17u	5
 MCG +02-32-159	g	18u	5
 MCG +02-32-160	g	1f	0
+MCG +02-32-162	g	1oy	5
+MCG +02-32-164	g	2h8	5
+MCG +02-32-165	g	867	5
+MCG +02-32-167	g	7yk	5
+MCG +02-32-169	g	2h0	5
+MCG +02-32-170	g	hw	3
+MCG +02-32-171	g	1ub	5
+MCG +02-32-172	g	5dv	5
+MCG +02-32-173	g	zl	5
+MCG +02-32-174	g	167	5
+MCG +02-32-175	g	16t	5
+MCG +02-32-176	g	22p	5
+MCG +02-32-177	g	id	3
+MCG +02-32-178	g	157	5
+MCG +02-32-179	g	5bq	5
+MCG +02-32-180	g	19e	5
+MCG +02-32-182	g	1ig	5
+MCG +02-32-183	g	12	0
+MCG +02-32-184	g	16u	5
+MCG +02-32-186	g	84e	5
+MCG +02-32-187	g	1a1	5
+MCG +02-32-188	g	1il	5
+MCG +02-32-189	g	1kz	5
+MCG +02-32-190	g	1ob	5
+MCG +02-32-191	g	1vi	5
+MCG +02-32-192	g	6kj	5
+MCG +02-32-193	g	6hn	5
+MCG +02-33-001	g	h0	3
+MCG -02-33-001	g	1tz	5
+MCG +02-33-002	g	18	0
+MCG -02-33-002	g	25q	5
+MCG +02-33-003	g	6jc	5
+MCG +02-33-004	g	g0	3
+MCG +02-33-005	g	7a1	5
+MCG +02-33-006	g	148	5
+MCG +02-33-007	g	17d	5
+MCG -02-33-007	g	207	5
+MCG +02-33-008	g	9i	3
+MCG -02-33-008	g	292	5
+MCG +02-33-009	g	15d	5
+MCG +02-33-010	g	198	5
+MCG +02-33-011	g	1h4	5
+MCG -02-33-011	g	34z	5
+MCG -02-33-013	g	ae	3
+MCG +02-33-013	g	5kq	5
+MCG +02-33-014	g	829	5
+MCG +02-33-015	g	80s	5
+MCG -02-33-016	g	39f	5
+MCG -02-33-018	g	3mv	5
+MCG -02-33-019	g	3ll	5
+MCG +02-33-019	g	5uu	5
+MCG +02-33-020	g	5zo	5
+MCG +02-33-021	g	15w	5
+MCG -02-33-021	g	3mz	5
+MCG +02-33-022	g	i2	3
+MCG +02-33-023	g	19t	5
+MCG -02-33-023	g	650	5
+MCG +02-33-024	g	ls	3
+MCG -02-33-026	g	1cd	5
+MCG -02-33-027	g	38v	5
+MCG +02-33-028	g	16m	5
+MCG +02-33-029	g	20c	5
+MCG +02-33-030	g	hf	3
+MCG -02-33-030	g	3pa	5
+MCG -02-33-031	g	1bz	5
+MCG -02-33-032	g	16g	5
+MCG +02-33-033	g	hz	3
+MCG +02-33-034	g	1cp	5
+MCG -02-33-034	g	3hn	5
+MCG +02-33-036	g	2e4	5
+MCG -02-33-037	g	4a2	5
+MCG -02-33-039	g	3gc	5
+MCG -02-33-040	g	3gx	5
+MCG +02-33-040	g	7ej	5
+MCG -02-33-041	g	3by	5
+MCG -02-33-042	g	3dq	5
+MCG +02-33-045	g	1w8	5
+MCG +02-33-047	g	1eg	5
+MCG -02-33-049	g	f8	3
+MCG -02-33-050	g	3cg	5
+MCG -02-33-051	g	3d4	5
+MCG -02-33-053	g	30k	5
+MCG +02-33-053 NED01	g	7t1	5
+MCG +02-33-055 NED01	g	6g4	5
+MCG +02-33-055 NED02	g	6fh	5
+MCG -02-33-056	g	1ot	5
+MCG -02-33-060	g	367	5
+MCG -02-33-061	g	116	5
+MCG -02-33-067	g	3gz	5
+MCG -02-33-069	g	30l	5
+MCG -02-33-070	g	3p6	5
+MCG -02-33-072	g	4hq	5
+MCG -02-33-074	g	3kd	5
+MCG-02-33-075	g	uh	4
+MCG -02-33-077	g	2qz	5
+MCG -02-33-078	g	jb	3
+MCG -02-33-079	g	48g	5
+MCG -02-33-081	g	3pn	5
+MCG -02-33-086	g	4em	5
+MCG -02-33-087	g	2dj	5
+MCG -02-33-089	g	2aa	5
+MCG -02-33-090	g	2cm	5
+MCG -02-33-092	g	nz	3
+MCG -02-33-096	g	484	5
+MCG -02-33-101	g	2se	5
+MCG -02-33-102	g	2sf	5
+MCG -02-33-103	g	2qt	5
+MCG -02-33-104	g	o5	3
+MCG -02-33-107	g	26i	5
+MCG +02-34-001	g	63i	5
+MCG +02-34-003	g	2uh	5
+MCG -02-34-004	g	1ab	5
+MCG +02-34-006	g	136	5
+MCG +02-34-007	g	618	5
+MCG +02-34-009 NED01	g	722	5
+MCG +02-34-009 NED02	g	75r	5
+MCG +02-34-010	g	4zp	5
+MCG -02-34-011	g	4jv	5
+MCG +02-34-011	g	5gf	5
+MCG +02-34-012	g	7gr	5
+MCG -02-34-013	g	27s	5
+MCG -02-34-014	g	5qx	5
+MCG +02-34-014	g	5xo	5
+MCG +02-34-015	g	5hk	5
+MCG +02-34-016	g	5op	5
+MCG -02-34-017	g	5c8	5
+MCG +02-34-017	g	625	5
+MCG +02-34-018	g	5r2	5
+MCG +02-34-019	g	65u	5
+MCG -02-34-020	g	2gd	5
+MCG +02-34-020	g	5no	5
+MCG -02-34-021	g	1n2	5
+MCG +02-34-021	g	564	5
+MCG -02-34-022	g	4cr	5
+MCG +02-34-022	g	598	5
+MCG +02-34-023	g	636	5
+MCG +02-34-024	g	5um	5
+MCG -02-34-025	g	1xa	5
+MCG +02-34-025	g	66f	5
+MCG -02-34-026	g	2l1	5
+MCG +02-34-026	g	5qc	5
+MCG -02-34-027	g	2dm	5
+MCG -02-34-030	g	1u6	5
+MCG -02-34-034	g	1cg	5
+MCG -02-34-037	g	4mf	5
+MCG -02-34-039	g	2dn	5
+MCG -02-34-041	g	4es	5
+MCG -02-34-042	g	2hz	5
+MCG -02-34-043	g	2ie	5
+MCG -02-34-044	g	3aa	5
+MCG -02-34-049	g	50e	5
+MCG +02-35-001	g	6al	5
+MCG +02-35-004	g	58b	5
+MCG +02-35-005 NED01	g	5pp	5
+MCG +02-35-005 NED02	g	5mf	5
+MCG +02-35-006	g	5mj	5
+MCG +02-35-009	g	5ob	5
+MCG +02-35-011	g	7r2	5
+MCG -02-35-012	g	1xb	5
+MCG +02-35-015	g	fg	3
+MCG -02-35-015	g	4rh	5
+MCG +02-35-019	g	605	5
+MCG +02-35-021	g	5th	5
+MCG +02-35-023	g	5yr	5
+MCG +02-36-001	g	6c8	5
+MCG -02-36-001	g	7l8	5
+MCG +02-36-003	g	58r	5
+MCG -02-36-004	g	2zx	5
+MCG -02-36-005	g	22n	5
+MCG -02-36-006	g	4g1	5
+MCG +02-36-009	g	4vr	5
+MCG -02-36-009	g	754	5
+MCG +02-36-011	g	5xd	5
+MCG +02-36-013	g	461	5
+MCG +02-36-014	g	4n1	5
+MCG +02-36-017	g	513	5
+MCG -02-36-019	g	3id	5
+MCG +02-36-019	g	4gp	5
+MCG +02-36-020	g	52x	5
+MCG +02-36-022	g	3zx	5
+MCG +02-36-025	g	5jq	5
+MCG +02-36-028	g	64i	5
+MCG +02-36-029	g	52n	5
+MCG +02-36-036	g	5uy	5
+MCG +02-36-037	g	3sa	5
+MCG +02-36-040	g	5vj	5
+MCG +02-36-043	g	6v4	5
+MCG +02-36-048	g	3lp	5
+MCG +02-36-050	g	5zq	5
+MCG +02-36-060	g	5y9	5
+MCG +02-36-062 NED01	g	60n	5
+MCG +02-36-063	g	640	5
+MCG +02-36-064	g	5yy	5
+MCG +02-36-065	g	61j	5
+MCG +02-37-002	g	6w1	5
+MCG -02-37-003	g	2vh	5
+MCG +02-37-004	g	4c2	5
+MCG +02-37-005	g	2yy	5
+MCG +02-37-006 NED01	g	65p	5
+MCG +02-37-006 NED02	g	67j	5
+MCG -02-37-008	g	5vn	5
+MCG +02-37-012	g	1ru	5
+MCG +02-37-013	g	6dc	5
+MCG +02-37-016	g	78q	5
+MCG +02-37-017	g	61d	5
+MCG +02-37-019	g	3gu	5
+MCG +02-37-020	g	4gt	5
+MCG +02-37-021	g	1bb	5
+MCG +02-37-023	g	20t	5
+MCG +02-37-025	g	6b1	5
+MCG +02-37-028	g	712	5
+MCG +02-37-029	g	6jq	5
+MCG +02-38-001	g	6jw	5
+MCG +02-38-002	g	6u6	5
+MCG -02-38-007	g	3ef	5
+MCG -02-38-008	g	6b2	5
+MCG -02-38-011	g	2gg	5
+MCG +02-38-011	g	6vh	5
+MCG -02-38-012	g	1of	5
+MCG +02-38-014	g	1po	5
+MCG +02-38-022	g	70t	5
+MCG -02-38-025	g	2ik	5
+MCG +02-38-025	g	6m9	5
+MCG +02-38-026	g	7i2	5
+MCG -02-38-035	g	6ph	5
+MCG +02-38-036	g	5fs	5
+MCG +02-38-044	g	4qj	5
+MCG +02-38-045	g	5iq	5
+MCG -02-39-001	g	4az	5
+MCG -02-39-002	g	1y6	5
+MCG +02-39-002	g	6mq	5
+MCG -02-39-003	g	1tm	5
+MCG -02-39-005	g	56v	5
+MCG -02-39-006	g	1wo	5
+MCG -02-39-007	g	22w	5
+MCG -02-39-012	g	3tj	5
+MCG +02-39-012	g	7do	5
+MCG -02-39-013	g	1vj	5
+MCG -02-39-014	g	63u	5
+MCG -02-39-015	g	2zy	5
+MCG +02-39-017	g	7gz	5
+MCG -02-39-018	g	234	5
+MCG -02-39-019	g	233	5
+MCG -02-39-020	g	1di	5
+MCG +02-39-026	g	59o	5
+MCG +02-39-029	g	590	5
+MCG +02-39-030	g	3f8	5
+MCG -02-40-002	g	5y6	5
+MCG +02-40-003	g	1sr	5
+MCG +02-40-004	g	1qp	5
+MCG -02-40-004	g	64p	5
+MCG +02-40-006	g	1ua	5
+MCG +02-40-008	g	1v3	5
+MCG +02-40-011	g	1cq	5
+MCG +02-40-012	g	7tj	5
+MCG +02-40-014	g	3rg	5
+MCG +02-40-018	g	5vo	5
+MCG +02-41-001	g	413	5
+MCG +02-41-004	g	2uw	5
+MCG +02-41-008	g	7mg	5
+MCG +02-41-009	g	4ck	5
+MCG +02-41-011	g	7go	5
+MCG +02-41-013	g	53l	5
+MCG +02-41-016	g	783	5
+MCG +02-41-017	g	6yl	5
+MCG +02-41-019	g	4eq	5
+MCG +02-41-020	g	6y2	5
+MCG +02-41-022	g	2s3	5
+MCG +02-41-023	g	6je	5
+MCG +02-41-024 NED01	g	6rz	5
+MCG +02-42-002	g	495	5
+MCG +02-43-001	g	70b	5
+MCG +02-44-003	g	6st	5
+MCG +02-44-004	g	288	5
+MCG +02-46-006	g	3y1	5
+MCG +02-46-008	g	1sn	5
+MCG +02-46-010	g	2hn	5
+MCG +02-46-013	g	2dq	5
+MCG +02-47-003	g	4q8	5
+MCG -02-50-001	g	1ie	5
+MCG -02-50-006	g	5	0
+MCG -02-50-009	g	1lb	5
+MCG -02-50-010	g	1lc	5
+MCG -02-52-001	g	37o	5
+MCG -02-52-002	g	4vv	5
+MCG -02-52-012	g	3ke	5
+MCG +02-52-015	g	3pi	5
+MCG -02-52-016	g	31b	5
+MCG +02-52-016	g	3rs	5
+MCG +02-52-017	g	3h7	5
+MCG +02-52-018	g	3dw	5
+MCG +02-53-001	g	404	5
+MCG -02-53-001 NED01	g	3aw	5
+MCG -02-53-001 NED02	g	4z9	5
+MCG -02-53-002	g	634	5
+MCG +02-53-004	g	3uv	5
+MCG -02-53-005	g	4xm	5
+MCG -02-53-006	g	57e	5
+MCG -02-53-011	g	74h	5
+MCG +02-53-012	g	47z	5
+MCG -02-53-016	g	5wr	5
+MCG -02-53-018	g	6fn	5
+MCG -02-53-019	g	6lr	5
+MCG -02-53-020	g	6pj	5
+MCG -02-53-021	g	50g	5
+MCG -02-53-024	g	6mr	5
+MCG +02-54-001	g	431	5
+MCG +02-54-002	g	6c6	5
+MCG +02-54-003	g	6rb	5
+MCG -02-54-004	g	2au	5
+MCG -02-54-010	g	4sh	5
+MCG +02-54-013	g	3w8	5
+MCG +02-54-014	g	4dr	5
+MCG +02-54-027	g	4gs	5
+MCG -02-55-001	g	2tw	5
+MCG -02-55-002	g	40r	5
+MCG +02-55-006	g	6po	5
+MCG -02-55-007	g	2y9	5
+MCG +02-55-009	g	4yg	5
+MCG +02-55-013	g	6ht	5
+MCG +02-55-014	g	6y9	5
+MCG +02-55-028	g	5xb	5
+MCG -02-56-003	g	50y	5
+MCG -02-56-005	g	2k2	5
+MCG +02-56-008	g	6f5	5
+MCG +02-56-009	g	6ae	5
+MCG -02-56-009	g	7v5	5
+MCG +02-56-010	g	68p	5
+MCG +02-56-015	g	5xx	5
+MCG -02-56-015	g	7zv	5
+MCG -02-56-021 NED01	g	6t2	5
+MCG +02-56-023	g	69s	5
+MCG +02-56-024	g	69v	5
+MCG -02-56-024	g	6oo	5
+MCG +02-57-003	g	68z	5
+MCG -02-57-005	g	4v1	5
+MCG +02-57-007	g	2dc	5
+MCG +02-57-009	g	25b	5
+MCG -02-57-010	g	4e9	5
+MCG +02-57-010	g	56q	5
+MCG -02-57-011	g	48k	5
+MCG -02-57-013	g	1nx	5
+MCG -02-57-016	g	3ep	5
+MCG -02-57-017	g	68o	5
+MCG -02-58-001	g	2dk	5
+MCG -02-58-002	g	6uq	5
+MCG -02-58-004	g	6e6	5
+MCG +02-58-004	g	7k7	5
+MCG -02-58-005	g	1vn	5
+MCG +02-58-005	g	7kj	5
+MCG -02-58-006	g	3sx	5
+MCG +02-58-006	g	61l	5
+MCG +02-58-007	g	5u0	5
+MCG -02-58-013	g	5ya	5
+MCG +02-58-014	g	53q	5
+MCG -02-58-015	g	2sv	5
+MCG -02-58-016	g	2mf	5
+MCG +02-58-017	g	53r	5
+MCG +02-58-018	g	537	5
+MCG -02-58-019	g	2qy	5
+MCG +02-58-019	g	6ad	5
+MCG +02-58-020	g	54k	5
+MCG -02-58-020	g	5z7	5
+MCG -02-58-021	g	5wj	5
+MCG +02-58-022	g	538	5
+MCG +02-58-035	g	74a	5
+MCG +02-58-040	g	63p	5
+MCG +02-58-041	g	1yk	5
+MCG +02-58-045	g	5zw	5
+MCG +02-58-056	g	3fz	5
+MCG +02-58-057	g	7ka	5
+MCG +02-58-060	g	nb	3
+MCG +02-59-003	g	485	5
+MCG -02-59-003	g	73u	5
+MCG +02-59-004	g	7dd	5
+MCG +02-59-005	g	7p9	5
+MCG +02-59-006	g	47f	5
+MCG +02-59-007	g	3ig	5
+MCG +02-59-008	g	3tm	5
+MCG +02-59-009	g	7db	5
+MCG +02-59-010	g	2us	5
+MCG -02-59-010	g	7fq	5
+MCG +02-59-011	g	3co	5
+MCG -02-59-011	g	6d8	5
+MCG -02-59-012	g	nw	3
+MCG +02-59-013	g	3x2	5
+MCG +02-59-014	g	3yd	5
+MCG +02-59-015	g	3n3	5
+MCG -02-59-015	g	5t5	5
+MCG -02-59-016	g	75s	5
+MCG +02-59-018	g	43g	5
+MCG +02-59-019	g	3rj	5
+MCG -02-59-019	g	451	5
+MCG +02-59-020	g	375	5
+MCG +02-59-021	g	7c3	5
+MCG +02-59-022	g	64m	5
+MCG +02-59-023	g	72a	5
+MCG -02-59-024	g	3yx	5
+MCG +02-59-025	g	2pg	5
+MCG +02-59-027	g	7uq	5
+MCG +02-59-029	g	6ri	5
+MCG +02-59-032	g	7sw	5
+MCG +02-59-033	g	30h	5
+MCG +02-59-035	g	7p8	5
+MCG +02-59-036 NED01	g	7pf	5
+MCG +02-59-038	g	3lm	5
+MCG +02-59-040	g	3c3	5
+MCG +02-59-044	g	39e	5
+MCG +02-59-045	g	2rx	5
+MCG +02-59-048	g	34w	5
+MCG +02-60-004	g	3fp	5
+MCG -02-60-005	g	n1	3
+MCG -02-60-006	g	2gi	5
+MCG -02-60-008	g	k5	3
+MCG +02-60-010	g	1nl	5
+MCG +02-60-011	g	1go	5
+MCG +02-60-016	g	2p2	5
+MCG -02-60-020	g	53f	5
+MCG -02-60-022	g	6wu	5
+MCG +02-60-022 NED01	g	5dw	5
+MCG +02-60-022 NED02	g	5d0	5
+MCG +02-60-024	g	5dc	5
+MCG +03-01-006	g	7s2	5
+MCG +03-01-010	g	272	5
+MCG +03-01-013	g	14g	5
+MCG +03-01-015	g	5bc	5
+MCG +03-01-016	g	4z2	5
+MCG +03-01-017	g	572	5
+MCG -03-01-019	g	64b	5
+MCG +03-01-019	g	7t8	5
+MCG +03-01-020	g	fj	3
+MCG +03-01-021	g	1wg	5
+MCG +03-01-026	g	11i	5
+MCG -03-01-026	g	4ql	5
+MCG +03-01-027	g	5ah	5
+MCG +03-01-029	g	32w	5
+MCG +03-01-030	g	506	5
+MCG +03-01-031	g	3xi	5
+MCG +03-02-009	g	11a	5
+MCG +03-02-015	g	5dp	5
+MCG +03-02-023	g	4px	5
+MCG -03-02-024	g	2ua	5
+MCG -03-02-026	g	4ww	5
+MCG -03-02-029	g	7z0	5
+MCG -03-02-030	g	805	5
+MCG -03-02-031	g	3bn	5
+MCG -03-02-034	g	2r9	5
+MCG -03-02-035	g	3dk	5
+MCG -03-02-036	g	7zr	5
+MCG -03-03-003	g	12k	5
+MCG +03-03-003	g	3a1	5
+MCG +03-03-007	g	28n	5
+MCG -03-03-013	g	7qs	5
+MCG -03-03-015	g	46z	5
+MCG -03-03-020	g	4a7	5
+MCG -03-03-022	g	5a8	5
+MCG -03-03-023	g	6hd	5
+MCG -03-04-001	g	5ct	5
+MCG -03-04-004	g	55m	5
+MCG -03-04-008	g	7zf	5
+MCG +03-04-009	g	825	5
+MCG -03-04-010	g	7mp	5
+MCG -03-04-011	g	70z	5
+MCG -03-04-013	g	7o5	5
+MCG +03-04-017	g	7qh	5
+MCG +03-04-019	g	6nq	5
+MCG -03-04-019	g	7rk	5
+MCG +03-04-022	g	1z6	5
+MCG +03-04-023	g	5cr	5
+MCG +03-04-035	g	6jr	5
+MCG +03-04-036	g	2yi	5
+MCG -03-04-039	g	6xt	5
+MCG +03-04-039	g	7s8	5
+MCG -03-04-040	g	54m	5
+MCG -03-04-041	g	4zt	5
+MCG -03-04-043	g	539	5
+MCG +03-04-051	g	2ph	5
+MCG +03-04-052	g	2pq	5
+MCG -03-04-056	g	51a	5
+MCG -03-04-063	g	6s2	5
+MCG -03-04-077	g	5so	5
+MCG -03-05-001	g	7tg	5
+MCG -03-05-004	g	7jy	5
+MCG -03-05-005	g	2wt	5
+MCG +03-05-010	g	76p	5

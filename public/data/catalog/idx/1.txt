@@ -1,93 +1,3 @@
-BH 26	c	270	6
-BH 260	c	4j	2
-BH 261	c	2p	2
-BH 262	c	3h	2
-BH 27	c	cs	4
-BH 28	c	4z6	6
-BH 29	c	54r	6
-BH 3	c	oc	4
-BH 30	c	k7	4
-BH 31	c	ng	4
-BH 32	c	4kf	6
-BH 33	c	1a	2
-BH 35	c	4sy	6
-BH 37	c	4pd	6
-BH 38	c	eq	4
-BH 39	c	o5	4
-BH 41	c	mh	4
-BH 43	c	o4	4
-BH 45	c	jq	4
-BH 45	c	27x	6
-BH 46	c	fh	4
-BH 46	c	31a	6
-BH 48	c	mz	4
-BH 49	c	jr	4
-BH 5	c	8n	4
-BH 50	c	dl	4
-BH 51	c	d3	4
-BH 52	c	bw	4
-BH 54	c	37x	6
-BH 55	c	4yb	6
-BH 56	c	al	4
-BH 59	c	kp	4
-BH 61	c	o8	4
-BH 62	c	gf	4
-BH 64	c	3w6	6
-BH 65	c	n7	4
-BH 66	c	or	4
-BH 67	c	5es	6
-BH 68	c	ow	4
-BH 68	c	4gy	6
-BH 69	c	cv	4
-BH 7	c	mg	4
-BH 71	c	ck	4
-BH 72	c	54m	6
-BH 73	c	59a	6
-BH 74	c	h3	4
-BH 75	c	3e2	6
-BH 76	c	2x7	6
-BH 76	c	2zw	6
-BH 77	c	mk	4
-BH 78	c	5dk	6
-BH 79	c	4bw	6
-BH 8	c	lt	4
-BH 80	c	m9	4
-BH 81	c	3lw	6
-BH 82	c	5ex	6
-BH 83	c	nv	4
-BH 84	c	38q	6
-BH 84	c	4tm	6
-BH 85	c	5d6	6
-BH 86	c	q	2
-BH 87	c	gk	4
-BH 88	c	2qr	6
-BH 89	c	ll	4
-BH 9	c	6f	4
-BH 9	c	7c	4
-BH 9	c	1my	6
-BH 90	c	ip	4
-BH 92	c	3ko	6
-BH 93	c	14v	6
-BH 94	c	nj	4
-BH 96	c	od	4
-BH 99	c	7y	4
-Bharani	s	86	0
-Bibhā	s	bg	0
-Bibing	s	cv	0
-Bica 2	c	2kp	6
-Bica 3	c	3vq	6
-Bica 5	c	2m0	6
-Bica 631	c	4fu	6
-Bica 652	c	4pu	6
-Biham	s	4g	0
-binary pulsar	p	6	1
-Biurakan 10	c	4uq	6
-Biurakan 11	c	4v8	6
-Biurakan 2	c	2q7	6
-Biurakan 7	c	ol	4
-Biurakan 8	c	l7	4
-Biurakan 9	c	544	6
-BK 3N	g	5z	3
 BK 5N	g	57	3
 BK 6N	g	5e	3
 Bl 3-13	n	18g	6
@@ -126,16 +36,6 @@ Bochum 9	c	52y	6
 Bodu	s	da	0
 Bok 1	c	7s	4
 Bol 520	g	p9	4
-Boo	s	g6	1
-Boo	s	gz	1
-Boo	s	jq	1
-Boo	s	pr	1
-Boo	s	ps	1
-Boo	s	u3	1
-Boo	s	u7	1
-Boo	s	uw	1
-Boo	s	uy	1
-Boo	s	10w	1
 BootesI	g	ov	4
 BootesII	g	os	4
 BootesIII	g	ot	4
@@ -173,56 +73,19 @@ C1557-540	c	3ds	6
 C1636-283	c	5d4	6
 C 2041+368	c	3je	6
 CA 1	c	1dc	6
-Cae	s	i4	1
-Cae	s	jl	1
-Cae	s	148	1
-Cae	s	182	1
-Cam	s	19f	1
 CamA	g	5n	3
 CamB	g	41	3
 Can-Battlo 1	c	45o	6
 Canopus	s	ba	0
-Cap	s	h0	1
-Cap	s	j7	1
-Cap	s	jz	1
-Cap	s	rc	1
-Cap	s	rf	1
-Cap	s	ro	1
-Cap	s	tn	1
-Cap	s	tp	1
-Cap	s	vl	1
-Cap	s	x4	1
-Cap	s	132	1
-Cap	s	15z	1
-Cap	s	17a	1
-Cap	s	17r	1
-Cap	s	17v	1
-Cap	s	19o	1
-Cap	s	1a1	1
-Cap	s	1au	1
 Capella	s	1z	0
 Capella B	s	1y	0
 Caph	s	2p	0
 Capricornus	c	5hm	6
-Car	s	11d	1
-Car	s	12e	1
-Car	s	16i	1
-Car	s	19m	1
 Carina	g	oy	4
 Caroli	s	51	0
 Caroli B	s	5d	0
-Cas	s	g8	1
-Cas	s	mn	1
-Cas	s	pl	1
-Cas	s	pp	1
-Cas	s	rl	1
-Cas	s	rm	1
-Cas	s	zw	1
-Cas	s	10q	1
-Cas	s	18o	1
-Cas	s	1as	1
-Cas	s	1ax	1
 Cas 1	g	3z	3
+Cas A	n	6s	3
 Casado 10	c	4gd	6
 Casado 12	c	3wo	6
 Casado 13	c	4sq	6
@@ -254,20 +117,6 @@ CD-53 2004	x	29	5
 Cebalrai	s	41	0
 Ceibo	s	64	0
 Celaeno	s	df	0
-Cen	s	m4	1
-Cen	s	mg	1
-Cen	s	tq	1
-Cen	s	ug	1
-Cen	s	v2	1
-Cen	s	x5	1
-Cen	s	10z	1
-Cen	s	11g	1
-Cen	s	125	1
-Cen	s	12f	1
-Cen	s	137	1
-Cen	s	13l	1
-Cen	s	14v	1
-Cen	s	16c	1
 CenN	g	4x	3
 Centauri	s	0	0
 Centauri	c	c	0
@@ -275,35 +124,11 @@ Centaurus A	g	d	0
 Centaurus A-dE5	g	uw	4
 Cen X-3	x	6y	5
 Cen X-4	x	2e	5
-Cep	s	gx	1
-Cep	s	j0	1
-Cep	s	lc	1
-Cep	s	mx	1
-Cep	s	ri	1
-Cep	s	ve	1
-Cep	s	xx	1
-Cep	s	19x	1
-Cep	s	1a7	1
-Cep	s	1bt	1
 Cephei Cluster	c	uh	6
 Cepheus 1	g	rk	4
 Cep X-4	x	82	5
 Cernik 39	c	4gb	6
 Cervantes	s	2j	0
-Cet	s	g4	1
-Cet	s	im	1
-Cet	s	io	1
-Cet	s	ip	1
-Cet	s	j3	1
-Cet	s	kt	1
-Cet	s	lh	1
-Cet	s	vt	1
-Cet	s	xo	1
-Cet	s	118	1
-Cet	s	11r	1
-Cet	s	138	1
-Cet	s	163	1
-Cet	s	17c	1
 Cetus	g	2f	3
 CFBDS J013302.27+023128.4	d	5v	5
 CGCG 014-054	g	d0	3
@@ -315,17 +140,6 @@ CGCG 217-018	g	ub	4
 CGCG 262-028	g	s2	4
 CGMW 1-260	g	e6	3
 CGMW 2-3473	g	sq	4
-Cha	s	hy	1
-Cha	s	ng	1
-Cha	s	o1	1
-Cha	s	qt	1
-Cha	s	qy	1
-Cha	s	x1	1
-Cha	s	xz	1
-Cha	s	105	1
-Cha	s	135	1
-Cha	s	14u	1
-Cha	s	15s	1
 Chalawan	s	24	0
 Chamaleon I	c	sy	6
 Chamukuy	s	7d	0
@@ -371,13 +185,6 @@ Chi For Group	c	py	6
 χ UMa	s	9g	0
 χ Vir	s	xk	1
 Cigar Galaxy	g	b	0
-Cir	s	jr	1
-Cir	s	vp	1
-Cir	s	12k	1
-Cir	s	13b	1
-Cir	s	192	1
-Cir	s	1b7	1
-Cir	s	1bp	1
 CIRCINUS	g	f	0
 Circinus Galaxy	g	f	0
 Cir X-1	x	5t	5
@@ -410,12 +217,6 @@ Cluster	c	6	0
 Cluster	c	8	0
 Cluster	c	uh	6
 Cluster Praesepe	c	4	0
-CMa	s	jt	1
-CMa	s	vj	1
-CMa	s	12w	1
-CMa	s	17y	1
-CMa	s	19w	1
-CMa	s	1a3	1
 CMa 1	c	1vh	6
 CMa 2	c	1xw	6
 CMa 23	c	2gg	6
@@ -424,21 +225,9 @@ Cmg 1066	c	4ja	6
 Cmg 119	c	1f7	6
 Cmg 672	c	3qd	6
 Cmg 878	c	406	6
-CMi	s	xs	1
-CMi	s	199	1
-CMi	s	19a	1
-CMi	s	1ab	1
 Cn 1-3	n	1a4	6
 Cn 1-5	n	14h	6
 Cn 3-1	n	171	6
-Cnc	s	hm	1
-Cnc	s	m9	1
-Cnc	s	vk	1
-Cnc	s	xp	1
-Cnc	s	yv	1
-Cnc	s	12n	1
-Cnc	s	139	1
-Cnc	s	16z	1
 Cocibolca	s	5k	0
 Cocoon Galaxy	g	j	0
 COIN-Gaia 1	c	94	4
@@ -482,16 +271,6 @@ COIN-Gaia 6	c	4dc	6
 COIN-Gaia 7	c	2b3	6
 COIN-Gaia 8	c	1e4	6
 COIN-Gaia 9	c	1lx	6
-Col	s	kd	1
-Col	s	qr	1
-Col	s	sl	1
-Col	s	vs	1
-Col	s	y5	1
-Col	s	z9	1
-Col	s	12x	1
-Col	s	1ac	1
-Col	s	1b8	1
-Col	s	1bk	1
 Collinder 1	c	la	4
 Collinder 101	c	de	4
 Collinder 103	c	hu	4
@@ -867,8 +646,6 @@ Collinder 95	c	9b	4
 Collinder 95	c	46g	6
 Collinder 97	c	59q	6
 Collinder 98	c	21	2
-Com	s	gg	1
-Com	s	p1	1
 Coma Berenices	c	1	0
 ComaI	g	or	4
 Coma Pinwheel	g	1r	0
@@ -878,48 +655,8 @@ Copernicus B	s	1t	0
 Cor Caroli	s	51	0
 Cor Caroli B	s	5d	0
 Cr 1	n	ws	6
-CrA	s	ha	1
-CrA	s	hb	1
-CrA	s	k5	1
-CrA	s	q5	1
-CrA	s	ql	1
-CrA	s	rv	1
-CrA	s	113	1
-CrA	s	15i	1
-CrA	s	160	1
 Crab Nebula	n	70	3
 Crab Pulsar	p	5	1
-CrB	s	hd	1
-CrB	s	hi	1
-CrB	s	hj	1
-CrB	s	ih	1
-CrB	s	ij	1
-CrB	s	jw	1
-CrB	s	ku	1
-CrB	s	ms	1
-CrB	s	qw	1
-CrB	s	u2	1
-CrB	s	vm	1
-CrB	s	173	1
-CrB	s	17s	1
-Crt	s	j2	1
-Crt	s	j8	1
-Crt	s	nq	1
-Crt	s	r5	1
-Crt	s	th	1
-Crt	s	ul	1
-Crt	s	ww	1
-Crt	s	xn	1
-Crt	s	z5	1
-Crt	s	11n	1
-Crt	s	14s	1
-Cru	s	i1	1
-Cru	s	lp	1
-Cru	s	zq	1
-Cru	s	10j	1
-Crv	s	hn	1
-Crv	s	xb	1
-Crv	s	110	1
 CTA 1	n	10	3
 CTB 1	n	3v	3
 CTB 104A	n	17	3
@@ -2322,20 +2059,6 @@ CXOU J174805.0-244643	x	s	2
 CXOU J175834.5-212321	x	6l	5
 CXOU J205847.5+414637	x	85	5
 CXOU J212958.1+121002	x	ay	5
-Cyg	s	hq	1
-Cyg	s	i2	1
-Cyg	s	ln	1
-Cyg	s	lt	1
-Cyg	s	mw	1
-Cyg	s	nu	1
-Cyg	s	ur	1
-Cyg	s	w2	1
-Cyg	s	123	1
-Cyg	s	15b	1
-Cyg	s	17n	1
-Cyg	s	18w	1
-Cyg	s	1av	1
-Cyg	s	1bu	1
 Cygnus Loop	n	h	3
 Cyg X-1	x	6	2
 Cyg X-2	x	4r	5
@@ -2472,12 +2195,6 @@ DDO 217	g	d5	3
 DDO 226	g	7i	3
 DeHt 2	n	y5	6
 DeHt 3	n	15b	6
-Del	s	jy	1
-Del	s	q8	1
-Del	s	re	1
-Del	s	so	1
-Del	s	st	1
-Del	s	1bl	1
 δ1 Aps	s	175	1
 δ1 Cha	s	zg	1
 δ1 CMi	s	19b	1
@@ -2609,30 +2326,9 @@ Dolidze 5	c	373	6
 Dolidze 52a	c	2wx	6
 Dolidze 53	c	302	6
 Dolidze 8	c	1ru	6
-Dor	s	gm	1
-Dor	s	i5	1
-Dor	s	ns	1
-Dor	s	p8	1
-Dor	s	ss	1
-Dor	s	w1	1
-Dor	s	15q	1
-Dor	s	15x	1
-Dor	s	16r	1
-Dor	s	1an	1
 Double Pulsar (A)	p	3	1
 Double Pulsar (B)	p	4	1
 DR4	n	3u	3
-Dra	s	g9	1
-Dra	s	ia	1
-Dra	s	ir	1
-Dra	s	ny	1
-Dra	s	o3	1
-Dra	s	tf	1
-Dra	s	wz	1
-Dra	s	z3	1
-Dra	s	10o	1
-Dra	s	12r	1
-Dra	s	13u	1
 Draco	g	ow	4
 DS 1	n	vt	6
 DS 2	n	vu	6
@@ -2835,23 +2531,6 @@ Enif	s	ey	0
 ε UMi	s	yl	1
 ε Vir	s	5f	0
 ε Vol	s	17i	1
-Equ	s	ht	1
-Equ	s	l4	1
-Equ	s	pt	1
-Equ	s	y1	1
-Eri	s	ga	1
-Eri	s	gb	1
-Eri	s	hf	1
-Eri	s	nl	1
-Eri	s	nw	1
-Eri	s	s4	1
-Eri	s	sp	1
-Eri	s	153	1
-Eri	s	15f	1
-Eri	s	161	1
-Eri	s	180	1
-Eri	s	19s	1
-Eri	s	19t	1
 Eridanus	c	2g	2
 Errai	s	23	0
 ES0490SC50	c	5el	6
@@ -3998,3 +3677,324 @@ ESO 271-021	g	2kn	5
 ESO 271-028	g	1ik	5
 ESO 272-003	g	ek	3
 ESO 272-005	g	1cl	5
+ESO 272-014	g	1uj	5
+ESO 272-015	g	3kf	5
+ESO 272-016	g	f3	3
+ESO 272-019	g	2ig	5
+ESO 272-022	g	2cs	5
+ESO 272-023	g	1w0	5
+ESO 272-025	g	8k	3
+ESO273-014	g	df	3
+ESO 273-015	g	467	5
+ESO274-001	g	3p	3
+ESO 275-01	c	2f5	6
+ESO 275-1	c	2f5	6
+ESO 275-275	c	2f5	6
+ESO 276-6	c	ak	4
+ESO 277-11	c	3qk	6
+ESO 277-14	c	he	4
+ESO 277-15	c	3c9	6
+ESO 277-18	c	3p9	6
+ESO 277-19	c	20v	6
+ESO 277-20	c	1r4	6
+ESO 277-22	c	1b	2
+ESO 277-3	c	e8	4
+ESO 277-6	c	fn	4
+ESO 277-6	c	3d9	6
+ESO 277-8	c	3pj	6
+ESO 279-13	c	49	2
+ESO 279-2	c	4t	2
+ESO 280-4	c	30	2
+ESO 282-003	g	3a7	5
+ESO 283-008	g	3hw	5
+ESO 283-011	g	4u1	5
+ESO 284-023	g	4fc	5
+ESO 284-024	g	28q	5
+ESO 284-028	g	2o7	5
+ESO 284-029	g	3ka	5
+ESO 284-031	g	4z6	5
+ESO 284-054	g	25h	5
+ESO 285-004	g	7zx	5
+ESO 285-005	g	2k7	5
+ESO 285-007	g	2it	5
+ESO 285-008	g	o3	3
+ESO 285-012	g	29j	5
+ESO 285-027	g	4m7	5
+ESO 286-014	g	4dn	5
+ESO 286-051	g	6p7	5
+ESO 286-057	g	4ol	5
+ESO 286-079	g	4am	5
+ESO 287-017	g	32h	5
+ESO 287-022	g	45m	5
+ESO 287-028	g	25c	5
+ESO 287-029	g	4dt	5
+ESO 287-031	g	4av	5
+ESO 287-034	g	24t	5
+ESO 287-036	g	1nc	5
+ESO 287-048	g	223	5
+ESO 287-049	g	2b8	5
+ESO 287-052	g	20x	5
+ESO 288-001	g	742	5
+ESO 288-002	g	77l	5
+ESO 288-026	g	23z	5
+ESO 288-027	g	29b	5
+ESO 288-028	g	22h	5
+ESO 288-043	g	ma	3
+ESO 288-046	g	29t	5
+ESO 288-051	g	1h6	5
+ESO 289-001	g	1vq	5
+ESO 289-003	g	25n	5
+ESO 289-007	g	1t3	5
+ESO 289-008	g	1sm	5
+ESO 289-009	g	1zd	5
+ESO 289-018	g	cf	3
+ESO 289-031	g	1ps	5
+ESO 290-002	g	1yh	5
+ESO 290-022	g	2nl	5
+ESO 290-024	g	m2	3
+ESO 290-028	g	12e	5
+ESO 290-029	g	is	3
+ESO 290-045	g	2iu	5
+ESO 291-001	g	lp	3
+ESO 291-007	g	1ku	5
+ESO 291-010	g	mg	3
+ESO 291-012	g	lh	3
+ESO 291-016	g	kp	3
+ESO 291-021	g	1j1	5
+ESO 291-029	g	2df	5
+ESO 292-017	g	2lw	5
+ESO 293-004	g	1ng	5
+ESO 293-050	g	2z	3
+ESO 294-010	g	2y	3
+ESO 295-006	g	49u	5
+ESO 295-020	g	34	3
+ESO 295-025	g	2x7	5
+ESO 295-026	g	4ie	5
+ESO 296-004	g	2ws	5
+ESO 296-007	g	2xm	5
+ESO 296-013	g	5gb	5
+ESO 296-021	g	4g3	5
+ESO 296-022	g	56m	5
+ESO 296-024	g	53b	5
+ESO 296-025	g	4r4	5
+ESO 296-031	g	6xb	5
+ESO 297-005	g	5i	3
+ESO 297-006	g	4x1	5
+ESO 297-009	g	53i	5
+ESO 297-011	g	4g8	5
+ESO 298-009	g	4mj	5
+ESO 298-020	g	4k9	5
+ESO 298-027	g	4j5	5
+ESO 298-029	g	45x	5
+ESO 298-038	g	3wi	5
+ESO 299-004	g	3tb	5
+ESO 299-006	g	1ff	5
+ESO 299-007	g	ms	3
+ESO 300-006	g	54t	5
+ESO 300-010	g	59l	5
+ESO 300-014	g	d8	3
+ESO 300-016	g	cd	3
+ESO 301-002	g	ce	3
+ESO 301-023	g	1k0	5
+ESO 302-022	g	7yn	5
+ESO 303-001	g	5aw	5
+ESO 303-014	g	55a	5
+ESO 303-017	g	3xo	5
+ESO 303-018	g	40w	5
+ESO 304-016	g	4jl	5
+ESO 304-018	g	59p	5
+ESO 305-000	g	e8	3
+ESO 305-001	g	803	5
+ESO 305-006	g	e8	3
+ESO 305-008	g	c9	3
+ESO 305-16	c	4z	2
+ESO 306-032	g	2jq	5
+ESO 309-007	g	g5	3
+ESO 309-016	g	18j	5
+ESO311-012	g	174	5
+ESO 311-17	c	w	2
+ESO 311-19	c	5g1	6
+ESO 311-21	c	54u	6
+ESO 311-8	c	6f	4
+ESO 311-8	c	7c	4
+ESO 311-8	c	1my	6
+ESO 312-03	c	4hv	6
+ESO 312-04	c	56r	6
+ESO 312-1	c	5at	6
+ESO 312-2	c	ma	4
+ESO 312-3	c	4hv	6
+ESO 312-3	c	56r	6
+ESO 312-312	c	4hv	6
+ESO 312-312	c	56r	6
+ESO 312-4	c	4hv	6
+ESO 312-4	c	56r	6
+ESO 313-14	c	d3	4
+ESO 313-2	c	1a	2
+ESO 313-6	c	am	4
+ESO 313-6	c	1or	6
+ESO 313-8	c	mh	4
+ESO 313-9	c	o4	4
+ESO 314-010	g	28v	5
+ESO 314-1	c	4yb	6
+ESO 314-13	c	o8	4
+ESO 315-013	g	2av	5
+ESO 317-024	g	2fh	5
+ESO 317-026	g	2nb	5
+ESO 317-028	g	2og	5
+ESO 317-029	g	2ab	5
+ESO 317-030	g	60m	5
+ESO 317-031	g	2jg	5
+ESO 317-034	g	2go	5
+ESO 317-040	g	423	5
+ESO 317-043	g	26w	5
+ESO 317-052	g	274	5
+ESO 317-053	g	2f4	5
+ESO 318-012	g	496	5
+ESO 318-013	g	93	3
+ESO 320-006	g	26g	5
+ESO 320-008	g	2fj	5
+ESO 320-014	g	8s	3
+ESO 321-006	g	2dz	5
+ESO 321-014	g	3u	3
+ESO 322-004	g	2u0	5
+ESO 322-006	g	oc	3
+ESO 322-008	g	2eu	5
+ESO 322-010	g	2qp	5
+ESO 322-014	g	mq	3
+ESO 322-022	g	311	5
+ESO 322-029	g	30p	5
+ESO 322-030	g	27h	5
+ESO 322-036	g	1x0	5
+ESO 322-044	g	1ye	5
+ESO 322-048	g	2oh	5
+ESO 322-049	g	2p7	5
+ESO 322-050	g	2wm	5
+ESO 322-052	g	21b	5
+ESO 322-055	g	251	5
+ESO 322-056	g	2l6	5
+ESO 322-057	g	376	5
+ESO 322-059	g	2q9	5
+ESO 322-060	g	1u2	5
+ESO 322-066	g	1y5	5
+ESO 322-067	g	2hb	5
+ESO 322-069	g	2ix	5
+ESO 322-072	g	3rc	5
+ESO 322-073	g	2tf	5
+ESO 322-077	g	24b	5
+ESO 322-078	g	2ot	5
+ESO 322-081	g	35e	5
+ESO 322-082	g	3f2	5
+ESO 322-083	g	2j8	5
+ESO 322-087	g	317	5
+ESO 322-088	g	299	5
+ESO 322-090	g	1qv	5
+ESO 322-091	g	nx	3
+ESO 323-001	g	2re	5
+ESO 323-003	g	2b1	5
+ESO 323-016	g	1xf	5
+ESO 323-017	g	2z0	5
+ESO 323-021	g	1uk	5
+ESO 323-022	g	2uz	5
+ESO 323-029	g	1u7	5
+ESO 323-031	g	2ii	5
+ESO 323-036	g	23p	5
+ESO 323-041	g	2xw	5
+ESO 323-047	g	2qa	5
+ESO 323-048	g	2vx	5
+ESO 323-051	g	335	5
+ESO 323-074	g	2at	5
+ESO 324-024	g	53	3
+ESO 325-011	g	q4	4
+ESO 325-046	g	79	3
+ESO 325-047	g	79	3
+ESO 325-051	g	3hy	5
+ESO 326-025	g	752	5
+ESO 327-037	g	2li	5
+ESO 328-015	g	3cn	5
+ESO 329-18	c	4q	2
+ESO 331-3	c	k	2
+ESO 331-4	c	4h	2
+ESO 332-10	c	cn	4
+ESO 332-13	c	2j4	6
+ESO 332-16	c	2ml	6
+ESO 332-17	c	dn	4
+ESO 332-19	c	8g	4
+ESO 332-22	c	2hg	6
+ESO 332-9	c	eh	4
+ESO 333-1	c	go	4
+ESO 333-14	c	4g	2
+ESO 333-16	c	p0	4
+ESO 333-2	c	3yh	6
+ESO 333-4	c	38v	6
+ESO 333-6	c	2d3	6
+ESO 333-7	c	gs	4
+ESO 334-3	c	9c	4
+ESO 334-4	c	dc	4
+ESO 337-018	g	47y	5
+ESO 338-005	g	53a	5
+ESO 338-014	g	4h1	5
+ESO 338-015	g	4yd	5
+ESO 339-018	g	477	5
+ESO 339-023	g	42n	5
+ESO 339-032	g	547	5
+ESO 340-011	g	3re	5
+ESO 340-020	g	5tj	5
+ESO 341-015	g	2dh	5
+ESO 342-039	g	4nr	5
+ESO 343-004	g	4pg	5
+ESO 343-008	g	4hl	5
+ESO 343-022	g	432	5
+ESO 344-013	g	7fy	5
+ESO 344-014	g	7e2	5
+ESO 344-020	g	4jo	5
+ESO 345-004	g	6lp	5
+ESO 345-006	g	6hx	5
+ESO 345-017	g	85t	5
+ESO 345-018	g	7f8	5
+ESO 345-019	g	6ul	5
+ESO 345-026	g	1k7	5
+ESO 345-049	g	237	5
+ESO 346-010	g	1sa	5
+ESO 346-012	g	nn	3
+ESO 346-017	g	1qj	5
+ESO 346-019	g	fh	3
+ESO 346-022	g	147	5
+ESO 346-026	g	16a	5
+ESO 346-028	g	dk	3
+ESO 347-004	g	1qo	5
+ESO 347-015	g	7f7	5
+ESO 347-016	g	7e5	5
+ESO 347-017	g	ar	3
+ESO 347-018	g	ko	3
+ESO 347-028	g	b9	3
+ESO 347-030	g	2ls	5
+ESO 347-033	g	1xy	5
+ESO 347-034	g	18f	5
+ESO 348-009	g	xu	4
+ESO 349-012	g	5k	3
+ESO 349-021	g	5ne	5
+ESO 349-031	g	3x	3
+ESO 349-032	g	5yg	5
+ESO 349-035	g	66j	5
+ESO 350-014	g	2vz	5
+ESO 350-017	g	1uh	5
+ESO 350-021	g	125	5
+ESO 350-023	g	j3	3
+ESO 350-033	g	1or	5
+ESO 351-026	g	5sr	5
+ESO 351-027	g	2zk	5
+ESO 352-001	g	5zf	5
+ESO 352-012	g	532	5
+ESO 352-014	g	51k	5
+ESO 352-024	g	2vm	5
+ESO 352-033	g	48f	5
+ESO 352-046	g	2jh	5
+ESO 352-053	g	39d	5
+ESO 352-066	g	4vz	5
+ESO 352-068	g	4xk	5
+ESO 353-003	g	4py	5
+ESO 353-006	g	3u0	5
+ESO 353-011	g	4eo	5
+ESO 353-015	g	6sb	5
+ESO 353-021	g	6ln	5
+ESO 353-023	g	6s7	5

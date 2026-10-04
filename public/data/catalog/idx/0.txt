@@ -3304,18 +3304,6 @@ Amadioha	s	9h	0
 AMU 1	n	xg	6
 Añañuca	s	1f	0
 Ancha	s	94	0
-And	s	jj	1
-And	s	k6	1
-And	s	lj	1
-And	s	mz	1
-And	s	oz	1
-And	s	pe	1
-And	s	pk	1
-And	s	v7	1
-And	s	166	1
-And	s	16k	1
-And	s	183	1
-And	s	1bm	1
 And I	g	pc	4
 And II	g	pa	4
 And III	g	pe	4
@@ -3352,12 +3340,6 @@ Aniara	s	co	0
 Ankaa	s	45	0
 Anon vdB	c	4o	2
 Anser	s	aw	0
-Ant	s	kl	1
-Ant	s	s1	1
-Ant	s	yz	1
-Ant	s	109	1
-Ant	s	13v	1
-Ant	s	18a	1
 Antalova 1	c	2cf	6
 Antalova 2	c	1zm	6
 Antares	s	ee	0
@@ -3370,71 +3352,12 @@ Apamvatsa	s	dt	0
 Apdu	s	5t	0
 ApplesI	g	ua	4
 Apriamaswili 1	c	2s9	6
-Aps	s	n4	1
-Aps	s	o5	1
-Aps	s	oc	1
-Aps	s	wp	1
-Aps	s	119	1
-Aps	s	15o	1
-Aps	s	1aa	1
-Aql	s	h5	1
-Aql	s	hz	1
-Aql	s	ko	1
-Aql	s	lx	1
-Aql	s	of	1
-Aql	s	pj	1
-Aql	s	q7	1
-Aql	s	sv	1
-Aql	s	14f	1
-Aql	s	16j	1
-Aql	s	193	1
-Aql	s	19j	1
-Aql	s	19p	1
-Aql	s	1aq	1
-Aql	s	1bh	1
 Aql X-1	x	5d	5
-Aqr	s	d	0
-Aqr	s	il	1
-Aqr	s	ne	1
-Aqr	s	oy	1
-Aqr	s	q0	1
-Aqr	s	rz	1
-Aqr	s	s7	1
-Aqr	s	tc	1
-Aqr	s	13w	1
-Aqr	s	15j	1
-Aqr	s	18t	1
-Aqr	s	1ah	1
-Ara	s	i8	1
-Ara	s	me	1
-Ara	s	t8	1
-Ara	s	vb	1
-Ara	s	x3	1
-Ara	s	10v	1
-Ara	s	12j	1
-Ara	s	168	1
-Ara	s	18h	1
-Ara	s	19v	1
-Ara	s	1al	1
-Ara	s	1ao	1
 Ara X-1	x	64	5
 Arcalís	s	db	0
 AR Cas	c	td	6
 Archinal 1	c	2om	6
 Arcturus	s	1p	0
-Ari	s	jx	1
-Ari	s	ma	1
-Ari	s	qb	1
-Ari	s	vh	1
-Ari	s	vn	1
-Ari	s	104	1
-Ari	s	12l	1
-Ari	s	12t	1
-Ari	s	13e	1
-Ari	s	13q	1
-Ari	s	167	1
-Ari	s	16v	1
-Ari	s	18y	1
 Arkab Posterior	s	70	0
 Arkab Prior	s	cb	0
 Arneb	s	fw	0
@@ -3566,19 +3489,6 @@ ATO J091.8608+22.0966	x	61	5
 ATO J315.8987+45.7515	x	63	5
 Atria	s	cc	0
 Auner 1	c	5em	6
-Aur	s	gt	1
-Aur	s	ot	1
-Aur	s	ox	1
-Aur	s	q2	1
-Aur	s	rr	1
-Aur	s	s2	1
-Aur	s	u6	1
-Aur	s	11l	1
-Aur	s	14y	1
-Aur	s	158	1
-Aur	s	16b	1
-Aur	s	178	1
-Aur	s	18l	1
 Aurwandilsta	s	c2	0
 Australis	s	1j	0
 Australis	s	6x	0
@@ -3998,3 +3908,93 @@ BH 254	c	d	2
 BH 255	c	er	4
 BH 256	c	3y	2
 BH 26	c	ej	4
+BH 26	c	270	6
+BH 260	c	4j	2
+BH 261	c	2p	2
+BH 262	c	3h	2
+BH 27	c	cs	4
+BH 28	c	4z6	6
+BH 29	c	54r	6
+BH 3	c	oc	4
+BH 30	c	k7	4
+BH 31	c	ng	4
+BH 32	c	4kf	6
+BH 33	c	1a	2
+BH 35	c	4sy	6
+BH 37	c	4pd	6
+BH 38	c	eq	4
+BH 39	c	o5	4
+BH 41	c	mh	4
+BH 43	c	o4	4
+BH 45	c	jq	4
+BH 45	c	27x	6
+BH 46	c	fh	4
+BH 46	c	31a	6
+BH 48	c	mz	4
+BH 49	c	jr	4
+BH 5	c	8n	4
+BH 50	c	dl	4
+BH 51	c	d3	4
+BH 52	c	bw	4
+BH 54	c	37x	6
+BH 55	c	4yb	6
+BH 56	c	al	4
+BH 59	c	kp	4
+BH 61	c	o8	4
+BH 62	c	gf	4
+BH 64	c	3w6	6
+BH 65	c	n7	4
+BH 66	c	or	4
+BH 67	c	5es	6
+BH 68	c	ow	4
+BH 68	c	4gy	6
+BH 69	c	cv	4
+BH 7	c	mg	4
+BH 71	c	ck	4
+BH 72	c	54m	6
+BH 73	c	59a	6
+BH 74	c	h3	4
+BH 75	c	3e2	6
+BH 76	c	2x7	6
+BH 76	c	2zw	6
+BH 77	c	mk	4
+BH 78	c	5dk	6
+BH 79	c	4bw	6
+BH 8	c	lt	4
+BH 80	c	m9	4
+BH 81	c	3lw	6
+BH 82	c	5ex	6
+BH 83	c	nv	4
+BH 84	c	38q	6
+BH 84	c	4tm	6
+BH 85	c	5d6	6
+BH 86	c	q	2
+BH 87	c	gk	4
+BH 88	c	2qr	6
+BH 89	c	ll	4
+BH 9	c	6f	4
+BH 9	c	7c	4
+BH 9	c	1my	6
+BH 90	c	ip	4
+BH 92	c	3ko	6
+BH 93	c	14v	6
+BH 94	c	nj	4
+BH 96	c	od	4
+BH 99	c	7y	4
+Bharani	s	86	0
+Bibhā	s	bg	0
+Bibing	s	cv	0
+Bica 2	c	2kp	6
+Bica 3	c	3vq	6
+Bica 5	c	2m0	6
+Bica 631	c	4fu	6
+Bica 652	c	4pu	6
+Biham	s	4g	0
+binary pulsar	p	6	1
+Biurakan 10	c	4uq	6
+Biurakan 11	c	4v8	6
+Biurakan 2	c	2q7	6
+Biurakan 7	c	ol	4
+Biurakan 8	c	l7	4
+Biurakan 9	c	544	6
+BK 3N	g	5z	3

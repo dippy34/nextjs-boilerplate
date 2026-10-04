@@ -257,7 +257,7 @@ def pulsars() -> Cat:
                           "-nohead", "-nonumber", "-o", "short_csv"], cwd=tdir, capture_output=True, text=True).stdout
     famous = {"B0531+21": "Crab Pulsar", "B0833-45": "Vela Pulsar", "J0437-4715": None, "B1919+21": None,
               "B1913+16": "Hulse-Taylor binary pulsar", "J0737-3039A": "Double Pulsar (A)", "J0737-3039B": "Double Pulsar (B)",
-              "B1257+12": "Lich (PSR B1257+12, the first planets found)", "J1748-2446ad": None, "B1937+21": None,
+              "B1257+12": "Lich (PSR B1257+12)", "J1748-2446ad": None, "B1937+21": None,
               "J0633+1746": "Geminga"}
     for line in out.splitlines():
         f = [x.strip() for x in line.split(";")]
@@ -281,7 +281,7 @@ def pulsars() -> Cat:
 
 
 def toi_hosts() -> Cat:
-    c = Cat("t", "toi", "TESS planet candidates", COMMON + ["tmag", "teff", "radSun", "planets"],
+    c = Cat("t", "toi", "TESS candidates", COMMON + ["tmag", "teff", "radSun", "planets"],
             "NASA Exoplanet Archive, TESS Objects of Interest (TOI) table")
     hosts = defaultdict(list)
     with open(RAWDIR / "toi.csv") as f:
@@ -481,6 +481,8 @@ def nebulae() -> Cat:
             continue
         nm = sval(r["Names"])
         names = [x.strip() for x in nm.split(",") if x.strip()] if nm else []
+        if names and names[0] in ("Cassiopeia A", "Cas A"):
+            names = ["Cassiopeia A", "Cas A"] + [n for n in names[1:] if n not in ("Cassiopeia A", "Cas A")]
         c.add(names[0] if names else f"SNR G{g.lstrip('G')}", names[1:] + [f"SNR G{g.lstrip('G')}"],
               hms(r["RAh"], r["RAm"], r["RAs"]), dms(r["DE-"], r["DEd"], r["DEm"], 0), d * 1000, "e", 3 if names else 6,
               kind="snr", majArcmin=val(r["MajDiam"]), minArcmin=val(r["MinDiam"]), note=sval(r["type"]))
@@ -522,7 +524,7 @@ def word_keys(name: str) -> list[str]:
     if re.search(r"\d", name) and not re.match(r"^[A-Za-z' ]+$", name):
         return []
     words = re.findall(r"[^\s\-()]+", name)
-    return [" ".join(words[i:]) for i in range(1, len(words)) if len(words[i]) >= 3]
+    return [" ".join(words[i:]) for i in range(1, len(words)) if len(words[i]) >= 4 and words[i][0].isalpha()]
 
 
 def write(cats: list[Cat]) -> dict:
