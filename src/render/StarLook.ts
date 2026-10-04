@@ -111,7 +111,7 @@ export function starLookUniforms(look: StarLook, axisBF = new Vector3(0, 0, 1)):
     uSeed: { value: look.seed }, uGranFreq: { value: look.granFreq }, uGranAmp: { value: look.granAmp },
     uSpots: { value: look.spots }, uSpotLat: { value: look.spotLat }, uFaculae: { value: look.faculae },
     uLimbA: { value: look.limbA }, uLimbB: { value: look.limbB }, uRotRate: { value: look.rotRate },
-    uGravDark: { value: look.gravDark }, uAxis: { value: axisBF.clone() }, uFlares: { value: look.flares },
+    uGravDark: { value: look.gravDark }, uAxis: { value: axisBF.clone() }, uFlares: { value: look.flares }, uFlat: { value: look.flattening },
   };
 }
 
@@ -121,4 +121,5 @@ export function applyStarLook(u: Record<string, { value: unknown }>, look: StarL
   u.uSpots.value = look.spots; u.uSpotLat.value = look.spotLat; u.uFaculae.value = look.faculae;
   u.uLimbA.value = look.limbA; u.uLimbB.value = look.limbB; u.uRotRate.value = look.rotRate;
   u.uGravDark.value = look.gravDark; u.uFlares.value = look.flares;
+  if (u.uFlat) u.uFlat.value = look.flattening;
 }

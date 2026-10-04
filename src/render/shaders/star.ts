@@ -48,7 +48,10 @@ float fbm3(vec3 p) { return 0.55 * n3(p) + 0.3 * n3(p * 2.1 + 7.0) + 0.15 * n3(p
 vec3 rotateAbout(vec3 v, vec3 k, float a) { float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c); }
 
 void main() {
-  vec3 nW = normalize(uBodyToWorld * vNormalBF);
+  // the surface normal of the drawn (flattened) ellipsoid: with the sphere's own normal the limb of
+  // a fast rotator came out dark on one side (that normal faces away along part of the outline)
+  vec3 nE = normalize(vNormalBF + uAxis * dot(vNormalBF, uAxis) * (1.0 / max(1.0 - uFlat, 0.3) - 1.0));
+  vec3 nW = normalize(uBodyToWorld * nE);
   vec3 V = normalize(-vPosView);
   float mu = clamp(dot(nW, V), 0.0, 1.0);
   // surface coordinates rotating with the star (equator faster: differential rotation)
@@ -98,7 +101,7 @@ void main() {
   vec3 col = uColor * ld * gd * gran * (1.0 - spot) * (1.0 + fac);
   // cooler (redder) spots, lanes and equator; hotter cell centres a little whiter; and a redder
   // limb (the light there comes from higher, cooler layers: limb darkening is stronger in blue)
-  float cool = clamp(spot * 1.4 + uGravDark * (1.0 - lat * lat) + (1.0 - gran) * 1.5 + 0.9 * x * x * x, 0.0, 1.0);
+  float cool = clamp(spot * 1.4 + uGravDark * (1.0 - lat * lat) + (1.0 - gran) * 1.5 + 0.45 * x * x * x * x, 0.0, 1.0);
   col *= mix(vec3(1.0), vec3(1.0, 0.72, 0.5), cool);
   // shown more saturated than the blackbody's own pale tint (as photographs and the eye's
   // impression of a star's colour are): an M star orange-red, a G star yellow-white, an O star blue
