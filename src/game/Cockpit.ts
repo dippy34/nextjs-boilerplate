@@ -17,6 +17,8 @@ export interface CockpitReadout {
   time: string;
   missions: string;
   hint: string;
+  /** real-physics flight data (null outside the ship's physics) */
+  flight: { lines: string[]; g: string; sas: string; fuel: number; clocks: string; warning: string; lock: string } | null;
 }
 
 /**
@@ -28,7 +30,7 @@ export class Cockpit {
   readonly group = new Group();
   readout: CockpitReadout = {
     speed: '0 m/s', throttle: 0, boost: false, altitude: '', reference: '', target: 'none', targetKind: '', distance: '', eta: '',
-    warp: 'no target', time: '', missions: '', hint: '',
+    warp: 'no target', time: '', missions: '', hint: '', flight: null,
   };
   private screens: Panel[] = [];
   private timer = 0;
@@ -121,10 +123,26 @@ export class Cockpit {
     p.rect(t >= 0 ? mid : mid + (w / 2) * t, y0, (w / 2) * Math.abs(t), 22, 8, t >= 0 ? COLORS.accent : COLORS.warn);
     p.text('altitude', 18, 210, 20, COLORS.dim, 600);
     p.text(r.altitude, 18, 246, 30, COLORS.text, 600, 'left', p.width - 36);
+    if (r.flight) {
+      // propellant gauge along the bottom
+      p.rect(18, 262, p.width - 36, 10, 5, 'rgba(255,255,255,0.06)');
+      p.rect(18, 262, (p.width - 36) * Math.max(0, Math.min(1, r.flight.fuel)), 10, 5, r.flight.fuel < 0.1 ? COLORS.warn : '#9dff8a');
+    }
   }
 
   private paintCentre(p: Panel): void {
     const r = this.readout;
+    if (r.flight) {
+      // orbit screen: apsides, impact, then the target line and warp state
+      const f = r.flight;
+      this.frame(p, 'ORBIT');
+      f.lines.forEach((l, i) => p.text(l, 18, 72 + i * 34, 26, l.startsWith('IMPACT') ? COLORS.warn : COLORS.text, 600, 'left', p.width - 36));
+      p.text(`${r.target}${r.distance ? ` · ${r.distance}` : ''}`, 18, 182, 20, r.target === 'none' ? COLORS.dim : COLORS.sel, 600, 'left', p.width - 36);
+      const warp = r.warp === 'warping' ? 'WARP ENGAGED' : f.lock ? 'WARP MASS-LOCKED' : r.warp === 'ready' ? 'WARP READY' : 'SELECT A TARGET';
+      p.rect(18, 220, p.width - 36, 48, 12, r.warp === 'warping' ? 'rgba(127,178,255,0.35)' : 'rgba(255,255,255,0.05)', COLORS.border, 2);
+      p.text(warp, p.width / 2, 245, 24, f.lock ? COLORS.warn : r.warp === 'warping' ? '#ffffff' : r.warp === 'ready' ? COLORS.accent : COLORS.dim, 700, 'center');
+      return;
+    }
     this.frame(p, 'NAVIGATION');
     p.text(r.target, 18, 80, 38, r.target === 'none' ? COLORS.dim : COLORS.sel, 700, 'left', p.width - 36);
     p.text(r.targetKind, 18, 112, 20, COLORS.dim, 500, 'left', p.width - 36);
@@ -139,6 +157,17 @@ export class Cockpit {
 
   private paintRight(p: Panel): void {
     const r = this.readout;
+    if (r.flight) {
+      const f = r.flight;
+      this.frame(p, 'STATUS');
+      p.text(r.reference, 18, 64, 22, COLORS.text, 600, 'left', p.width - 36);
+      p.text(`${f.g} · SAS ${f.sas}`, 18, 100, 22, COLORS.text, 600, 'left', p.width - 36);
+      p.text(f.clocks, 18, 136, 18, COLORS.dim, 500, 'left', p.width - 36);
+      p.text(r.time, 18, 168, 18, COLORS.dim, 500, 'left', p.width - 36);
+      if (f.warning) p.text(f.warning, 18, 214, 24, COLORS.warn, 700, 'left', p.width - 36);
+      p.text(r.hint, 18, 270, 16, COLORS.dim, 400, 'left', p.width - 36);
+      return;
+    }
     this.frame(p, 'STATUS');
     p.text('near', 18, 66, 20, COLORS.dim, 600);
     p.text(r.reference, 18, 98, 28, COLORS.text, 600, 'left', p.width - 36);

@@ -1,4 +1,4 @@
-// Drives game mode in headless Chromium: cockpit, thrust, inertia, brake, warp, chase view, traffic,
+// Drives game mode in headless Chromium: cockpit, physics thrust, mass lock, warp, chase view, traffic,
 // missions. Usage: node scripts/game.mjs [baseUrl] [outDir]
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -32,22 +32,20 @@ await page.screenshot({ path: path.join(outDir, 'g1-cockpit.png'), timeout: 1800
 st = await page.evaluate(() => ({ ships: window.app.game.traffic.ships.length, anchor: window.app.rig.anchor?.name }));
 check('fictional traffic orbits the planet we are near', st.ships > 0 && st.anchor === 'Earth', JSON.stringify(st));
 
-// 3. thrust; releasing keeps momentum (inertia); X brakes
-// (S: thrust backwards, away from Earth: near a surface the speed limit tightens by design)
-await page.keyboard.down('KeyS');
-await frames(20);
-await page.keyboard.up('KeyS');
-await frames(1);
-const v1 = await page.evaluate(() => window.app.rig.speed);
-await frames(6);
-const v2 = await page.evaluate(() => window.app.rig.speed);
-check('thrust works, and the ship coasts after release', v1 > 0 && v2 > 0.3 * v1, `${v1.toFixed(0)} -> ${v2.toFixed(0)} m/s`);
+// 3. real physics: W throttles the main engine up (the orbital speed changes), X cuts it, the ship coasts
+st = await page.evaluate(() => ({ on: window.app.game.flight.on, v: window.app.game.flight.readout.orbitSpeed, paused: window.app.clock.paused }));
+check('boarding turns on physics flight with time running', st.on && !st.paused, JSON.stringify(st));
+const v0 = st.v;
+await page.keyboard.down('KeyW');
+await frames(12);
+await page.keyboard.up('KeyW');
+const thr = await page.evaluate(() => window.app.game.flight.ship.throttle);
 await page.keyboard.down('KeyX');
-await frames(40);
+await frames(2);
 await page.keyboard.up('KeyX');
 await frames(2);
-const v3 = await page.evaluate(() => window.app.rig.speed);
-check('X brakes', v3 < 0.2 * Math.max(v2, 1), `${v3.toFixed(1)} m/s`);
+st = await page.evaluate(() => ({ thr: window.app.game.flight.ship.throttle, v: window.app.game.flight.readout.orbitSpeed, fuel: window.app.game.flight.readout.fuel }));
+check('W throttles up and burns, X cuts the engine', thr > 0 && st.thr === 0 && Math.abs(st.v - v0) > 0.5 && st.fuel < 1, `throttle ${thr.toFixed(2)}, ${v0.toFixed(1)} -> ${st.v.toFixed(1)} m/s`);
 
 // 4. cockpit screens show the target and the warp drive flies there
 await page.evaluate(() => { const a = window.app; a.select(a.findByName('Moon')); });
@@ -57,6 +55,13 @@ check('cockpit shows the target', st.target === 'Moon' && st.warp === 'ready' &&
 st = await page.evaluate(() => { const h = window.app.game.hud; return { hud: h.group.visible, target: h.group.children[0].visible }; });
 check('canopy HUD brackets the target', st.hud && st.target, JSON.stringify(st));
 await page.screenshot({ path: path.join(outDir, 'g1b-hud.png'), timeout: 180000 });
+// (deep in Earth's gravity the drive is mass-locked: climb out first)
+await page.keyboard.press('KeyJ');
+await frames(3);
+st = await page.evaluate(() => ({ ap: window.app.rig.autopilot, lock: window.app.game.flight.massLock() }));
+check('the warp drive is mass-locked close to Earth', !st.ap && st.lock !== '', st.lock);
+await page.evaluate(() => { const a = window.app; const e = a.findByName('Earth'); a.placeNear(e, e.radius * 12, 60, 10); });
+await frames(3);
 await page.keyboard.press('KeyJ');
 await frames(4);
 st = await page.evaluate(() => ({ ap: window.app.rig.autopilot, warp: window.app.game.cockpit.readout.warp, fx: window.app.game.warpFx.lines.visible }));
@@ -106,13 +111,11 @@ st = await page.evaluate(() => ({ docked: window.app.game.docked }));
 check('thrust undocks', st.docked === null);
 
 // 8. landing: come down onto the Moon
-await page.evaluate(() => { const a = window.app; const m = a.findByName('Moon'); a.select(m); a.placeNear(m, m.radius * 1.002, 30, 20); a.rig.lookAt(m.upos.sub(a.rig.upos).normalize()); });
+// (dropped 12 m over the ground with no speed: lunar gravity sets it down at ~6 m/s)
+await page.evaluate(() => { const a = window.app; const m = a.findByName('Moon'); a.select(m); a.placeNear(m, m.radius + 12, 30, 20); });
+await page.waitForFunction(() => !!window.app.game.flight.readout.landed || !!window.app.game.flight.ending, null, { timeout: 240000 }).catch(() => undefined);
 await frames(4);
-await page.keyboard.down('KeyW');
-await page.waitForFunction(() => window.app.game.landed !== null, null, { timeout: 240000 }).catch(() => undefined);
-await page.keyboard.up('KeyW');
-await frames(4);
-st = await page.evaluate(() => ({ landed: window.app.game.landed?.name ?? null, alt: window.app.rig.altitude }));
+st = await page.evaluate(() => ({ landed: window.app.game.flight.readout.landed || null, alt: window.app.rig.altitude, ending: window.app.game.flight.ending?.title ?? null }));
 check('the ship touches down on the Moon', st.landed === 'Moon' && st.alt < 15, JSON.stringify(st));
 await page.screenshot({ path: path.join(outDir, 'g5-landed.png'), timeout: 180000 });
 
