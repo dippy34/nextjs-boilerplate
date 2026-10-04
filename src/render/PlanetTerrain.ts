@@ -208,6 +208,9 @@ export class PlanetTerrain {
   private jobSeq = 0;
   private frame = 0;
   private elevVersion = 0;
+  /** this frame's column under the explorer: direction (body-fixed) and the level wanted there */
+  private chainDir = new Vector3();
+  private chainLevel = 0;
   private groundKey = '';
   private drawn: Node[] = [];
   private lastT = performance.now();
@@ -477,6 +480,12 @@ export class PlanetTerrain {
     }
     // ---- requests
     want.sort((a, b) => b.p - a.p);
+    // the column under the explorer is built down to the detail wanted there in one worker job
+    {
+      const target = Math.max(pa * P * Math.max(altG, 0.2) * 0.5, minSp);
+      this.chainLevel = Math.max(0, Math.min(24, Math.ceil(Math.log2((R * Math.PI) / 2 / TILE_N / target))));
+      this.chainDir.copy(up);
+    }
     this.dispatch(w, want.map((x) => x.n), c, sunBF);
     this.stats.pending = this.jobs.size;
     if (!ready) return false;
@@ -653,7 +662,11 @@ export class PlanetTerrain {
       this.busy[k]++;
       free--;
       this.jobs.set(job, { node: n, world: w, worker: k, serialAtStart: 0 });
-      this.workers[k].postMessage({ type: 'tile', job, id: w.id, req: this.reqOf(w, n, sunBF, c.lonLeft) });
+      const req = this.reqOf(w, n, sunBF, c.lonLeft);
+      if (!n.data && this.chainLevel > n.level + 1 && this.holds(n, this.chainDir)) {
+        req.chain = { dir: [this.chainDir.x, this.chainDir.y, this.chainDir.z], level: Math.min(this.chainLevel, n.level + 8) };
+      }
+      this.workers[k].postMessage({ type: 'tile', job, id: w.id, req });
     }
   }
 
@@ -667,7 +680,15 @@ export class PlanetTerrain {
     for (const n of this.drawn) n.stale = true;
   }
 
-  private receive(worker: number, msg: { job: number; data: TileData | null }): void {
+  /** whether tile `n` holds body-fixed direction `d` */
+  private holds(n: Node, d: Vector3): boolean {
+    const f = dirFace(d);
+    if (f.face !== n.face) return false;
+    const [s0, t0, w] = tileRect(n.level, n.x, n.y);
+    return f.s >= s0 && f.s <= s0 + w && f.t >= t0 && f.t <= t0 + w;
+  }
+
+  private receive(worker: number, msg: { job: number; data: TileData | null; chain?: { level: number; x: number; y: number; data: TileData }[] }): void {
     this.busy[worker] = Math.max(0, this.busy[worker] - 1);
     const j = this.jobs.get(msg.job);
     if (!j) return;
@@ -675,7 +696,18 @@ export class PlanetTerrain {
     const n = j.node;
     if (n.job !== msg.job) return;
     n.job = 0;
-    if (msg.data && j.world === this.world) this.accept(j.world, n, msg.data);
+    if (!msg.data || j.world !== this.world) return;
+    this.accept(j.world, n, msg.data);
+    // the column below it, built in the same job
+    let node = n;
+    for (const c of msg.chain ?? []) {
+      if (!node.kids) node.kids = [0, 1, 2, 3].map((q) => new Node(node.face, node.level + 1, node.x * 2 + (q & 1), node.y * 2 + (q >> 1), node));
+      const kid = node.kids.find((k) => k.x === c.x && k.y === c.y);
+      if (!kid) break;
+      kid.used = this.frame;
+      if (!kid.data && !kid.job) { kid.sunBF.copy(n.sunBF); this.accept(j.world, kid, c.data); }
+      node = kid;
+    }
   }
 
   private accept(w: World, n: Node, data: TileData): void {

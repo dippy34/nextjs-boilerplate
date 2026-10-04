@@ -6,7 +6,7 @@ import type { Body } from '../src/universe/Body';
 import { TerrainSource } from '../src/universe/Terrain';
 import { heightFromSpec, heightSpec } from '../src/universe/TerrainHeights';
 import {
-  buildTile, dirFace, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileValue,
+  buildTile, childToward, dirFace, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileValue,
 } from '../src/universe/TerrainTiles';
 
 const R = 1737e3;
@@ -77,6 +77,21 @@ describe('planet terrain tiles', () => {
         const rk1 = tileGroundRadius({ face: 4, level: 4, x: 6 + qx, y: 8 + qy }, kid, 1, d);
         expect(Math.abs(rk1 - (R + hills(d)))).toBeLessThan(60);
       }
+    }
+  });
+
+  it('the column under a direction: each child holds it', () => {
+    const d = faceDir(3, 0.4321, -0.777);
+    let t = { face: 3, level: 0, x: 0, y: 0 };
+    for (let l = 0; l < 12; l++) {
+      const c = childToward(t, d);
+      t = { face: 3, level: l + 1, x: c.x, y: c.y };
+      const [s0, t0, w] = tileRect(t.level, t.x, t.y);
+      const f = dirFace(d);
+      expect(f.s).toBeGreaterThanOrEqual(s0 - 1e-12);
+      expect(f.s).toBeLessThanOrEqual(s0 + w + 1e-12);
+      expect(f.t).toBeGreaterThanOrEqual(t0 - 1e-12);
+      expect(f.t).toBeLessThanOrEqual(t0 + w + 1e-12);
     }
   });
 

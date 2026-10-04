@@ -116,6 +116,11 @@ export interface TileRequest {
   parent?: { pos: Float32Array; tn: Float32Array; centre: number[]; qx: number; qy: number } | null;
   /** finest spacing (m) the heights are computed for */
   minSpacing?: number;
+  /**
+   * Also build the column of descendants holding body-fixed direction `dir`, down to `level`
+   * (each from its parent's shape), so the ground under the explorer reaches its detail in one job.
+   */
+  chain?: { dir: number[]; level: number } | null;
 }
 
 export interface TileData {
@@ -367,6 +372,15 @@ function shadeTile(req: TileRequest, height: HeightFn, P: Float64Array, E: numbe
  * meets a tile's drawn surface (positions `pos` relative to `centre`, morphed from `morph` by `m`):
  * the plane of the triangle of the grid cell that holds the direction. NaN if outside the tile.
  */
+/** The child quadrant (x, y at level + 1) of a tile that holds direction `dir`. */
+export function childToward(t: { face: number; level: number; x: number; y: number }, dir: { x: number; y: number; z: number }): { x: number; y: number } {
+  const f = dirFace(dir);
+  const [s0, t0, w] = tileRect(t.level, t.x, t.y);
+  // (a direction on another face: the quadrant nearest to it in this face's parameters)
+  const qx = f.face === t.face ? (f.s >= s0 + w / 2 ? 1 : 0) : 0, qy = f.face === t.face ? (f.t >= t0 + w / 2 ? 1 : 0) : 0;
+  return { x: t.x * 2 + qx, y: t.y * 2 + qy };
+}
+
 export function tileGroundRadius(t: { face: number; level: number; x: number; y: number }, data: Pick<TileData, 'pos' | 'morph' | 'centre'>, m: number, dir: Vector3): number {
   const f = dirFace(dir);
   if (f.face !== t.face) return NaN;

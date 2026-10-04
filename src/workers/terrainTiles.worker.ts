@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { ElevationStore } from '../universe/Elevation';
 import { heightFromSpec, type HeightSpec } from '../universe/TerrainHeights';
-import { buildTile, faceDir, type HeightFn, tileRect, type TileRequest } from '../universe/TerrainTiles';
+import { buildTile, childToward, dirFace, faceDir, type HeightFn, type TileData, tileRect, type TileRequest } from '../universe/TerrainTiles';
 import { Vector3 } from 'three';
 
 /**
@@ -66,7 +66,20 @@ self.onmessage = (ev: MessageEvent) => {
       });
     }
     const data = buildTile(req, f.fn);
-    (self as unknown as Worker).postMessage({ job: m.job, data },
-      [data.pos.buffer, data.morph.buffer, data.n.buffer, data.tn.buffer, data.tnc.buffer, data.uv.buffer, data.sun.buffer, data.h.buffer]);
+    // the column under the explorer, each tile from its parent's shape
+    const chain: { level: number; x: number; y: number; data: TileData }[] = [];
+    if (req.chain && dirFace({ x: req.chain.dir[0], y: req.chain.dir[1], z: req.chain.dir[2] }).face === req.face) {
+      const dir = { x: req.chain.dir[0], y: req.chain.dir[1], z: req.chain.dir[2] };
+      let cur = { level: req.level, x: req.x, y: req.y, data };
+      while (cur.level < req.chain.level) {
+        const c = childToward({ face: req.face, ...cur }, dir);
+        const d = buildTile({ ...req, level: cur.level + 1, x: c.x, y: c.y, chain: null,
+          parent: { pos: cur.data.pos, tn: cur.data.tn, centre: cur.data.centre, qx: c.x & 1, qy: c.y & 1 } }, f.fn);
+        cur = { level: cur.level + 1, x: c.x, y: c.y, data: d };
+        chain.push(cur);
+      }
+    }
+    const bufs = (d: TileData) => [d.pos.buffer, d.morph.buffer, d.n.buffer, d.tn.buffer, d.tnc.buffer, d.uv.buffer, d.sun.buffer, d.h.buffer];
+    (self as unknown as Worker).postMessage({ job: m.job, data, chain }, [...bufs(data), ...chain.flatMap((c) => bufs(c.data))]);
   }
 };
