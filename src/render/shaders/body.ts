@@ -299,6 +299,7 @@ void main() {
   // pixel spans less than a couple of metres (and are not computed at all there), and the precise
   // local lattices further down take over.
   float mppT = length(fwidth(vPosView));
+  float sunW = fwidth(vSun);
   float wT = uTerrain > 0.5 ? smoothstep(0.4, 2.5, mppT) : 1.0;
   float texPerPx = fwidth(vUv.x) * uMapW;   // (derivatives outside the branches below)
   if (uProc > 0.5 && wT > 0.0) {
@@ -429,9 +430,11 @@ void main() {
       // close it lies in crisp patches, gone from slopes steeper than ~35-45 degrees, the rest is
       // bare rock (so the snowline is not the map's blur)
       float white = smoothstep(0.25, 0.55, min(albedo.r, albedo.b) / max(uAlbedoScale, 1e-3));
-      float fine = bnAt(uOI2, uOF2 + vLocal / 20.0);
+      // (the 20 m noise only where its cells span pixels, and a softer edge far away: no speckle)
+      float fine = mix(0.5, bnAt(uOI2, uOF2 + vLocal / 20.0), smoothstep(5.0, 1.5, mppT));
       float sl = 1.0 - dot(normalize(vTerrN), nB);
-      float cover = smoothstep(0.46, 0.54, white + (patchN - 0.5) * 0.55 + (fine - 0.5) * 0.25 - smoothstep(0.15, 0.32, sl) * 0.9);
+      float ew = 0.04 + 0.12 * smoothstep(2.0, 40.0, mppT);
+      float cover = smoothstep(0.5 - ew, 0.5 + ew, white + (patchN - 0.5) * 0.55 + (fine - 0.5) * 0.25 - smoothstep(0.15, 0.32, sl) * 0.9);
       float zone = smoothstep(0.03, 0.2, white);
       snowW = cover * zone;
       vec3 bare = vec3(0.13, 0.12, 0.11) * (0.8 + 0.4 * patchN);
@@ -516,7 +519,9 @@ void main() {
     light = max(mix(mu0, muC, cloud), 0.0);
   }
   light *= dayside * cloudShadow * grainShadow;
-  if (uTerrain > 0.5) light *= mix(1.0, clamp(0.5 + vSun, 0.0, 1.0), uHScale);   // shadows of the relief
+  // shadows of the relief: sharp where the mesh is fine, softened where the shadow's edge would
+  // otherwise step from one coarse triangle to the next (far hills)
+  if (uTerrain > 0.5) light *= mix(1.0, clamp(0.5 + vSun / max(1.0, 1.5 * sunW), 0.0, 1.0), uHScale);
   // shadows of the rocks, and the darker ground around their bases (render/Rocks.ts)
   float rockAO = 0.0;
 #ifdef TERRAIN
