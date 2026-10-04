@@ -9,7 +9,10 @@ import { GodAudio } from './GodAudio';
 import { GodLayer } from './GodLayer';
 import { GodPanel } from './GodPanel';
 import { GodVR } from './GodVR';
-import { mainSequence as physicsMainSequence } from './physics';
+import { equilibriumTemp, L_SUN, mainSequence as physicsMainSequence } from './physics';
+import { CLIMATE, starLuminosity } from './BodyView';
+import { SUN_LIGHT } from '../astro/photometry';
+import { earthLikeAtmosphere } from '../render/Atmospheres';
 import { FLAG_BLACK_HOLE, FLAG_RIGID, FLAG_STAR } from './NBody';
 import { type Entity, Sandbox, type SpawnSpec } from './Sandbox';
 
@@ -48,6 +51,9 @@ export function mainSequence(massSun: number): { lum: number; radius: number; te
   const ms = physicsMainSequence(massSun);
   return { lum: ms.lum.value, radius: ms.radius.value, teff: ms.teff.value };
 }
+
+/** mean surface temperatures (K) of the worlds with air, for the change of their scale height */
+const REAL_SURFACE_T: Record<number, number> = { 299: 737, 399: 288, 499: 210, 606: 94, 999: 44, 599: 165, 699: 134, 799: 76, 899: 72 };
 
 const TYPE_LOOK: Record<string, { type: PlanetType; teq: number }> = {
   rocky: { type: 'hot', teq: 420 }, terran: { type: 'terran', teq: 260 }, ocean: { type: 'ocean', teq: 265 }, ice: { type: 'ice', teq: 110 },
@@ -146,13 +152,75 @@ export class God {
       this.layer.selected = sel;
       const anchor = this.entityOf(this.app.rig.anchor);
       this.layer.focusPrimary = anchor ? (anchor.mode === 'massive' && anchor.kind === 'body' && anchor.body?.kind !== 'moon' ? anchor : sb.primaryOf(anchor)) : null;
+      this.climateTimer -= dt;
+      if (this.climateTimer <= 0) { this.climateTimer = 0.3; this.applyClimate(); }
     } else {
       this.app.orbits.group.visible = true;
+      if (this.climateOn) this.clearClimate();
     }
     const cam = this.app.rig.upos;
     const camV = cam.toVector3();
     this.layer.update(cam, (p) => p.distanceTo(camV));
     this.panel.update(dt);
+  }
+
+  // ---------------------------------------------------------------- climate -> rendering
+
+  private climateTimer = 0;
+  private climateOn = false;
+  private tweaked = new Set<Body>();
+
+  /**
+   * What the physics says, drawn: the Sun shines with the luminosity of its (edited) mass, and an
+   * atmosphere's density and scale height follow its pressure, temperature, molar mass and the
+   * world's gravity (H = RT/(Mg)).
+   */
+  private applyClimate(): void {
+    const sb = this.sandbox;
+    this.climateOn = true;
+    const sun = sb.entityOf(10);
+    SUN_LIGHT.lum = sun ? Math.max(1e-6, starLuminosity(sun.gm / G) / L_SUN) : 1e-6;
+    const stars = [...sb.entities.values()].filter((e) => e.flags & FLAG_STAR);
+    const seen = new Set<Body>();
+    for (const e of sb.entities.values()) {
+      const b = e.body;
+      if (!b || !e.gm) continue;
+      const cl = CLIMATE[e.id];
+      const p = e.phys?.pressure ?? cl?.pressure ?? 0;
+      if (!cl && !e.phys?.pressure) continue;
+      const base = sb.baselineOf(b);
+      const M = e.phys?.molar ?? cl?.molar ?? 0.029;
+      // temperature from the brightest star, as the editor shows it
+      let best = 0, T = 0;
+      for (const s of stars) {
+        const L = starLuminosity(s.gm / G), d = Math.max(s.pos.distanceTo(e.pos), 1);
+        if (L / (d * d) > best) { best = L / (d * d); T = equilibriumTemp(L, d, e.phys?.albedo ?? cl?.albedo ?? b.albedo).value; }
+      }
+      T = Math.max(3, T + (e.phys?.greenhouse ?? cl?.greenhouse ?? 0));
+      const g = e.gm / (e.radius * e.radius);
+      const T0 = REAL_SURFACE_T[e.id] ?? T, g0 = base ? base.gm / (base.radius * base.radius) : g;
+      const p0 = cl?.pressure ?? 0, M0 = cl?.molar ?? M;
+      let tw: Parameters<typeof this.app.atmospheres.setTweak>[1];
+      if (p0 > 0) {
+        tw = { density: p0 > 0 ? (p / p0) * (T0 / T) : 0, hScale: Math.min(20, Math.max(0.05, (T / T0) * (M0 / M) * (g0 / g))) };
+        if (Math.abs(tw.density - 1) < 1e-3 && Math.abs(tw.hScale - 1) < 1e-3) tw = null;
+      } else if (p > 0) {
+        const spec = earthLikeAtmosphere(p, T, g);
+        spec.HR *= 0.029 / M; spec.HM *= 0.029 / M; spec.top *= 0.029 / M;
+        tw = { density: 1, hScale: 1, spec };
+      } else tw = null;
+      const had = this.tweaked.has(b);
+      if (tw) { this.app.atmospheres.setTweak(b, tw); this.tweaked.add(b); seen.add(b); }
+      else if (had) { this.app.atmospheres.setTweak(b, null); this.tweaked.delete(b); }
+    }
+    for (const b of [...this.tweaked]) if (!seen.has(b)) { this.app.atmospheres.setTweak(b, null); this.tweaked.delete(b); }
+  }
+
+  private clearClimate(): void {
+    SUN_LIGHT.lum = 1;
+    for (const b of this.tweaked) this.app.atmospheres.setTweak(b, null);
+    this.tweaked.clear();
+    this.climateOn = false;
   }
 
   // ---------------------------------------------------------------- selection
@@ -721,7 +789,7 @@ export class God {
     const sb = this.sandbox;
     return {
       active: sb.active, jd: sb.jd, entities: sb.entities.size, lagging: sb.lagging, stepsPerSecond: Math.round(sb.stepsPerSecond),
-      holes: this.app.blackHoles.filter((h) => h.key.startsWith('god:')).length, canUndo: sb.canUndo,
+      holes: this.app.blackHoles.filter((h) => h.key.startsWith('god:')).length, canUndo: sb.canUndo, mode: sb.mode, sunLight: SUN_LIGHT.lum,
     };
   }
 }
