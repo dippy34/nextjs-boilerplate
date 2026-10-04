@@ -1,0 +1,47 @@
+{
+ "body": "vesta",
+ "tileSize": 256,
+ "border": 1,
+ "format": "png16",
+ "path": "{level}/{face}-{x}-{y}.png",
+ "faces": "equi-angular cube; face 0..5 = +X,-X,+Y,-Y,+Z,-Z; (u right, v down) -> normalize(N + tan((2u-1)pi/4) U + tan((2v-1)pi/4) V); U,V per face: +X:(+Y,-Z) -X:(-Y,-Z) +Y:(-X,-Z) -Y:(+X,-Z) +Z:(+Y,+X) -Z:(+Y,-X)",
+ "offset": -19869.0,
+ "step": 1.0,
+ "unit": "m",
+ "referenceRadius": 261389.3,
+ "radii": [
+  284620.0,
+  277240.0,
+  226330.0
+ ],
+ "reference": "IAU ellipsoid 284.62 x 277.24 x 226.33 km (converted from radii)",
+ "min": -19868.0,
+ "max": 21718.0,
+ "levels": [
+  {
+   "level": 0,
+   "tiles": 6,
+   "metresPerSample": 1603.86
+  },
+  {
+   "level": 1,
+   "tiles": 24,
+   "metresPerSample": 801.93
+  },
+  {
+   "level": 2,
+   "tiles": 41,
+   "metresPerSample": 400.97,
+   "bitmap": "zAZxH5j7cA9+JgAA"
+  },
+  {
+   "level": 3,
+   "tiles": 6,
+   "metresPerSample": 200.48,
+   "bitmap": "AAAAAAAAAAACAgACAAAAAgAAAAAAAAAAAAAAAAAAAABAAAAQAAAAAAAAAAAAAAAA"
+  }
+ ],
+ "bytes": 6996336,
+ "credit": "NASA/JPL-Caltech/UCLA/MPS/DLR/IDA Dawn FC HAMO DTM (DLR) 48 px/deg, via USGS Astrogeology",
+ "license": "Public domain (U.S. Government work / NASA mission data)"
+}

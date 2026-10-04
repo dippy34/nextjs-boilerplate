@@ -1,0 +1,45 @@
+// scratch: galaxies from several distances and angles
+// usage: node galaxy.mjs <base> "Name[@k1/k2][@view],..." <outprefix>
+//   view: earth (from the Sun's side, as photographed), face, edge, or a tilt t (normal*t + major axis)
+//   defaults: KS env (0.25,1.5,4) and TILT env (0.6); W/H env for the viewport
+import { chromium } from '@playwright/test';
+const base = process.argv[2] ?? 'http://127.0.0.1:4174/';
+const specs = (process.argv[3] ?? 'Andromeda Galaxy').split(',');
+const out = process.argv[4] ?? '/tmp/claude-0/gal';
+const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 1280), height: Number(process.env.H ?? 720) } });
+const errors = [];
+page.on('pageerror', (e) => errors.push(String(e)));
+page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 180000 }); };
+await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
+await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 180000 });
+for (const spec of specs) {
+  const [name, ksS, viewS] = spec.split('@');
+  const ks = (ksS ?? process.env.KS ?? '0.25,1.5,4').split('/').join(',').split(',').map(Number);
+  const view = viewS ?? process.env.TILT ?? '0.6';
+  for (const k of ks) {
+    await page.evaluate(([n, kk, vw]) => {
+      const a = window.app; const o = a.findByName(n); a.select(o);
+      let v;
+      if (vw === 'earth') {
+        const s = o.upos.sub(a.rig.upos.clone().set(0, 0, 0)).normalize().negate();
+        v = s;
+      } else if (vw === 'face') v = o.normal.clone();
+      else if (vw === 'edge') v = o.major.clone().multiplyScalar(0.3).addScaledVector(o.minor, 1).normalize();
+      else v = o.normal.clone().multiplyScalar(Number(vw)).addScaledVector(o.major, 1).normalize();
+      a.rig.upos.copy(o.upos).addVec(v, o.radius * kk);
+      a.rig.lookAt(v.clone().negate());
+    }, [name, k, view]);
+    await frames(10);
+    // the nearest galaxy's star cloud is sampled over several frames
+    await page.waitForFunction(() => !window.app.galaxies.filling, null, { timeout: 120000 }).catch(() => console.log('cloud still filling'));
+    await frames(3);
+    const fps = await page.evaluate(() => window.app.fps);
+    const file = `${out}-${name.split(' ')[0].replace(/[^A-Za-z0-9]/g, '')}-${view}-${k}.png`;
+    await page.screenshot({ path: file, timeout: 240000 });
+    console.log('shot', file, 'fps', Math.round(fps));
+  }
+}
+console.log('errors', errors.length, errors.slice(0, 2).join(' | '));
+await browser.close();
