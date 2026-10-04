@@ -363,6 +363,8 @@ export class Walk {
   private jumpBuffer = 0;
   private crouchToggle = false;
   private lastGround = 0;
+  /** seconds the drawn terrain under the walker has been missing */
+  private lostFrame = 0;
   private approachTarget: SpaceObject | null = null;
   private approachWait = 0;
   private descend = { h0: 1, pitch0: 0 };
@@ -465,6 +467,7 @@ export class Walk {
     const was = this.state;
     this.state = 'off';
     this.approachTarget = null;
+    this.lostFrame = 0;
     app.vr.comfort = 0;
     this.marks.group.visible = false;
     if (this.orbitsBefore !== null) { app.orbits.enabled = this.orbitsBefore; this.orbitsBefore = null; }
@@ -662,10 +665,15 @@ export class Walk {
     }
     // something else took over the camera: a flight, a VR travel
     if (app.rig.autopilot || app.vr.traveling) { this.exit(true); return false; }
-    if (!this.updateFrame()) {
-      // the terrain went away (another world got closer, or it is being rebuilt): keep the last frame
-      if (!this.world || !app.terrain.owner || app.terrain.owner !== this.world) {
-        if (this.state === 'descend') { this.exit(true); return false; }
+    if (this.updateFrame()) this.lostFrame = 0;
+    else {
+      // the terrain went away (it is being rebuilt, or another world came closer): walk on with the
+      // frame we had, but give up after a moment rather than stand on nothing
+      this.lostFrame += dt;
+      if (this.state === 'descend' || this.lostFrame > 3) {
+        this.say(`No ground under you any more: back to free flight`);
+        this.exit(true);
+        return false;
       }
     }
     if (this.state === 'descend') return this.updateDescend(dt);
@@ -868,7 +876,7 @@ export class Walk {
     this.status = `Walking on ${this.worldName()} · gravity ${g.toFixed(2)} m/s² · ${motion}`;
     if (!this.hudEl) return;
     const vr = this.app.vr.active;
-    this.hudEl.style.display = this.state === 'walk' && !vr ? 'block' : 'none';
+    this.hudEl.style.display = this.state === 'walk' && !vr && !this.app.photoMode ? 'block' : 'none';
     this.hudEl.innerHTML = `<b>Walking on ${escapeHtml(this.worldName())}</b>, gravity ${g.toFixed(2)} m/s² (${(g / 9.80665).toFixed(2)} g) · ${motion}`
       + `<br><span style="opacity:.65">W A S D move · mouse look · Shift run · Space jump · C/Ctrl crouch · B fly</span>`;
   }
@@ -937,7 +945,7 @@ void main() {
   float m = 1.0 - smoothstep(0.86, 1.0, e);
   float rim = smoothstep(0.78, 0.92, e) * (1.0 - smoothstep(0.92, 1.0, e));
   float tread = step(0.5, fract(p.y * 7.0 + 0.25));
-  float f = 1.0 - m * vA * (0.30 + 0.12 * tread) + rim * vA * 0.10;
+  float f = 1.0 - m * vA * (0.42 + 0.16 * tread) + rim * vA * 0.16;
   gl_FragColor = vec4(vec3(f), 1.0);
 }`;
 
@@ -980,7 +988,7 @@ export class GroundMarks {
     this.group.name = 'walk-marks';
     this.group.matrixAutoUpdate = false;
     const common = { vertexShader: MARK_VERT, transparent: true, depthWrite: false, depthTest: true, blending: CustomBlending };
-    const pg = new PlaneGeometry(0.13, 0.31);
+    const pg = new PlaneGeometry(0.16, 0.34);
     this.printA = new InstancedBufferAttribute(new Float32Array(MAX_PRINTS), 1);
     pg.setAttribute('aA', this.printA);
     this.prints = new InstancedMesh(pg, new ShaderMaterial({
