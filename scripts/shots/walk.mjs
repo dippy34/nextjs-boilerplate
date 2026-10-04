@@ -78,8 +78,10 @@ await frames(10);
 await page.keyboard.up('KeyW');
 await page.keyboard.up('ShiftLeft');
 await page.waitForFunction(() => window.app.walk.body.onGround, null, { timeout: 400000 });
-await page.keyboard.press('Space');
-await page.waitForFunction(() => !window.app.walk.body.onGround, null, { timeout: 400000 });
+// hold Space until the walker leaves the ground (a press can fall between frames at 2 fps)
+await page.keyboard.down('Space');
+await page.waitForFunction(() => !window.app.walk.body.onGround, null, { timeout: 900000 });
+await page.keyboard.up('Space');
 await page.waitForFunction(() => window.app.walk.body.onGround, null, { timeout: 400000 });
 await frames(2);
 await turn(160, -25);

@@ -530,7 +530,8 @@ export class App {
     const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
-    void this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera).catch(() => undefined);
+    // (into the HDR target the scene is drawn to: programs differ per output target)
+    void this.renderer.withSceneTarget(() => this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera)).catch(() => undefined);
     this.galaxy.compile(this.renderer.gl);
     objs.forEach((o, i) => { o.visible = was[i]; });
   }

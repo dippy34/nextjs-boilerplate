@@ -10,7 +10,7 @@ import { Vector3 } from 'three';
  * 2 / 2^L of each parameter; its grid has TILE_N segments per side, with the vertices uniform in
  * the parameters, so a child's even vertices are exactly its parent's.
  */
-export const TILE_N = 64;
+export const TILE_N = 32;
 export const TILE_V = TILE_N + 1;
 /** grid vertices, then the skirt (four edges of TILE_V vertices, hanging below the edges) */
 export const TILE_VERTS = TILE_V * TILE_V + 4 * TILE_V;
@@ -62,9 +62,10 @@ export function ellipsoidRadius(radii: readonly number[], x: number, y: number, 
 
 /**
  * Shared index buffer of a tile: two triangles per cell (diagonal from (i, j) to (i+1, j+1),
- * the morph targets depend on it) and skirts on the four edges, wound both ways.
+ * the morph targets depend on it) and skirts, wound both ways, on the edges set in `skirts` (bit e:
+ * edge e of `edgeLists`; a skirt is only needed against a neighbour of another level).
  */
-export function tileIndices(): Uint16Array | Uint32Array {
+export function tileIndices(skirts = 15): Uint16Array | Uint32Array {
   const idx: number[] = [];
   const g = (i: number, j: number) => j * TILE_V + i;
   for (let j = 0; j < TILE_N; j++) {
@@ -75,6 +76,7 @@ export function tileIndices(): Uint16Array | Uint32Array {
   }
   const edges = edgeLists();
   for (let e = 0; e < 4; e++) {
+    if (!(skirts & (1 << e))) continue;
     const base = TILE_V * TILE_V + e * TILE_V;
     for (let k = 0; k < TILE_N; k++) {
       const a = edges[e][k], b = edges[e][k + 1], a2 = base + k, b2 = base + k + 1;
@@ -248,9 +250,22 @@ export function buildTile(req: TileRequest, height: HeightFn): TileData {
   }
   // relief shadows
   if (req.sun) shadeTile(req, height, P, E, C, sun, spacing, hMax);
-  // skirts: the edge vertices again, hanging down (hide cracks against coarser neighbours)
-  const depth = spacing * 2.5 + 5 + (hMax - hMin) * 0.05;
+  // skirts: the edge vertices again, hanging down (hide cracks against neighbours of another
+  // level). A crack is the step between this tile's edge and a coarser neighbour's straight
+  // segments: the parent's shape along the edge (the morph start) measures it for one level;
+  // neighbours up to two levels coarser and the morph in between are covered by a few times that.
+  // Against a finer neighbour, whose edge dips below this one's by its own (smaller) step, the same
+  // depth does. (Deep skirts are not free: a software rasteriser shades every hidden fragment.)
   const edges = edgeLists();
+  let edgeStep = 0;
+  if (par) {
+    for (let e = 0; e < 4; e++) {
+      for (const v of edges[e]) {
+        edgeStep = Math.max(edgeStep, Math.hypot(pos[v * 3] - morph[v * 3], pos[v * 3 + 1] - morph[v * 3 + 1], pos[v * 3 + 2] - morph[v * 3 + 2]));
+      }
+    }
+  }
+  const depth = 4 * edgeStep + 0.02 * spacing + 0.3;
   for (let e = 0; e < 4; e++) {
     for (let k = 0; k < TILE_V; k++) {
       const src = edges[e][k], dst = GV + e * TILE_V + k;
