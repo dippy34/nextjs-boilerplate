@@ -477,6 +477,8 @@ export class Walk {
   private approachTarget: SpaceObject | null = null;
   private approachWait = 0;
   private descend = { h0: 1, pitch0: 0 };
+  /** body-fixed direction of the place being landed at (walking at a landmark), or null: straight down */
+  private descendTo: Vector3 | null = null;
   /** VR controller inputs for the next update */
   private vr = { x: 0, y: 0, run: false, turn: 0 };
   private hudEl: HTMLDivElement | null = null;
@@ -581,6 +583,7 @@ export class Walk {
     const was = this.state;
     this.state = 'off';
     this.approachTarget = null;
+    this.descendTo = null;
     this.lostFrame = 0;
     app.vr.comfort = 0;
     this.marks.group.visible = false;
@@ -658,6 +661,7 @@ export class Walk {
 
   private beginWalk(): void {
     const app = this.app;
+    this.descendTo = null;
     this.updateFrame();
     const n = this.camBF();
     this.body.placeOn(n, this.ground);
@@ -771,6 +775,10 @@ export class Walk {
         if (why) { this.say(why); this.exit(true); return false; }
         this.bindWorld(owner);
         this.beginDescend(below.dist - below.ground);
+        // a place: glide down onto it, not straight down from the viewpoint the travel arrived at
+        if (target instanceof Landmark && target.world === owner) {
+          this.descendTo = target.up().applyMatrix3(this.R.clone().transpose()).normalize();
+        }
         return false;
       }
       // the ground is still being built (or loaded): wait a little
@@ -800,15 +808,25 @@ export class Walk {
     const app = this.app;
     app.input.consume();
     app.input.look.dx = app.input.look.dy = 0;
-    const n = this.camBF();
+    let n = this.camBF();
     const gR = this.ground(n);
     const r = app.rig.upos.sub(this.centre, new Vector3()).length();
     const h = r - gR;
     const hEye = EYE_STAND;
     let nh = hEye + (h - hEye) * Math.exp(-1.5 * dt);
     nh = Math.min(nh, Math.max(hEye, h - 2 * dt));
+    if (this.descendTo) {
+      // glide over to the place at the same pace as the height comes down
+      const ang = n.angleTo(this.descendTo);
+      const k = h - hEye > 1e-3 ? 1 - (nh - hEye) / (h - hEye) : 1;
+      if (ang > 1e-12) {
+        const axis = new Vector3().crossVectors(n, this.descendTo).normalize();
+        n = n.clone().applyAxisAngle(axis, ang * Math.min(1, k)).normalize();
+      }
+    }
     const up = n.clone().applyMatrix3(this.R);
-    app.rig.upos.addVec(up, nh - h);
+    // the eye nh above the ground under its (new) place, as an absolute position
+    app.rig.upos.copy(this.centre).addVec(up.clone().multiplyScalar(this.ground(n) + nh));
     // level the view on the way down
     const s = Math.max(0, Math.min(1, Math.log(Math.max(nh, 1)) / Math.log(Math.max(this.descend.h0, 2))));
     const fw = app.rig.forward(new Vector3());

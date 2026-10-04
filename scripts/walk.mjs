@@ -367,9 +367,11 @@ if (which !== 'desktop') {
   st = await page.evaluate(() => {
     const a = window.app, w = a.walk, d = w.debug();
     const lm = a.landmarks.find((l) => l.name === 'Apollo 11 landing site');
-    return { world: d.world, eyeH: d.eyeH, fromSite: lm.upos.sub(a.rig.upos).length() };
+    // along the ground from the site (the place's elevation in the list is only approximate)
+    const up = a.rig.upos.sub(lm.world.upos).normalize();
+    return { world: d.world, eyeH: d.eyeH, fromSite: up.angleTo(lm.up()) * lm.world.radius };
   });
-  check('v6: Places → Walk there → Apollo 11 travels there, lands and walks', st.world === 'Moon' && st.fromSite < 3000, JSON.stringify(st));
+  check('v6: Places → Walk there → Apollo 11 travels there, lands at the site and walks', st.world === 'Moon' && st.fromSite < 50 && Math.abs(st.eyeH - 1.7) < 0.15, JSON.stringify(st));
   await page.screenshot({ timeout: 400000, path: path.join(outDir, 'v6-vr-apollo11.png') });
   await page.close();
 }
