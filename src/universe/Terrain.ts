@@ -171,6 +171,51 @@ export function craterField(px: number, py: number, pz: number, cell: number, s:
   return h;
 }
 
+/**
+ * Earth's land below sea level, and lakes with their own level. Earth's elevation data stores all
+ * ground at or below 0 m as -200 m (pipeline: ocean fill), so without these the flat sea filled
+ * every basin below 0 m (Death Valley, the Qattara Depression, the Jordan Rift). Inside a circle,
+ * ground is raised to `level` (at least) and is water only if `water`: dry basins get a flat floor
+ * at a typical depth of theirs, lakes their surface (the Dead Sea and Galilee lie below -200 m, the
+ * data's floor, so they are drawn just above it). The first circle containing a point decides, so
+ * lakes come before the dry basins around them. Circles were checked against the open sea nearby
+ * (none reaches it).
+ */
+export const DEPRESSIONS: readonly { name: string; lat: number; lon: number; km: number; level: number; water: boolean }[] = [
+  { name: 'Dead Sea', lat: 31.5, lon: 35.5, km: 50, level: -199, water: true },
+  { name: 'Sea of Galilee', lat: 32.82, lon: 35.59, km: 12, level: -199, water: true },
+  { name: 'Jordan Rift', lat: 32.3, lon: 35.55, km: 60, level: -200, water: false },
+  { name: 'Karagiye Depression', lat: 43.4, lon: 51.4, km: 25, level: -100, water: false },
+  { name: 'Caspian Sea (north)', lat: 45.5, lon: 50.0, km: 450, level: -28, water: true },
+  { name: 'Caspian Sea (south)', lat: 39.5, lon: 51.5, km: 380, level: -28, water: true },
+  { name: 'Akdzhakaya Depression', lat: 40.7, lon: 57.3, km: 60, level: -60, water: false },
+  { name: 'Lake Assal', lat: 11.62, lon: 42.42, km: 9, level: -155, water: true },
+  { name: 'Danakil Depression', lat: 13.9, lon: 40.3, km: 70, level: -100, water: false },
+  { name: 'Qattara Depression (west)', lat: 29.6, lon: 26.6, km: 120, level: -80, water: false },
+  { name: 'Qattara Depression (east)', lat: 29.7, lon: 28.4, km: 120, level: -80, water: false },
+  { name: 'Siwa Oasis', lat: 29.2, lon: 25.5, km: 40, level: -18, water: false },
+  { name: 'Chott Melrhir', lat: 34.2, lon: 6.3, km: 70, level: -30, water: false },
+  { name: 'Sebkha Tah', lat: 27.8, lon: -12.95, km: 12, level: -50, water: false },
+  { name: 'Turpan Depression', lat: 42.7, lon: 89.3, km: 70, level: -130, water: false },
+  { name: 'Salton Sea', lat: 33.3, lon: -115.8, km: 50, level: -70, water: true },
+  { name: 'Death Valley', lat: 36.25, lon: -116.85, km: 50, level: -80, water: false },
+  { name: 'Lake Enriquillo', lat: 18.5, lon: -71.6, km: 18, level: -45, water: true },
+  { name: 'Laguna del Carbón', lat: -49.6, lon: -68.35, km: 15, level: -90, water: false },
+  { name: 'Lake Eyre', lat: -28.4, lon: 137.3, km: 80, level: -12, water: false },
+];
+const EARTH_KM = 6371;
+const DEPRESSION_DIRS = DEPRESSIONS.map((d) => {
+  const la = (d.lat * Math.PI) / 180, lo = (d.lon * Math.PI) / 180;
+  return { x: Math.cos(la) * Math.cos(lo), y: Math.cos(la) * Math.sin(lo), z: Math.sin(la), cos: Math.cos(d.km / EARTH_KM), level: d.level, water: d.water };
+});
+const OPEN_SEA = { level: 0, water: true };
+
+/** Earth's lowest ground at body-fixed unit direction `n` (m), and whether ground there is water; `sea`: the sea level. */
+export function earthWaterLevel(n: Vector3, sea: number): { level: number; water: boolean } {
+  for (const d of DEPRESSION_DIRS) if (n.x * d.x + n.y * d.y + n.z * d.z > d.cos) return d;
+  return sea === 0 ? OPEN_SEA : { level: sea, water: true };
+}
+
 function seedOf(name: string): number {
   let h = 2166136261;
   for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
@@ -229,6 +274,19 @@ export class TerrainSource {
     const k = b.name.toLowerCase();
     return this.manifest?.maps[k] ? k : null;
   }
+  /**
+   * Water level (m above the reference surface) at body-fixed unit direction `n` on `b`, or null
+   * where there is no water at that level (a world without oceans, or a dry depression). Ground
+   * at or below it is drawn as flat water.
+   */
+  waterLevel(b: Body, n: Vector3): number | null {
+    const k = this.keyOf(b);
+    const sea = k ? (this.maps.get(k)?.sea ?? this.manifest?.maps[k]?.sea) : undefined;
+    if (sea === undefined) return null;
+    const w = earthWaterLevel(n, sea);
+    return w.water ? w.level : null;
+  }
+
 
   /** True when the body's heights are final (no elevation model, or it has loaded). */
   ready(b: Body): boolean {
@@ -354,9 +412,12 @@ export class TerrainSource {
     let slope = m ? 0.012 : Math.min(0.03, TerrainSource.amplitude(b) / (R / 3));
     // a world with oceans: no generated relief at sea, little on lowlands, the most in high mountains
     const sea = m?.sea;
+    // the lowest ground here (the water's level, or a dry basin's floor), which generated relief and
+    // the flat fill are measured from
+    const lvl = sea !== undefined ? earthWaterLevel(n, sea).level : 0;
     if (sea !== undefined) {
-      const t = Math.min(1, Math.max(0, (h - sea) / 150));
-      slope *= t * t * (3 - 2 * t) * Math.min(1, Math.max(0.08, (h - sea) / 2500));
+      const t = Math.min(1, Math.max(0, (h - lvl) / 150));
+      slope *= t * t * (3 - 2 * t) * Math.min(1, Math.max(0.08, (h - lvl) / 2500));
     }
     let o = 0;
     for (let L = top; L > minL && o < 16; L *= 0.5, o++) {
@@ -397,7 +458,7 @@ export class TerrainSource {
         h += craterField(px, py, pz, cell, s + 100 * i, d, depth) * (cell > topP * 1.2 ? 1 - wP : 1);
       }
     }
-    if (sea !== undefined) h = Math.max(h, sea);
+    if (sea !== undefined) h = Math.max(h, lvl);
     return Number.isFinite(h) ? h : 0;
   }
 

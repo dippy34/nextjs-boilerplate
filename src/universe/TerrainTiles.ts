@@ -99,6 +99,33 @@ export function edgeLists(): number[][] {
   return out;
 }
 
+/**
+ * Skirt edges (bit e: edge e of `edgeLists`) of each tile in a drawn set: edges bordering a tile of
+ * another level, and every edge on a cube face's border. The finer side's skirt covers its edge
+ * rising above the coarser chord, the coarser side's covers the finer edge dipping below it (a
+ * grazing sight line would slip under the coarser tile); between tiles of one level there is none.
+ */
+export function skirtMasks(tiles: readonly { face: number; level: number; x: number; y: number }[]): number[] {
+  const key = (f: number, l: number, x: number, y: number) => `${f}:${l}:${x}:${y}`;
+  const drawn = new Set(tiles.map((n) => key(n.face, n.level, n.x, n.y)));
+  // tiles with a drawn descendant
+  const above = new Set<string>();
+  for (const n of tiles) for (let l = n.level - 1; l >= 0; l--) above.add(key(n.face, l, n.x >> (n.level - l), n.y >> (n.level - l)));
+  const NB = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+  return tiles.map((n) => {
+    let mask = 0;
+    const size = 2 ** n.level;
+    for (let e = 0; e < 4; e++) {
+      const nx = n.x + NB[e][0], ny = n.y + NB[e][1];
+      if (nx < 0 || ny < 0 || nx >= size || ny >= size || above.has(key(n.face, n.level, nx, ny))) { mask |= 1 << e; continue; }
+      for (let l = n.level - 1; l >= 0; l--) {
+        if (drawn.has(key(n.face, l, nx >> (n.level - l), ny >> (n.level - l)))) { mask |= 1 << e; break; }
+      }
+    }
+    return mask;
+  });
+}
+
 /** height (m above the reference surface) at a body-fixed unit direction, for features down to `spacing` m */
 export type HeightFn = (n: Vector3, spacing: number) => number;
 

@@ -82,6 +82,12 @@ describe('landing terrain', () => {
     expect(sea.every((h) => h === 0)).toBe(true);
     expect(Math.min(...land)).toBeGreaterThan(1500);
     expect(Math.max(...land) - Math.min(...land)).toBeGreaterThan(50);   // generated relief on land
+    // a dry depression in the sea half (Death Valley's circle): a dry floor at its own depth, not sea
+    const dv = at(-116.85, 36.25);
+    expect(t.height(earth, dv, 100)).toBe(-80);
+    expect(t.waterLevel(earth, dv)).toBeNull();
+    expect(t.waterLevel(earth, at(-150, 0))).toBe(0);
+    expect(t.waterLevel(world('Moon', 1737.4e3), at(0, 0))).toBeNull();
   });
 
   it('a coarse mesh samples the elevation model averaged over its spacing (no aliasing)', () => {
