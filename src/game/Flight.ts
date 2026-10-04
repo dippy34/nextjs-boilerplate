@@ -293,6 +293,21 @@ export class Flight {
     if (announce) this.app.hud.toast(`Matched orbit about ${D.name}`);
   }
 
+  /** Hold the ship still `h` metres over the ground below it (turning with the world): it starts to fall. */
+  hoverOverGround(h: number): void {
+    const core = this.core, ship = this.ship;
+    core.chooseFrame();
+    this.frameEnv();
+    const D = core.frame;
+    if (!D || core.groundR <= 0) return;
+    const rel = ship.upos.sub(D.upos, new Vector3());
+    rel.setLength(core.groundR + h);
+    ship.upos.copy(D.upos).addVec(rel);
+    ship.vel.copy(D.vel).add(new Vector3().crossVectors(core.spin, rel));
+    core.landed = null;
+    this.app.rig.upos.copy(ship.upos);
+  }
+
   /** Warp drive check: mass-locked by strong gravity. Returns the reason, or '' when free. */
   massLock(): string {
     if (!this.on) return '';
@@ -327,7 +342,8 @@ export class Flight {
       return this.simDt;
     }
     // the explorer was moved (a tour stop, a search pick, a script): the ship goes with it
-    if (rig().upos.sub(ship.upos, this.tmp).length() > 1e-3 && !this.ending) {
+    if (rig().upos.sub(ship.upos, this.tmp).length() > 1e-3) {
+      this.ending = null;
       ship.upos.copy(rig().upos);
       ship.quat.copy(rig().quat);
       ship.angVel.set(0, 0, 0);
