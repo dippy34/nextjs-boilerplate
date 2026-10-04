@@ -210,9 +210,10 @@ export class App {
     app.galaxy = new GalaxyGlow();
     app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
     app.exo = new ExoPlanetLayer(starField.psf, bodies.surfaceExposure);
+    app.exo.gl = renderer.gl;
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
     // scanned ground materials for close-up surfaces (loaded in the background)
-    void loadMaterials(DATA, xrCapable).catch((e) => console.warn('materials', e));
+    void loadMaterials(DATA, xrCapable, (t) => renderer.gl.initTexture(t)).catch((e) => console.warn('materials', e));
     app.rocks = new Rocks(app.terrain, xrCapable);
     app.terrain.source = bodies.terrainSource;
     app.cometTails = new CometTails(bodies.surfaceExposure);

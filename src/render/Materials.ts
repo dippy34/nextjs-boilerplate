@@ -136,7 +136,7 @@ async function pixels(url: string, size: number): Promise<Uint8ClampedArray> {
 const srgb = (v: number) => { const a = v / 255; return a <= 0.04045 ? a / 12.92 : ((a + 0.055) / 1.055) ** 2.4; };
 
 /** Load the materials into the shared uniforms (1024 px layers on desktop, 512 in the headset tier). */
-export async function loadMaterials(base: string, vr: boolean): Promise<void> {
+export async function loadMaterials(base: string, vr: boolean, upload?: (t: Texture) => void): Promise<void> {
   const m = (await fetch(`${base}/materials/manifest.json`).then((r) => r.json())) as Manifest;
   const size = vr ? 512 : Math.min(1024, m.size);
   const n = m.layers.length;
@@ -171,6 +171,8 @@ export async function loadMaterials(base: string, vr: boolean): Promise<void> {
   };
   MATERIALS.uMatCol.value = make(col);
   MATERIALS.uMatNrm.value = make(nrm);
+  // upload now (with their mipmaps), not on the first frame that lands on terrain
+  if (upload) for (const t of [MATERIALS.uMatCol.value, MATERIALS.uMatNrm.value]) upload(t);
   MATERIALS.uMatOn.value = 1;
 }
 

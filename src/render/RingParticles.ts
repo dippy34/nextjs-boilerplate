@@ -96,13 +96,16 @@ float lumps(vec3 p) { return 0.55 * rn(p * 3.0) + 0.3 * rn(p * 7.0 + 3.1) + 0.15
 void main() {
   vec3 n = normalize(vN);
   // clumpy surface: the gradient of the lump field bends the normal (finite differences, object frame)
-  float e = 0.03;
-  float h0 = lumps(vObj);
-  vec3 g = vec3(lumps(vObj + vec3(e, 0.0, 0.0)), lumps(vObj + vec3(0.0, e, 0.0)), lumps(vObj + vec3(0.0, 0.0, e))) - h0;
-  vec3 W = normalize(cross(vT, vB));
-  vec3 gw = (g.x * vT + g.y * vB + g.z * W) / e;
+  // (only on particles big enough on screen for it to show)
   float detailVis = smoothstep(6.0, 30.0, vSize / max(length(fwidth(vPos)), 1e-6));   // pixels per particle radius
-  n = normalize(n - 0.35 * detailVis * (gw - n * dot(gw, n)));
+  float h0 = lumps(vObj);
+  if (detailVis > 0.0) {
+    float e = 0.03;
+    vec3 g = vec3(lumps(vObj + vec3(e, 0.0, 0.0)), lumps(vObj + vec3(0.0, e, 0.0)), lumps(vObj + vec3(0.0, 0.0, e))) - h0;
+    vec3 W = normalize(cross(vT, vB));
+    vec3 gw = (g.x * vT + g.y * vB + g.z * W) / e;
+    n = normalize(n - 0.35 * detailVis * (gw - n * dot(gw, n)));
+  }
   // the planet's shadow: does the ray towards the Sun hit it?
   vec3 oc = vPos - uPlanet;
   float b = dot(oc, uSunDir);
@@ -190,14 +193,16 @@ float tauAt(float r) {
 // q: position relative to the explorer plus the explorer's position modulo 16 km (precise, and
 // fixed in the ring apart from a jump each 16 km travelled).
 float clumps(vec3 q, vec2 radial, float dist) {
+  float vis = 1.0 - smoothstep(300.0, 3000.0, dist);      // far away it averages out
+  if (vis <= 0.0) return 1.0;
   vec2 az = vec2(-radial.y, radial.x);
   vec2 w = cos(0.44) * az + sin(0.44) * radial;           // along the wake
   vec2 c = vec2(-w.y, w.x);                               // across
   vec2 u = vec2(dot(q.xy, w) / 160.0, dot(q.xy, c) / 28.0);
   float wake = sn(vec3(u, q.z / 12.0));
-  float grain = sn(q / 1.6);
-  float vis = 1.0 - smoothstep(300.0, 3000.0, dist);      // far away it averages out
-  return mix(1.0, 0.25 + 1.5 * wake * wake + 0.5 * (grain - 0.5) * (1.0 - smoothstep(20.0, 80.0, dist)), vis);
+  float gw = 1.0 - smoothstep(20.0, 80.0, dist);
+  float grain = gw > 0.0 ? sn(q / 1.6) : 0.5;
+  return mix(1.0, 0.25 + 1.5 * wake * wake + 0.5 * (grain - 0.5) * gw, vis);
 }
 void main() {
   vec3 d = normalize(uToRing * normalize(vPos));
