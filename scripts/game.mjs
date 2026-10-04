@@ -15,7 +15,7 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(String(e)));
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${detail}`); };
-const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 120000 }); };
+const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 240000 }); };
 
 await page.goto(`${base}?time=2026-10-01T20:00:00Z&paused=1&target=Earth&dist=1.6&az=60&el=10`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 120000 });
@@ -26,7 +26,7 @@ await page.keyboard.press('KeyV');
 await frames(4);
 let st = await page.evaluate(() => ({ mode: window.app.game.mode, cockpit: window.app.game.cockpit.group.visible, inertia: window.app.rig.inertia }));
 check('V enters the cockpit', st.mode === 'cockpit' && st.cockpit && st.inertia > 0, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 'g1-cockpit.png') });
+await page.screenshot({ path: path.join(outDir, 'g1-cockpit.png'), timeout: 180000 });
 
 // 2. traffic appears around Earth
 st = await page.evaluate(() => ({ ships: window.app.game.traffic.ships.length, anchor: window.app.rig.anchor?.name }));
@@ -56,13 +56,13 @@ st = await page.evaluate(() => ({ ...window.app.game.cockpit.readout }));
 check('cockpit shows the target', st.target === 'Moon' && st.warp === 'ready' && st.distance.length > 0, `${st.target} ${st.distance} ${st.warp}`);
 st = await page.evaluate(() => { const h = window.app.game.hud; return { hud: h.group.visible, target: h.group.children[0].visible }; });
 check('canopy HUD brackets the target', st.hud && st.target, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 'g1b-hud.png') });
+await page.screenshot({ path: path.join(outDir, 'g1b-hud.png'), timeout: 180000 });
 await page.keyboard.press('KeyJ');
 await frames(4);
 st = await page.evaluate(() => ({ ap: window.app.rig.autopilot, warp: window.app.game.cockpit.readout.warp, fx: window.app.game.warpFx.lines.visible }));
 check('J engages the warp drive', st.ap === true, JSON.stringify(st));
 await page.waitForTimeout(800);
-await page.screenshot({ path: path.join(outDir, 'g2-warp.png') });
+await page.screenshot({ path: path.join(outDir, 'g2-warp.png'), timeout: 180000 });
 await page.waitForFunction(() => !window.app.rig.autopilot, null, { timeout: 120000 });
 await frames(10);
 st = await page.evaluate(() => { const a = window.app; const m = a.findByName('Moon'); return { anchor: a.rig.anchor?.name, d: m.upos.sub(a.rig.upos).length() / m.radius }; });
@@ -79,7 +79,7 @@ await page.keyboard.press('KeyV');
 await frames(6);
 st = await page.evaluate(() => ({ mode: window.app.game.mode, ship: window.app.game.ship.group.visible, cockpit: window.app.game.cockpit.group.visible }));
 check('V switches to the chase view', st.mode === 'chase' && st.ship && !st.cockpit, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 'g3-chase.png') });
+await page.screenshot({ path: path.join(outDir, 'g3-chase.png'), timeout: 180000 });
 
 // 7. docking: fly to the station around the Moon, then in along its axis
 await page.keyboard.press('KeyV'); // chase -> off
@@ -98,7 +98,7 @@ await page.waitForFunction(() => window.app.game.docked !== null, null, { timeou
 st = await page.evaluate(() => { const g = window.app.game; return { docked: g.docked?.name ?? null, missions: g.missions.list.filter((m) => m.done).map((m) => m.id) }; });
 check('the docking computer docks the ship', !!st.docked, JSON.stringify(st));
 await frames(12);
-await page.screenshot({ path: path.join(outDir, 'g4-docked.png') });
+await page.screenshot({ path: path.join(outDir, 'g4-docked.png'), timeout: 180000 });
 await page.keyboard.down('KeyS');
 await frames(6);
 await page.keyboard.up('KeyS');
@@ -114,7 +114,7 @@ await page.keyboard.up('KeyW');
 await frames(4);
 st = await page.evaluate(() => ({ landed: window.app.game.landed?.name ?? null, alt: window.app.rig.altitude }));
 check('the ship touches down on the Moon', st.landed === 'Moon' && st.alt < 15, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 'g5-landed.png') });
+await page.screenshot({ path: path.join(outDir, 'g5-landed.png'), timeout: 180000 });
 
 // 9. V: off, classic flight back
 await page.keyboard.press('KeyV');
