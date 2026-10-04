@@ -3,6 +3,7 @@ import { PC } from '../core/units';
 import { UPos } from '../core/upos';
 import { DUST_NORM, GALAXY, LUM } from '../universe/Galaxy';
 import { GALAXY_GLSL } from './shaders/galaxy';
+import { VOLUMES } from './Renderer';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 const f = (x: number) => (Number.isInteger(x) ? `${x}.0` : `${x}`);
@@ -133,6 +134,9 @@ export class MilkyWayVolume {
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -999;
     this.mesh.visible = false;
+    // drawn in the renderer's reduced-resolution volume pass
+    this.mesh.layers.set(VOLUMES.layer);
+    VOLUMES.meshes.add(this.mesh);
     const c = GALAXY.centre;
     this.centre = UPos.from(c.x * PC, c.y * PC, c.z * PC);
   }
