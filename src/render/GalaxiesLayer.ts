@@ -3,6 +3,7 @@ import type { UPos } from '../core/upos';
 import { discFrame, type Galaxy } from '../universe/Galaxies';
 import { F_LOG0, F_N, F_STEP, INTERIOR } from './interiorState';
 import { noise3D, sampleNoise } from './Noise3D';
+import { VOLUMES } from './Renderer';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, POINT_CLIP, PROJECT_PARS } from './shaders/xr';
 
 /**
@@ -800,6 +801,9 @@ export class GalaxiesLayer {
     m.frustumCulled = false;
     m.renderOrder = -1;
     m.name = g.name;
+    // drawn in the renderer's reduced-resolution volume pass
+    m.layers.set(VOLUMES.layer);
+    VOLUMES.meshes.add(m);
     this.group.add(m);
     this.volumes.set(g, m);
     return m;
@@ -815,6 +819,7 @@ export class GalaxiesLayer {
       if (g === this.cloudOf || (this.lastSeen.get(g) ?? 0) >= this.frameNo - 1) continue;
       const v = this.volumes.get(g)!;
       this.group.remove(v);
+      VOLUMES.meshes.delete(v);
       (v.material as ShaderMaterial).dispose();
       this.volumes.delete(g);
       this.models.delete(g);
@@ -880,7 +885,8 @@ export class GalaxiesLayer {
   update(cam: UPos, pixelAngle: number, adapt: number, fade: number, viewQuat?: Quaternion): void {
     this.views = [];
     this.gain.value = 0.9 * Math.pow(Math.max(adapt, 0), 0.55) * fade * this.adaptGalaxy(cam, viewQuat);
-    this.pixAng.value = pixelAngle;
+    // (the volumes are drawn at reduced resolution: their pixels are larger)
+    this.pixAng.value = pixelAngle / Math.min(1, LITE.uLite.value > 0.5 ? VOLUMES.scaleXr : VOLUMES.scale);
     this.group.visible = fade > 0.001;
     const rel = new Vector3();
     const m = new Matrix4();
