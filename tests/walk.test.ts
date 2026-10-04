@@ -267,6 +267,22 @@ describe('rocks', () => {
     expect(b.pos.y).toBeGreaterThan(low.centre.y + 1);
     expect(Math.abs(b.radius - R)).toBeLessThan(0.02);
   });
+  it('jumping into the side of a tall boulder drops you back to the ground in front of it', () => {
+    const tall = rock(2.2, 1.5, 0.6); // 2.1 m high (its foot 0.83 m ahead), too high to jump onto on Earth
+    const b = new WalkBody();
+    b.gm = EARTH.gm; b.lope = false; b.rocks = [tall];
+    const flatE = sphere(EARTH.r);
+    tall.centre.z = EARTH.r + 0.6;
+    b.placeOn(new Vector3(0, 0, 1), flatE);
+    b.vel.set(0, 1.4, 0);
+    b.step(1 / 60, intent({ jump: true, wish: new Vector3(0, 1, 0) }), flatE);
+    let maxH = 0;
+    for (let i = 0; i < 3 * 60; i++) { b.step(1 / 60, intent({ wish: new Vector3(0, 1, 0) }), flatE); maxH = Math.max(maxH, b.radius - EARTH.r); }
+    expect(maxH).toBeLessThan(0.4); // a 2.5 m/s jump on Earth: 0.32 m, no climbing up the face
+    expect(b.onGround).toBe(true);
+    expect(b.radius - EARTH.r).toBeLessThan(0.01);
+    expect(b.pos.y).toBeLessThan(tall.centre.y);
+  });
   it('a jump lands on top of a boulder; standing there you are on the rock', () => {
     const boulder = rock(1.2, 0.8, 0.1); // 0.9 m high, right ahead
     const b = new WalkBody();
@@ -282,5 +298,47 @@ describe('rocks', () => {
     expect(landedHigh).toBe(true);
     expect(b.onGround).toBe(true);
     expect(Math.abs(b.height(flat))).toBeLessThan(1e-6);
+  });
+});
+
+describe('the water\'s edge', () => {
+  const R = EARTH.r;
+  const flat = sphere(R);
+  // sea for x > 0 (a straight shoreline along y), dry land for x < 0
+  const sea = (n: Vector3) => n.x > 0;
+  function shoreWalker(x: number): WalkBody {
+    const b = new WalkBody();
+    b.gm = EARTH.gm;
+    b.water = sea;
+    b.placeOn(new Vector3(x / R, 0, 1).normalize(), flat);
+    return b;
+  }
+  const xm = (b: WalkBody) => (b.pos.x / b.pos.length()) * R;
+  it('walking at the sea stops at the shoreline', () => {
+    const b = shoreWalker(-3);
+    let blocked = false;
+    for (let i = 0; i < 6 * 60; i++) { b.step(1 / 60, intent({ wish: new Vector3(1, 0, 0) }), flat); blocked ||= b.blocked; }
+    expect(blocked).toBe(true);
+    expect(xm(b)).toBeLessThan(0);
+    expect(xm(b)).toBeGreaterThan(-0.2);
+  });
+  it('walking along the beach at an angle slides along the water\'s edge', () => {
+    const b = shoreWalker(-1);
+    for (let i = 0; i < 6 * 60; i++) b.step(1 / 60, intent({ wish: new Vector3(1, 1, 0).normalize() }), flat);
+    expect(xm(b)).toBeLessThan(0);
+    expect((b.pos.y / b.pos.length()) * R).toBeGreaterThan(3);
+  });
+  it('a jump towards the sea does not land in it', () => {
+    const b = shoreWalker(-0.3);
+    b.vel.set(1.4, 0, 0);
+    b.step(1 / 60, intent({ jump: true, wish: new Vector3(1, 0, 0) }), flat);
+    for (let i = 0; i < 3 * 60; i++) b.step(1 / 60, intent({ wish: new Vector3(1, 0, 0) }), flat);
+    expect(b.onGround).toBe(true);
+    expect(xm(b)).toBeLessThan(0);
+  });
+  it('someone already standing in the water can walk out of it', () => {
+    const b = shoreWalker(2);
+    for (let i = 0; i < 4 * 60; i++) b.step(1 / 60, intent({ wish: new Vector3(-1, 0, 0) }), flat);
+    expect(xm(b)).toBeLessThan(-1);
   });
 });

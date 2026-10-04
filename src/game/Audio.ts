@@ -85,6 +85,47 @@ export class ShipAudio {
     this.pad.gain.setTargetAtTime(on * 0.035, t, 1.5);
   }
 
+  private crunch: AudioBuffer | null = null;
+
+  /**
+   * A footstep or a landing while walking (src/app/Walk.ts), `strength` 0..1. Without air
+   * (`air` 0) only what the suit carries: a muffled low thump through the boots. `air` 0..1 scales
+   * a short gravelly crunch that air would carry (faint in Mars' thin air).
+   */
+  step(strength: number, air: number): void {
+    if (!this.ctx || !this.master || !this.enabled) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const s = Math.max(0, Math.min(1, strength));
+    // thump: a low, quickly falling sine through a low-pass (felt more than heard)
+    const o = ctx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(78 + 20 * Math.random(), t);
+    o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 220;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.02 + 0.22 * s, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09 + 0.12 * s);
+    o.connect(lp); lp.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + 0.3);
+    if (air <= 0) return;
+    // crunch: a short noise burst through a band-pass (regolith, gravel)
+    if (!this.crunch) {
+      const len = Math.floor(ctx.sampleRate * 0.12);
+      this.crunch = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = this.crunch.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.3 ? 1 : 0.35);
+    }
+    const n = ctx.createBufferSource(); n.buffer = this.crunch;
+    n.playbackRate.value = 0.8 + 0.4 * Math.random();
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400 + 900 * Math.random(); bp.Q.value = 0.9;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.exponentialRampToValueAtTime(0.0002 + 0.06 * s * Math.min(1, air), t + 0.005);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.07 + 0.05 * s);
+    n.connect(bp); bp.connect(ng); ng.connect(this.master);
+    n.start(t); n.stop(t + 0.15);
+  }
+
   /** A short rising chime. */
   chime(): void {
     if (!this.ctx || !this.master || !this.enabled) return;

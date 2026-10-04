@@ -127,6 +127,24 @@ export class WalkBody {
   /** the last step was stopped or deflected by a wall (a boulder, a ledge) */
   blocked = false;
   private terrainFn: GroundFn | null = null;
+  /** open water at a body-fixed unit direction (oceans, lakes): not walked into; null on dry worlds */
+  water: ((n: Vector3) => boolean) | null = null;
+
+  /** Horizontal unit direction from the feet towards the water nearby (body-fixed tangent). */
+  private shoreNormal(fallback: Vector3): Vector3 {
+    const up = this.pos.clone().normalize();
+    const t1 = new Vector3(), t2 = new Vector3(), sum = new Vector3(), q = new Vector3();
+    tangents(up, t1, t2);
+    const R = this.pos.length();
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const dir = t1.clone().multiplyScalar(Math.cos(a)).addScaledVector(t2, Math.sin(a));
+      if (this.water!(q.copy(this.pos).addScaledVector(dir, 0.75).divideScalar(R).normalize())) sum.add(dir);
+    }
+    if (sum.lengthSq() < 1e-9) sum.copy(fallback);
+    sum.addScaledVector(up, -sum.dot(up));
+    return sum.lengthSq() > 1e-12 ? sum.normalize() : sum.set(0, 0, 0);
+  }
 
   /** Radius of what the feet stand on along unit direction `n`: the ground, or the top of a rock there. */
   surface(n: Vector3, ground: GroundFn): number {
@@ -293,11 +311,15 @@ export class WalkBody {
       let nR = ground(nUp);
       const wallAt = (u: Vector3, rr: number) => this.rockWall(u.clone().multiplyScalar(rr), terrain);
       const tooHigh = (rr: number, dd: number) => rr - gR > STEP_UP + dd * Math.tan(SLOPE_LIMIT);
+      // the shoreline: no walking from land into open water (once in it, you may walk out)
+      const dry = !this.water || !this.water(up);
+      const wet = (u: Vector3) => dry && !!this.water && this.water(u);
       let rockHit = wallAt(nUp, Math.min(nR, r));
-      if (rockHit || tooHigh(nR, d)) {
-        // a wall (a boulder, a ledge): no climbing it; slide along it instead
+      let shore = wet(nUp);
+      if (rockHit || shore || tooHigh(nR, d)) {
+        // a wall (a boulder, a ledge, the water's edge): not crossed; slide along it instead
         this.blocked = true;
-        const wall = rockHit ?? this.wallNormal(nUp, terrain, ground);
+        const wall = rockHit ?? (shore ? this.shoreNormal(vt.clone().normalize()) : this.wallNormal(nUp, terrain, ground));
         const into = vt.dot(wall);
         if (into > 0) vt.addScaledVector(wall, -into);
         d = vt.length() * dt;
@@ -305,7 +327,8 @@ export class WalkBody {
         nUp = _n.copy(this.pos).addScaledVector(vt, dt).addScaledVector(wall, -(0.5 * d + 1e-3)).normalize().clone();
         nR = ground(nUp);
         rockHit = wallAt(nUp, Math.min(nR, r));
-        if (rockHit || tooHigh(nR, d)) {
+        shore = wet(nUp);
+        if (rockHit || shore || tooHigh(nR, d)) {
           // still into it: stop here
           vt.set(0, 0, 0);
           d = 0;
@@ -351,11 +374,14 @@ export class WalkBody {
     this.apex = Math.max(this.apex, r - this.takeoffR);
     const nUp = _n.copy(this.pos).divideScalar(r);
     let gR = ground(nUp);
-    if ((r <= gR && gR - r > STEP_UP) || this.rockWall(this.pos, this.terrainFn ?? ground)) {
+    // crossing the shoreline from land, even in the air: the water's edge is a wall
+    const intoWater = !!this.water && this.water(nUp) && !this.water(prevUp);
+    if ((r <= gR && gR - r > STEP_UP) || this.rockWall(this.pos, this.terrainFn ?? ground) || intoWater) {
       // flew into the side of something (a boulder): back out sideways, keep falling
       this.blocked = true;
       this.pos.copy(prevUp).multiplyScalar(r);
-      this.vel.copy(prevUp).multiplyScalar(this.vel.dot(prevUp));
+      const vUp = this.vel.dot(prevUp);
+      this.vel.copy(prevUp).multiplyScalar(vUp);
       nUp.copy(prevUp);
       gR = ground(nUp);
     }
@@ -431,6 +457,21 @@ export function airDrag(o: object | null): number {
   if (n === 'Earth') return 3;
   if (n === 'Mars') return 0.8;
   if (o instanceof ExoPlanet && ['terran', 'ocean', 'desert'].includes(o.spec.type)) return 2;
+  return 0;
+}
+
+/** Why walking stops at open water. */
+export function waterReason(o: object | null): string {
+  const n = (o as { name?: string } | null)?.name ?? 'this world';
+  return `That's open water on ${n === 'Earth' ? 'Earth' : n}: fly to dry land to walk`;
+}
+
+/** How much air carries the sound of footsteps (0: vacuum, only the thump through the suit). */
+export function airCarry(o: object | null): number {
+  const n = (o as { name?: string } | null)?.name;
+  if (n === 'Earth') return 1;
+  if (n === 'Mars') return 0.25; // under 1% of Earth's pressure: faint and dull
+  if (o instanceof ExoPlanet && ['terran', 'ocean', 'desert'].includes(o.spec.type)) return 1;
   return 0;
 }
 
@@ -532,6 +573,8 @@ export class Walk {
   /** Start walking here: on the ground below, flying down first if needed. Returns false (with a message) if impossible. */
   start(target?: SpaceObject): boolean {
     const app = this.app;
+    // footsteps (src/game/Audio.ts): audio may only start from a gesture, like this key press
+    if (!app.game.active) { app.game.audio.start(); app.game.audio.update(0, 0, false); }
     if (app.game.active) {
       app.game.setMode('off');
       this.say('You climb out of the ship');
@@ -541,6 +584,7 @@ export class Walk {
     if (!target && below && owner) {
       const why = cannotWalkReason(owner);
       if (why) { this.say(why); return false; }
+      if (this.isWater(below.dir)) { this.say(waterReason(owner)); return false; }
       this.bindWorld(owner);
       app.rig.cancelGoto();
       const h = below.dist - below.ground;
@@ -659,9 +703,21 @@ export class Walk {
     return rel.applyMatrix3(this.R.clone().transpose()).normalize();
   }
 
+  /** Open water below body-fixed direction `n` on the world walked on (the terrain's sea test). */
+  private isWater(n: Vector3): boolean {
+    const t = this.app.terrain as { isSea?: (n: Vector3) => boolean };
+    return !!t.isSea && t.isSea(n);
+  }
+
   private beginWalk(): void {
     const app = this.app;
     this.descendTo = null;
+    if (this.isWater(this.camBF())) {
+      // came down over water after all (the ground under the descent changed): stay in the air
+      this.say(waterReason(this.world));
+      this.exit(true);
+      return;
+    }
     this.updateFrame();
     const n = this.camBF();
     this.body.placeOn(n, this.ground);
@@ -774,11 +830,11 @@ export class Walk {
         const why = cannotWalkReason(owner);
         if (why) { this.say(why); this.exit(true); return false; }
         this.bindWorld(owner);
-        this.beginDescend(below.dist - below.ground);
         // a place: glide down onto it, not straight down from the viewpoint the travel arrived at
-        if (target instanceof Landmark && target.world === owner) {
-          this.descendTo = target.up().applyMatrix3(this.R.clone().transpose()).normalize();
-        }
+        const to = target instanceof Landmark && target.world === owner ? target.up().applyMatrix3(this.R.clone().transpose()).normalize() : below.dir;
+        if (this.isWater(to)) { this.say(waterReason(owner)); this.exit(true); return false; }
+        this.beginDescend(below.dist - below.ground);
+        if (target instanceof Landmark && target.world === owner) this.descendTo = to;
         return false;
       }
       // the ground is still being built (or loaded): wait a little
@@ -901,6 +957,8 @@ export class Walk {
     const rocks = app.rocks;
     b.rocks = rocks && rocks.group.visible && app.terrain.owner === this.world
       ? rocks.rocksNear(b.pos, 3 + b.vel.length() * dt * 2, 0.2) : [];
+    const t = app.terrain as { isSea?: (n: Vector3) => boolean };
+    b.water = t.isSea && app.terrain.owner === this.world ? (nn) => t.isSea!(nn) : null;
     const n = Math.max(1, Math.ceil(dt / (1 / 90)));
     let landed = false, impact = 0, jumped = false;
     for (let i = 0; i < n; i++) {
@@ -963,7 +1021,9 @@ export class Walk {
     const heading = vt.lengthSq() > 0.04 ? vt.clone().normalize() : this.fwd.clone();
     const side = new Vector3().crossVectors(heading, up).normalize();
     const footAt = (sgn: number) => b.pos.clone().addScaledVector(side, 0.11 * sgn);
+    const air = airCarry(this.world);
     if (landed) {
+      this.app.game.audio.step(Math.min(1, 0.25 + impact / 3), air);
       if (prints) { this.marks.addPrint(footAt(1), heading, up); this.marks.addPrint(footAt(-1), heading, up); }
       const n = Math.round(Math.min(90, 10 + impact * 22 + vt.length() * 6));
       if (impact > 0.4 || vt.length() > 1.5) this.marks.kick(b.pos, up, n, Math.min(2.2, 0.35 + impact * 0.45 + vt.length() * 0.15), vt.clone().multiplyScalar(0.25));
@@ -973,6 +1033,7 @@ export class Walk {
         this.stepIndex = step;
         this.foot = -this.foot;
         if (prints) this.marks.addPrint(footAt(this.foot), heading, up);
+        this.app.game.audio.step(vt.length() > 2 ? 0.55 : 0.3, air);
         if (vt.length() > 2) this.marks.kick(footAt(this.foot), up, 6, 0.5, vt.clone().multiplyScalar(0.2));
       }
     }
