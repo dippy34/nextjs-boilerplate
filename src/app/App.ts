@@ -113,7 +113,8 @@ export class App {
   craft!: SpacecraftLayer;
   /** close-up map tiles for the body being approached */
   tiles!: TileDetail;
-  private photoMode = false;
+  /** photo mode (U): panels and labels hidden (read by Walk for its own HUD line) */
+  photoMode = false;
   private labelsBeforePhoto = true;
   /** real 3D ground under the explorer near solid worlds */
   readonly terrain = new TerrainPatch();
