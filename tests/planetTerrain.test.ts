@@ -4,12 +4,13 @@ import { ExoGround } from '../src/universe/ExoTerrain';
 import type { ExoPlanet } from '../src/universe/Planets';
 import type { Body } from '../src/universe/Body';
 import { tileFragment } from '../src/render/PlanetTerrain';
+import { Renderer } from '../src/render/Renderer';
 import { BODY_FRAG } from '../src/render/shaders/body';
 import { EXO_FRAG } from '../src/render/shaders/planet';
 import { TerrainSource } from '../src/universe/Terrain';
 import { heightFromSpec, heightSpec } from '../src/universe/TerrainHeights';
 import {
-  buildTile, childToward, dirFace, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileValue,
+  buildTile, childToward, dirFace, skirtMasks, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileValue,
 } from '../src/universe/TerrainTiles';
 
 const R = 1737e3;
@@ -181,5 +182,36 @@ describe('tile shaders', () => {
       expect(f).toContain('#define uHScale vHScale');
       expect(f).not.toMatch(/uniform float uHScale;/);
     }
+  });
+});
+
+describe('skirts and warm-up', () => {
+  it('skirts both sides of a level boundary, never between tiles of one level, always on face borders', () => {
+    // face 0 at level 1, its tile (0, 0) split into four level-2 tiles
+    const t = (level: number, x: number, y: number) => ({ face: 0, level, x, y });
+    const tiles = [t(2, 0, 0), t(2, 1, 0), t(2, 0, 1), t(2, 1, 1), t(1, 1, 0), t(1, 0, 1), t(1, 1, 1)];
+    const m = skirtMasks(tiles);
+    // edge bits: 0 = y-1, 1 = x+1, 2 = y+1, 3 = x-1
+    expect(m[0]).toBe(0b1001); // two face borders; its siblings get none
+    expect(m[3]).toBe(0b0110); // against the coarser (1, 0) and (0, 1)
+    expect(m[4]).toBe(0b1011); // face borders, and against the finer tiles at x-1
+    expect(m[5]).toBe(0b1101); // face borders, and against the finer tiles at y-1
+    expect(m[6]).toBe(0b0110); // face borders only: its neighbours are of its own level
+    // one level everywhere: face borders only
+    expect(skirtMasks([t(1, 0, 0), t(1, 1, 0), t(1, 0, 1), t(1, 1, 1)])).toEqual([0b1001, 0b0011, 0b1100, 0b0110]);
+  });
+
+  it('warm-up compiles with the scene target bound, then restores the one bound before', () => {
+    const hdr = { name: 'hdr' }, was = { name: 'before' };
+    let bound: unknown = was, seen: unknown = null;
+    const fake = { presenting: false, hdr, gl: { getRenderTarget: () => bound, setRenderTarget: (t: unknown) => { bound = t; } } };
+    const r = Renderer.prototype.withSceneTarget.call(fake as never, () => { seen = bound; return 7; });
+    expect(r).toBe(7);
+    expect(seen).toBe(hdr);
+    expect(bound).toBe(was);
+    // in a headset the XR target three binds is left alone
+    bound = was;
+    Renderer.prototype.withSceneTarget.call({ ...fake, presenting: true } as never, () => { seen = bound; });
+    expect(seen).toBe(was);
   });
 });

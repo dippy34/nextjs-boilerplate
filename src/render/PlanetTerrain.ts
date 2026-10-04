@@ -5,7 +5,7 @@ import type { UPos } from '../core/upos';
 import { baseRadius, type Ground, type TerrainSource } from '../universe/Terrain';
 import { heightSpec, type HeightSpec } from '../universe/TerrainHeights';
 import {
-  buildTile, childToward, dirFace, faceDir, SUN_CLEAR, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
+  buildTile, childToward, dirFace, faceDir, SUN_CLEAR, skirtMasks, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
   type TileData, type TileRequest, tileValue,
 } from '../universe/TerrainTiles';
 import { ATMO_HAZE_FRAG } from './shaders/atmosphere';
@@ -526,25 +526,10 @@ export class PlanetTerrain {
       return { n, d: Math.hypot(x - camBF.x, y - camBF.y, z - camBF.z) - n.data!.bound };
     }).sort((a, b) => a.d - b.d);
     byNear.forEach((e, i) => { e.n.mesh!.renderOrder = ORDER_TERRAIN + i * 1e-5; });
-    // skirts only where a tile borders one of another level (on a face's border: always): the
-    // finer side's skirt covers its edge rising above the coarser chord, the coarser side's covers
-    // the finer edge dipping below it (a grazing sight line would slip under the coarser tile)
-    const drawnKeys = new Set(sel.map((n) => `${n.face}:${n.level}:${n.x}:${n.y}`));
-    const aboveDrawn = new Set<string>();
-    for (const n of sel) for (let l = n.level - 1; l >= 0; l--) aboveDrawn.add(`${n.face}:${l}:${n.x >> (n.level - l)}:${n.y >> (n.level - l)}`);
-    const NB = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-    for (const n of sel) {
-      let mask = 0;
-      const size = 2 ** n.level;
-      for (let e = 0; e < 4; e++) {
-        const nx = n.x + NB[e][0], ny = n.y + NB[e][1];
-        if (nx < 0 || ny < 0 || nx >= size || ny >= size) { mask |= 1 << e; continue; }
-        if (aboveDrawn.has(`${n.face}:${n.level}:${nx}:${ny}`)) { mask |= 1 << e; continue; }
-        for (let l = n.level - 1; l >= 0; l--) {
-          const sh = n.level - l;
-          if (drawnKeys.has(`${n.face}:${l}:${nx >> sh}:${ny >> sh}`)) { mask |= 1 << e; break; }
-        }
-      }
+    // skirts only where a tile borders one of another level (TerrainTiles.skirtMasks)
+    const masks = skirtMasks(sel);
+    for (let i = 0; i < sel.length; i++) {
+      const n = sel[i], mask = masks[i];
       const g = n.mesh!.geometry;
       if (g.index !== this.indices[mask]) g.setIndex(this.indices[mask]);
     }
