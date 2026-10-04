@@ -1,6 +1,7 @@
-// Drives God mode in headless Chromium: the real ephemeris switching to the N-body sandbox, the
-// panel, reversing Earth's orbit, deleting the Earth (the Moon wanders off), a black hole, a
-// collision, undo, save/load, reset, and the in-headset God tab with an emulated Meta Quest 3.
+// Drives God mode in headless Chromium: the physics editor (mass/radius/density, Kepler elements,
+// the math lines), reversing Earth's orbit, Kepler III after a mass change, deleting the Earth (the
+// Moon wanders off), the N-body switch, a black hole, a collision, undo, save/load, reset, and the
+// in-headset God tab with an emulated Meta Quest 3.
 // Usage: node scripts/god.mjs [baseUrl] [outDir]
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -50,7 +51,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   await frames(3);
   const after = await helio('Earth');
   st = await page.evaluate(() => ({ active: window.app.god.active, badge: document.querySelector('.god-badge')?.textContent, n: window.app.god.sandbox.entities.size }));
-  check('an edit switches to the sandbox', st.active && /Sandbox/.test(st.badge ?? '') && st.n > 300, JSON.stringify(st));
+  check('an edit leaves the real ephemeris (Kepler orbits by default)', st.active && /Kepler/.test(st.badge ?? '') && st.n > 300, JSON.stringify(st));
   check('Reverse orbit flips Earth to a retrograde orbit', before.hEcl > 0.99 && after.hEcl < -0.99 && Math.abs(after.v - before.v) < 50, `${before.hEcl.toFixed(3)} -> ${after.hEcl.toFixed(3)}`);
   const jd0 = await page.evaluate(() => window.app.clock.jdTdb);
   await page.evaluate(() => { window.app.clock.rate = 86400 * 10; window.app.clock.paused = false; });
@@ -67,11 +68,26 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   const undone = await helio('Earth');
   check('Ctrl+Z undoes the edit', undone.hEcl > 0.99, `${undone.hEcl.toFixed(3)}`);
 
-  // 4. mass x1000: the Moon's orbit changes (it now orbits a much heavier Earth)
-  await page.click('button[data-a="mass"][data-k="1000"]');
-  await frames(3);
-  st = await page.evaluate(() => ({ gm: window.app.system.byId.get(399).gm, info: window.app.system.byId.get(399).info().find((r) => r[0] === 'Mass')?.[1] }));
-  check('mass x1000', Math.abs(st.gm / 3.986e17 - 1) < 0.01, JSON.stringify(st));
+  // 4. the editor: type a mass (radius kept, density follows); Kepler III speeds the Moon up
+  const moonP = () => page.evaluate(() => { const v = window.app.god.sandbox.orbitOf(window.app.god.sandbox.entityOf(301)); const a = v.el.q / (1 - v.el.e); return 2 * Math.PI * Math.sqrt(a ** 3 / v.el.mu) / 86400; });
+  await page.fill('input[data-f="mass"]', '4');
+  await page.press('input[data-f="mass"]', 'Enter');
+  await frames(6);
+  st = await page.evaluate(() => {
+    const b = window.app.system.byId.get(399);
+    return { gm: b.gm, r: b.radius, rho: document.querySelector('input[data-f="density"]')?.value, g: document.querySelector('[data-live="g"]')?.textContent, math: document.querySelector('[data-live-m="g"]')?.textContent };
+  });
+  check('typing 4 Earth masses: radius kept, density and g follow, with the working shown', Math.abs(st.gm / (4 * 3.986e14) - 1) < 0.01 && Math.abs(st.r - 6371e3) < 1e3 && Math.abs(Number(st.rho) - 22.05) < 0.2 && /^39\.\d+ m\/s²$/.test(st.g) && /^g = GM \/ R² = /.test(st.math), JSON.stringify(st));
+  const p4 = await moonP();
+  check("Kepler III: the Moon goes round a 4x heavier Earth twice as fast", Math.abs(p4 - 27.32 / 2) < 0.6, `${p4.toFixed(2)} d`);
+  await page.keyboard.press('Control+KeyZ');
+  await frames(4);
+  // orbital elements: set Earth's a to 1.5 AU: P = 1.84 yr from Kepler III, shown with its formula
+  await page.fill('input[data-f="a"]', '1.5');
+  await page.press('input[data-f="a"]', 'Enter');
+  await frames(6);
+  st = await page.evaluate(() => ({ P: document.querySelector('[data-live="P"]')?.textContent, au: (() => { const a = window.app; return a.system.byId.get(399).pos.distanceTo(a.system.sun.pos) / 1.495978707e11; })() }));
+  check('setting a = 1.5 AU puts Earth there; P = 2π√(a³/GM) reads 671 d (1.84 yr)', /^67[01]\d* d$/.test(st.P ?? '') && st.au > 1.48 && st.au < 1.53, JSON.stringify(st));
   await page.keyboard.press('Control+KeyZ');
   await frames(2);
 
@@ -83,12 +99,20 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
     return { earthValid: e.valid, earthGm: e.gm, moonValid: m.valid, mode: a.god.sandbox.entityOf(301)?.mode, primary: a.god.sandbox.primaryOf(a.god.sandbox.entityOf(301))?.name };
   });
   check('Delete removes Earth; the Moon now orbits the Sun', !moonFree.earthValid && moonFree.earthGm === 0 && moonFree.moonValid && moonFree.primary === 'Sun', JSON.stringify(moonFree));
+  // (still gone a moment later: the ephemeris must not bring it back)
+  await frames(3);
+  st = await page.evaluate(() => window.app.system.byId.get(399).valid);
+  check('a deleted body stays deleted', st === false, `${st}`);
   await page.keyboard.press('Control+KeyZ');
   await frames(2);
   st = await page.evaluate(() => ({ valid: window.app.system.byId.get(399).valid, primary: window.app.god.sandbox.primaryOf(window.app.god.sandbox.entityOf(301))?.name }));
   check('undo brings Earth back', st.valid && st.primary === 'Earth', JSON.stringify(st));
 
-  // 6. a black hole of 10 Suns near Earth: drawn by the black-hole layer, felt by everything
+  // 6. the N-body switch, then a black hole of 10 Suns near Earth: drawn by the black-hole layer, felt by everything
+  await page.click('input[data-c="nbody"]');
+  await frames(4);
+  st = await page.evaluate(() => ({ mode: window.app.god.sandbox.mode, badge: document.querySelector('.god-badge')?.textContent }));
+  check('"Simulate gravity" switches to the N-body simulation', st.mode === 'nbody' && /N-body/.test(st.badge), JSON.stringify(st));
   const holeId = await page.evaluate(() => {
     const a = window.app, e = a.system.byId.get(399);
     const pos = e.pos.clone().add(e.vel.clone().normalize().multiplyScalar(3e9));
@@ -114,6 +138,8 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   // 7. a collision: the Moon thrown at Mars merges with it (mass and momentum kept), with a flash
   await page.keyboard.press('Control+KeyZ'); // (the swallow is not an edit: this undoes the black hole)
   await frames(2);
+  st = await page.evaluate(() => window.app.god.sandbox.mode);
+  check('undo keeps the N-body mode', st === 'nbody', st);
   const coll = await page.evaluate(() => {
     const a = window.app, sb = a.god.sandbox, m = sb.entityOf(301), mars = sb.entityOf(499);
     // put the Moon 200,000 km from Mars, heading straight at it at 5 km/s

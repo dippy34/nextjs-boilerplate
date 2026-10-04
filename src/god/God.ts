@@ -9,6 +9,7 @@ import { GodAudio } from './GodAudio';
 import { GodLayer } from './GodLayer';
 import { GodPanel } from './GodPanel';
 import { GodVR } from './GodVR';
+import { mainSequence as physicsMainSequence } from './physics';
 import { FLAG_BLACK_HOLE, FLAG_RIGID, FLAG_STAR } from './NBody';
 import { type Entity, Sandbox, type SpawnSpec } from './Sandbox';
 
@@ -42,13 +43,10 @@ export function planetRadius(type: SpawnType, massEarth: number): number {
   return REARTH * Math.pow(massEarth, 0.27);
 }
 
-/** Main-sequence star from its mass (Suns): luminosity (Suns), radius (m), Teff (K). */
+/** Main-sequence star from its mass (Suns): luminosity (Suns), radius (m), Teff (K) (src/god/physics.ts). */
 export function mainSequence(massSun: number): { lum: number; radius: number; teff: number } {
-  const m = Math.max(0.08, massSun);
-  const lum = m < 0.43 ? 0.23 * m ** 2.3 : m < 2 ? m ** 4 : m < 55 ? 1.4 * m ** 3.5 : 32000 * m;
-  const r = m < 1 ? m ** 0.8 : m ** 0.57;
-  const teff = SUN_TEFF * Math.pow(lum / (r * r), 0.25);
-  return { lum, radius: r * 695_700e3, teff };
+  const ms = physicsMainSequence(massSun);
+  return { lum: ms.lum.value, radius: ms.radius.value, teff: ms.teff.value };
 }
 
 const TYPE_LOOK: Record<string, { type: PlanetType; teq: number }> = {
@@ -323,7 +321,87 @@ export class God {
     const e = this.sandbox.entityOf(id);
     if (e) this.sandbox.setMass(id, e.gm * k);
   }
-  setMass(id: number, gm: number): void { this.ensureActive(); this.sandbox.setMass(id, gm); }
+  setMass(id: number, gm: number): void { this.setPhysical(id, { massKg: gm / G }); }
+
+  /** Create panel: orbit radius of a new thing, and its unit */
+  placeA = 1;
+  placeAUnit: 'AU' | 'km' = 'AU';
+
+  /** N-body simulation on (from the universe as it is) or off (everything continues on Kepler orbits). */
+  setSimulation(on: boolean): void {
+    this.ensureActive();
+    this.sandbox.setMode(on ? 'nbody' : 'kepler');
+    this.app.hud.toast(on ? 'Simulating gravity: every body pulls on every other' : 'Kepler orbits: each body on its exact two-body orbit', 2.5);
+  }
+
+  /** Create something on a circular orbit of radius `a` (m) about the selection (or the Sun), at a random place on it. */
+  spawnOnOrbit(type: SpawnType, mass: number, a: number): number | null {
+    this.ensureActive();
+    const app = this.app;
+    const selE = this.entityOf(app.selection);
+    const center = selE ?? this.sandbox.entityOf(10);
+    if (!center) return null;
+    // in the plane of the centre's own orbit (the ecliptic for the Sun)
+    const pp = this.sandbox.primaryOf(center);
+    let n = new Vector3(0, -0.3977771559, 0.9174820621);
+    if (pp && center !== pp) { const h = center.pos.clone().sub(pp.pos).cross(center.vel.clone().sub(pp.vel)); if (h.lengthSq() > 0) n = h.normalize(); }
+    const u = new Vector3(1, 0, 0).cross(n).normalize();
+    const w = n.clone().cross(u);
+    const th = Math.random() * Math.PI * 2;
+    const pos = center.pos.clone().addScaledVector(u, a * Math.cos(th)).addScaledVector(w, a * Math.sin(th));
+    const gm = type === 'star' || type === 'hole' ? mass * GM_SUN : mass * GM_EARTH;
+    const vc = Math.sqrt((center.gm + gm) / a);
+    const vel = center.vel.clone().addScaledVector(n.clone().cross(pos.clone().sub(center.pos)).normalize(), vc);
+    const id = this.spawn(type, mass, pos, vel, center.id);
+    if (id !== null) this.selectEntity(id);
+    return id;
+  }
+
+  /** Which of mass, radius and density follows when one of the others is changed. */
+  derive: 'density' | 'mass' | 'radius' = 'density';
+
+  /** Current mass (kg), mean radius, polar radius (m) of a selectable thing (before the sandbox starts too). */
+  bulk(id: number): { massKg: number; radius: number; rpol: number; req: number } | null {
+    const e = this.sandbox.entityOf(id);
+    const b = e?.body ?? this.app.system.byId.get(id) ?? null;
+    const gm = e?.gm ?? b?.gm ?? 0;
+    const R = e?.radius ?? b?.radius ?? 0;
+    if (!R) return null;
+    const req = b ? (b.radii[0] + b.radii[1]) / 2 : R;
+    const rpol = b ? b.radii[2] : R;
+    return { massKg: gm / G, radius: R, rpol, req };
+  }
+
+  /**
+   * Linked mass / radius / density: change one (or the polar radius) and the one chosen in
+   * `derive` follows, the other stays.
+   */
+  setPhysical(id: number, ch: { massKg?: number; radius?: number; densityKgM3?: number; rpol?: number }): void {
+    const cur = this.bulk(id);
+    if (!cur) return;
+    let M = cur.massKg, R = cur.radius;
+    const rho = M / ((4 / 3) * Math.PI * R ** 3);
+    if (ch.massKg !== undefined) { M = ch.massKg; if (this.derive === 'radius') R = Math.cbrt((3 * M) / (4 * Math.PI * rho)); }
+    if (ch.radius !== undefined) { R = ch.radius; if (this.derive === 'mass') M = rho * (4 / 3) * Math.PI * R ** 3; }
+    if (ch.densityKgM3 !== undefined) {
+      if (this.derive === 'radius') R = Math.cbrt((3 * M) / (4 * Math.PI * ch.densityKgM3));
+      else M = ch.densityKgM3 * (4 / 3) * Math.PI * R ** 3;
+    }
+    this.ensureActive();
+    this.sandbox.setMass(id, M * G, R, ch.rpol);
+  }
+
+  /** Rotation: sidereal period (s, > 0) and direction. */
+  setRotation(id: number, periodS: number, retrograde: boolean): void {
+    this.ensureActive();
+    if (periodS > 0) this.sandbox.setSpin(id, ((retrograde ? -1 : 1) * 2 * Math.PI) / periodS, null);
+  }
+
+  /** Orbital elements (Kepler mode; in the N-body mode the body is put on that orbit's state). */
+  setOrbit(id: number, ch: Parameters<Sandbox['setOrbit']>[1]): void {
+    this.ensureActive();
+    this.sandbox.setOrbit(id, ch);
+  }
   scaleRadius(id: number, k: number): void {
     this.ensureActive();
     const e = this.sandbox.entityOf(id);
@@ -391,7 +469,7 @@ export class God {
    * Create something at `pos` (barycentric m): moving `vel` if given, else on a circular orbit
    * about the dominant body there. Returns the new entity's id.
    */
-  spawn(type: SpawnType, massValue: number, pos: Vector3, vel?: Vector3): number | null {
+  spawn(type: SpawnType, massValue: number, pos: Vector3, vel?: Vector3, parentId?: number): number | null {
     this.ensureActive();
     const sb = this.sandbox;
     const info = SPAWN_TYPES.find((t) => t.type === type)!;
@@ -417,6 +495,7 @@ export class God {
           spin: { ax: 0, ay: 0, az: 1, rate: 0, locked: false, base: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }, spawn: { type: 'swarm', seed: seed + i } });
       }
       st.nextId = (sb as unknown as { nextId: number }).nextId;
+      for (const r of st.entities) if (r.kind === 'swarm' && !r.orbit) sb.fitOrbit(r, p?.id ?? null);
       sb.applyState(st);
       this.audio.whoosh();
       return first;
@@ -430,7 +509,7 @@ export class God {
     const name = `${type === 'hole' ? 'Black hole' : type === 'star' ? 'Star' : info.label} ${count}`;
     const spec: SpawnSpec = { type, seed, rings: type === 'giant' && Math.random() < 0.5 };
     if (type === 'star') { const ms = mainSequence(massValue); spec.teff = ms.teff; spec.lum = ms.lum; }
-    const id = sb.spawn(kind, name, spec, gm, radius, pos, v, flags);
+    const id = sb.spawn(kind, name, spec, gm, radius, pos, v, flags, parentId);
     this.audio.whoosh();
     return id;
   }
