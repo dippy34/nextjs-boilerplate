@@ -85,7 +85,12 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`. Shadows: `aSun`
     is the Sun's clearance over the relief in penumbra widths (ray-marched per vertex, signed),
     and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`. Earth: the map's `"sea": 0` makes
-    lower ground flat water and limits generated hills to land (more on high ground); the painted
+    lower ground flat water and limits generated hills to land (more on high ground); the data
+    stores everything at or below 0 m as -200 m, so `Terrain.DEPRESSIONS` (circles) gives dry
+    basins a dry floor (Death Valley -80 m, Qattara, ...) and lakes below sea level their own
+    surface (Caspian -28 m, ...). Sea query for walking: `PlanetTerrain.isSea(nBF)` (the drawn
+    ground lies flat at the local water level) and `waterLevel(nBF)` (m, or null where no water;
+    generated ocean and Earth-like planets: 0); the painted
     clouds fade out on descent (`uCloudVis`, set in `Bodies`) while `render/CloudLayer.ts` (a
     sphere 7 km up, same map + generated billows) fades in, clearing again below 12-30 km. Draw order: atmosphere shell (19.8),
     terrain (19.9, transparent pass but opaque), terrain haze (19.95: `ATMO_HAZE_FRAG` on the
