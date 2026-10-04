@@ -554,8 +554,15 @@ export class App {
       return;
     }
     if (obj instanceof Galaxy) {
-      this.rig.flyTo(obj, obj.radius * 2.4, undefined, true, obj.viewDir(this.rig.upos.sub(obj.upos, new Vector3())));
-      this.hud.toast(`Going to ${obj.name}`);
+      // a second "go" from near the galaxy flies into its disc, looking at the bulge
+      const from = this.rig.upos.sub(obj.upos, new Vector3());
+      if (from.length() < obj.radius * 3) {
+        this.rig.flyTo(obj, obj.radius * 0.4, undefined, true, obj.insideDir(from));
+        this.hud.toast(`Flying into ${obj.name}`);
+        return;
+      }
+      this.rig.flyTo(obj, obj.radius * 2.4, undefined, true, obj.viewDir(from));
+      this.hud.toast(`Going to ${obj.name} (go again to fly into it)`);
       return;
     }
     let d: number;

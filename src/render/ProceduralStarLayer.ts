@@ -5,6 +5,8 @@ import { formatRaDec } from '../core/frames';
 import { extinction, GALAXY } from '../universe/Galaxy';
 import { BANDS, cellSize, generateCell, reach, spectralLabel, type StarCell } from '../universe/ProceduralStars';
 import { CatalogStar } from '../universe/Stars';
+import { BAND_LIGHT, dustBetween, F_LOG0, F_N, F_STEP, generateGalaxyCell, INTERIOR, interiorFrame } from './GalaxyInterior';
+import { smooth } from './GalaxiesLayer';
 import { STAR_FRAG, STAR_VERT } from './StarField';
 
 const ABS_MIN = -12;
@@ -14,6 +16,8 @@ const MAX_CELLS = 2500;
 
 interface Entry {
   cell: StarCell;
+  /** galaxy index for cells inside other galaxies (-1: the Milky Way) */
+  gi: number;
   points: Points | null;
   /** visual extinction (mag) from the eye to the cell, and where the eye was when it was computed */
   ext: number;
@@ -23,13 +27,14 @@ interface Entry {
 
 /** A star generated from the galaxy model (no catalogue entry). */
 export class ProceduralStar extends CatalogStar {
-  constructor(key: string, posPc: Vector3, absMag: number, teff: number, spect: string, name: string) {
+  /** `home`: the galaxy it belongs to (null: the Milky Way) */
+  constructor(key: string, posPc: Vector3, absMag: number, teff: number, spect: string, name: string, readonly home: string | null = null) {
     super(key, posPc, absMag, teff, spect, [name], null);
     this.exact = true;
   }
 
   override info(): [string, string][] {
-    const rows: [string, string][] = [['Type', 'Star (generated from the Milky Way model)']];
+    const rows: [string, string][] = [['Type', this.home ? `Star in the ${this.home} (generated from its model)` : 'Star (generated from the Milky Way model)']];
     if (this.spect) rows.push(['Spectral class', this.spect]);
     rows.push(['Temperature', `${Math.round(this.teff).toLocaleString()} K`]);
     rows.push(['Absolute mag (V)', this.absMag.toFixed(2)]);
@@ -38,6 +43,7 @@ export class ProceduralStar extends CatalogStar {
     const d = this.posPc.length();
     rows.push(['Distance from Sun', d > 3000 ? `${(d / 1000).toFixed(2)} kpc (${((d * PC) / LY / 1000).toFixed(1)} thousand ly)` : `${d.toFixed(0)} pc (${((d * PC) / LY).toFixed(0)} ly)`]);
     rows.push(['RA / Dec (from Sun)', formatRaDec(this.posPc)]);
+    if (this.home) rows.push(['Galaxy', this.home]);
     rows.push(['Origin', 'procedural: stars like it are there, this one is invented']);
     return rows;
   }
@@ -63,6 +69,8 @@ export class ProceduralStarLayer {
   private inflight = new Set<string>();
   private workers: Worker[] = [];
   private nextWorker = 0;
+  /** workers generating cells inside other galaxies (started when first needed) */
+  private gworkers: Worker[] = [];
 
   constructor(private psf: Record<string, { value: number }>, private colorLut: DataTexture) {
     this.group.name = 'procedural-stars';
@@ -107,11 +115,11 @@ export class ProceduralStarLayer {
     return pts;
   }
 
-  private receive(d: { key: string; band: number; ix: number; iy: number; iz: number; size: number; count: number; centre: number[];
+  private receive(d: { gi?: number; key: string; band: number; ix: number; iy: number; iz: number; size: number; count: number; centre: number[];
     pos: Float32Array; absMag: Float32Array; teff: Float32Array; cls: Uint8Array }): void {
     this.inflight.delete(d.key);
     const cell: StarCell = { ...d, centre: new Vector3(d.centre[0], d.centre[1], d.centre[2]) };
-    const e: Entry = { cell, points: null, ext: 0, extAt: null, lastUsed: this.frame };
+    const e: Entry = { cell, gi: d.gi ?? -1, points: null, ext: 0, extAt: null, lastUsed: this.frame };
     e.points = this.makePoints(e);
     if (e.points) e.points.visible = false;
     this.entries.set(d.key, e);
@@ -124,8 +132,9 @@ export class ProceduralStarLayer {
     this.visible.length = 0;
     if (!this.enabled) return;
     const camGal = GALAXY.toGal(camPc);
-    const want: { k: number; ix: number; iy: number; iz: number; d: number }[] = [];
-    for (let k = 0; k < BANDS.length; k++) {
+    const want: { k: number; ix: number; iy: number; iz: number; d: number; gi: number }[] = [];
+    // (far outside the Milky Way its model holds no stars)
+    if (camGal.length() < 60000) for (let k = 0; k < BANDS.length; k++) {
       const R = reach(BANDS[k].M, mLim + 0.3);
       const S = cellSize(k);
       const lo = [camGal.x - R, camGal.y - R, camGal.z - R].map((v) => Math.floor(v / S));
@@ -136,41 +145,113 @@ export class ProceduralStarLayer {
         const dy = Math.max(iy * S - camGal.y, 0, camGal.y - (iy + 1) * S);
         const dz = Math.max(iz * S - camGal.z, 0, camGal.z - (iz + 1) * S);
         const d = Math.hypot(dx, dy, dz);
-        if (d <= R) want.push({ k, ix, iy, iz, d });
+        if (d <= R) want.push({ k, ix, iy, iz, d, gi: -1 });
       }
     }
+    const inside = this.galaxyCells(camPc, mLim, want);
     want.sort((a, b) => a.k - b.k || a.d - b.d);
+    const wanted = new Float32Array(BANDS.length), ready = new Float32Array(BANDS.length);
     let extBudget = 40;
     this.pending = 0;
     const g = new Vector3();
+    const dA = new Vector3(), dB = new Vector3();
     for (const w of want) {
-      const key = `${w.k}:${w.ix}:${w.iy}:${w.iz}`;
+      const key = w.gi >= 0 ? `g${w.gi}:${w.k}:${w.ix}:${w.iy}:${w.iz}` : `${w.k}:${w.ix}:${w.iy}:${w.iz}`;
+      if (w.gi >= 0) wanted[w.k]++;
       const e = this.entries.get(key);
       if (!e) {
         // brightest bands come first in `want`; keep a few cells in flight per worker
         this.pending++;
-        if (!this.inflight.has(key) && this.inflight.size < this.workers.length * maxRequests) {
+        const pool = w.gi >= 0 ? this.galaxyWorkers() : this.workers;
+        if (!this.inflight.has(key) && this.inflight.size < pool.length * maxRequests) {
           this.inflight.add(key);
-          this.workers[this.nextWorker++ % this.workers.length].postMessage({ k: w.k, ix: w.ix, iy: w.iy, iz: w.iz });
+          pool[this.nextWorker++ % pool.length].postMessage({ gi: w.gi, k: w.k, ix: w.ix, iy: w.iy, iz: w.iz });
         }
         continue;
       }
+      if (w.gi >= 0) ready[w.k]++;
       e.lastUsed = this.frame;
       if (!e.points) continue;
       // dust towards the cell, refreshed when the eye has moved a few percent of the distance
       const toCell = e.cell.centre.distanceTo(camPc);
       if ((!e.extAt || e.extAt.distanceTo(camPc) > 0.03 * toCell + 1) && extBudget-- > 0) {
-        e.ext = extinction(camGal, GALAXY.toGal(e.cell.centre, g), 16);
+        if (e.gi >= 0) {
+          const fr = interiorFrame(e.gi);
+          e.ext = fr ? 1.086 * dustBetween(fr.model, fr.toDisc(camPc, dA), fr.toDisc(e.cell.centre, dB)) : 0;
+        } else e.ext = extinction(camGal, GALAXY.toGal(e.cell.centre, g), 16);
         e.extAt = camPc.clone();
       }
       const u = (e.points.material as ShaderMaterial).uniforms;
       (u.uOffset.value as Vector3).copy(e.cell.centre).sub(camPc);
       u.uHideRadius.value = hidePc;
-      u.uExtinction.value = e.ext;
+      // stars of another galaxy fade in as the explorer enters it
+      u.uExtinction.value = e.ext + (e.gi >= 0 && inside ? -2.5 * Math.log10(Math.max(inside.w, 1e-4)) : 0);
       e.points.visible = true;
       this.visible.push(e);
     }
     if (this.entries.size > MAX_CELLS) this.evict();
+    // the share of the galaxy's light carried by the stars drawn, by distance from the eye: bands
+    // drawn out to their reach, counted as far as their cells are ready
+    if (inside) {
+      const F = new Float32Array(F_N);
+      const reachK = BANDS.map((b) => reach(b.M, mLim + 0.3));
+      for (let j = 0; j < F_N; j++) {
+        const d = 10 ** (F_LOG0 + j * F_STEP);
+        let f = 0;
+        for (let k = 0; k < BANDS.length; k++) if (wanted[k] > 0) f += BAND_LIGHT[k] * (ready[k] / wanted[k]) * (1 - smooth(0.8 * reachK[k], 1.25 * reachK[k], d));
+        F[j] = Math.min(1, f) * inside.w;
+      }
+      INTERIOR.active = { gi: inside.gi, w: inside.w, F };
+    } else INTERIOR.active = null;
+  }
+
+  private galaxyWorkers(): Worker[] {
+    if (!this.gworkers.length) {
+      const n = Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1));
+      const data = INTERIOR.galaxies.map((g) => g.data);
+      for (let i = 0; i < n; i++) {
+        const w = new Worker(new URL('../workers/galaxyStars.worker.ts', import.meta.url), { type: 'module' });
+        w.onmessage = (ev) => this.receive(ev.data);
+        w.postMessage({ galaxies: data });
+        this.gworkers.push(w);
+      }
+    }
+    return this.gworkers;
+  }
+
+  /**
+   * Inside (or close to) another galaxy: its cells within each band's reach, in its disc frame and
+   * within its box. Returns the galaxy and how far its stars have faded in (from 1.6 to 1.1 radii).
+   */
+  private galaxyCells(camPc: Vector3, mLim: number, want: { k: number; ix: number; iy: number; iz: number; d: number; gi: number }[]): { gi: number; w: number } | null {
+    let gi = -1, best = Infinity;
+    const rel = new Vector3();
+    INTERIOR.galaxies.forEach((g, i) => {
+      const k = rel.copy(g.upos.toVector3()).multiplyScalar(1 / PC).sub(camPc).length() / (g.radius / PC);
+      if (k < best) { best = k; gi = i; }
+    });
+    if (gi < 0 || best > 1.6) return null;
+    const fr = interiorFrame(gi);
+    if (!fr) return null;
+    const w = smooth(1.6, 1.1, best);
+    const cam = fr.toDisc(camPc).multiplyScalar(fr.rpc);      // disc frame, pc
+    const e = fr.model.ext;
+    const half = Math.max(e.x, e.y, e.z) * fr.rpc;
+    const halfZ = (fr.model.look.disc ? Math.max(e.x, e.y, e.z) : e.z) * fr.rpc;
+    for (let k = 0; k < BANDS.length; k++) {
+      const R = reach(BANDS[k].M, mLim + 0.3);
+      const S = cellSize(k);
+      const lo = [Math.max(cam.x - R, -half), Math.max(cam.y - R, -half), Math.max(cam.z - R, -halfZ)].map((v) => Math.floor(v / S));
+      const hi = [Math.min(cam.x + R, half), Math.min(cam.y + R, half), Math.min(cam.z + R, halfZ)].map((v) => Math.floor(v / S));
+      for (let ix = lo[0]; ix <= hi[0]; ix++) for (let iy = lo[1]; iy <= hi[1]; iy++) for (let iz = lo[2]; iz <= hi[2]; iz++) {
+        const dx = Math.max(ix * S - cam.x, 0, cam.x - (ix + 1) * S);
+        const dy = Math.max(iy * S - cam.y, 0, cam.y - (iy + 1) * S);
+        const dz = Math.max(iz * S - cam.z, 0, cam.z - (iz + 1) * S);
+        const d = Math.hypot(dx, dy, dz);
+        if (d <= R) want.push({ k, ix, iy, iz, d, gi });
+      }
+    }
+    return { gi, w };
   }
 
   private evict(): void {
@@ -229,7 +310,9 @@ export class ProceduralStarLayer {
     let s = this.stars.get(key);
     if (!s) {
       const p = new Vector3(c.centre.x + c.pos[i * 3], c.centre.y + c.pos[i * 3 + 1], c.centre.z + c.pos[i * 3 + 2]);
-      s = new ProceduralStar(key, p, c.absMag[i], c.teff[i], spectralLabel(c, i), designation(c, i));
+      const gm = /^g(\d+):/.exec(c.key);
+      const home = gm ? INTERIOR.galaxies[Number(gm[1])]?.name ?? null : null;
+      s = new ProceduralStar(key, p, c.absMag[i], c.teff[i], spectralLabel(c, i), designation(c, i), home);
       if (this.stars.size > 5000) this.stars.clear();
       this.stars.set(key, s);
     }
@@ -238,6 +321,14 @@ export class ProceduralStarLayer {
 
   /** Look a star up by its designation (e.g. "PS 9.41.-3.0-17"). */
   find(name: string): ProceduralStar | null {
+    const gm = /^ps\s*g(\d+)\.(\d+)\.(-?\d+)\.(-?\d+)\.(-?\d+)-(\d+)$/i.exec(name.trim());
+    if (gm) {
+      const [gi, k, ix, iy, iz, i] = gm.slice(1).map(Number);
+      const fr = k < BANDS.length ? interiorFrame(gi) : null;
+      if (!fr) return null;
+      const c = this.entries.get(`g${gi}:${k}:${ix}:${iy}:${iz}`)?.cell ?? generateGalaxyCell(fr, k, ix, iy, iz);
+      return i < c.count ? this.star(c, i) : null;
+    }
     const m = /^ps\s*(\d+)\.(-?\d+)\.(-?\d+)\.(-?\d+)-(\d+)$/i.exec(name.trim());
     if (!m) return null;
     const [k, ix, iy, iz, i] = m.slice(1).map(Number);
@@ -249,5 +340,6 @@ export class ProceduralStarLayer {
 
 /** Designation encoding the cell and index, so the star can be found again. */
 export function designation(c: StarCell, i: number): string {
-  return `PS ${c.band}.${c.ix}.${c.iy}.${c.iz}-${i}`;
+  const gm = /^g(\d+):/.exec(c.key);
+  return gm ? `PS G${gm[1]}.${c.band}.${c.ix}.${c.iy}.${c.iz}-${i}` : `PS ${c.band}.${c.ix}.${c.iy}.${c.iz}-${i}`;
 }
