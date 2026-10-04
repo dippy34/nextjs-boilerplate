@@ -1,4 +1,4 @@
-import { Matrix4, Vector3 } from 'three';
+import { Matrix4 } from 'three';
 import { Body } from '../universe/Body';
 import { BlackHole } from '../universe/BlackHoles';
 import { type God, GM_EARTH, GM_SUN, SPAWN_TYPES, type SpawnType } from './God';
@@ -218,7 +218,7 @@ export class GodPanel {
       case 'move': g.tool = g.tool === 'move' ? 'none' : 'move'; if (g.tool === 'move') app.hud.toast('Drag the selected body to a new place', 2); break;
       case 'delete': if (id !== null) g.remove(id); break;
       case 'place': g.tool = g.tool === 'place' ? 'none' : 'place'; break;
-      case 'spawnHere': this.spawnNearSelection(); break;
+      case 'spawnHere': g.spawnNearSelection(g.placeType, g.placeMass); break;
     }
     this.refresh();
   }
@@ -235,23 +235,6 @@ export class GodPanel {
       if (k !== 1) g.scaleMass(id, k);
       this.refresh();
     } else if (c === 'radius' && id !== null && ev.type === 'change') { const v = Number(t.value); if (v > 0) g.setRadius(id, v * 1e3); }
-  }
-
-  /** Create the chosen thing a little way from the selection, on a circular orbit about it. */
-  private spawnNearSelection(): void {
-    const g = this.god, app = g.app;
-    const sel = app.selection;
-    const center = sel ? sel.upos.toVector3() : app.system.sun.pos.clone();
-    const type = g.placeType;
-    // around a planet: well outside it (a moon); around a star: between it and the selection's orbit
-    const r = sel ? Math.max((sel.radius || 1e6) * 8, type === 'star' || type === 'hole' ? 0.3 * 1.496e11 : 0) : 1.496e11;
-    const dir = g.screenRay(app.view.width * 0.65, app.view.height * 0.5).sub(g.screenRay(app.view.width * 0.5, app.view.height * 0.5)).normalize();
-    const pos = center.clone().addScaledVector(dir.lengthSq() > 0 ? dir : new Vector3(1, 0, 0), r);
-    const id = g.spawn(type, g.placeMass, pos);
-    if (id !== null) {
-      const ent = g.sandbox.entityOf(id);
-      if (ent && ent.kind !== 'swarm') { const o = g.objectOf(ent); if (o) app.select(o); }
-    }
   }
 
   private download(json: string): void {

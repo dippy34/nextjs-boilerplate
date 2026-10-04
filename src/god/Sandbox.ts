@@ -370,7 +370,7 @@ export class Sandbox {
       const soi = this.soi.get(k) ?? Infinity;
       if (e.pos.distanceTo(k.pos) < soi && soi <= bestSoi) { best = k; bestSoi = soi; }
     }
-    return best ?? (list[0] && list[0] !== e ? list[0] : null);
+    return best ?? (list[0] && list[0] !== e && list[0].gm > e.gm ? list[0] : null);
   }
 
   // ---------------------------------------------------------------- state

@@ -8,6 +8,7 @@ import { CatalogStar } from '../universe/Stars';
 import { GodAudio } from './GodAudio';
 import { GodLayer } from './GodLayer';
 import { GodPanel } from './GodPanel';
+import { GodVR } from './GodVR';
 import { FLAG_BLACK_HOLE, FLAG_RIGID, FLAG_STAR } from './NBody';
 import { type Entity, Sandbox, type SpawnSpec } from './Sandbox';
 
@@ -16,6 +17,8 @@ export const M_SUN = 1.98892e30;
 export const M_EARTH = 5.9722e24;
 export const GM_EARTH = 3.986004418e14;
 export const GM_SUN = 1.32712440041e20;
+/** a throw is capped at this many times the local escape speed */
+const MAX_THROW = 3;
 
 /** Spawnable things, with their default mass and look. */
 export type SpawnType = SpawnSpec['type'];
@@ -89,6 +92,8 @@ export class God {
   readonly layer: GodLayer;
   readonly panel: GodPanel;
   readonly audio = new GodAudio();
+  /** headset: grip grab-and-throw, laser placement */
+  readonly vr: GodVR;
   private proxies = new Map<number, Proxy>();
   private lights = new Map<number, CatalogStar>();
   /** desktop tool in use */
@@ -106,6 +111,7 @@ export class God {
       changed: (e) => this.changedProxy(e),
     };
     this.panel = new GodPanel(this);
+    this.vr = new GodVR(this);
     this.bindPointer();
   }
 
@@ -305,7 +311,7 @@ export class God {
   /** The selected thing's id (Solar System bodies count before the sandbox starts). */
   selectedId(): number | null { return this.idOf(this.app.selection); }
 
-  private ensure(): void {
+  ensureActive(): void {
     if (!this.sandbox.active) {
       this.sandbox.start(this.app.clock.jdTdb);
       this.app.hud.toast('Sandbox: the universe is now simulated (Reset returns to the real one)', 3);
@@ -313,20 +319,20 @@ export class God {
   }
 
   scaleMass(id: number, k: number): void {
-    this.ensure();
+    this.ensureActive();
     const e = this.sandbox.entityOf(id);
     if (e) this.sandbox.setMass(id, e.gm * k);
   }
-  setMass(id: number, gm: number): void { this.ensure(); this.sandbox.setMass(id, gm); }
+  setMass(id: number, gm: number): void { this.ensureActive(); this.sandbox.setMass(id, gm); }
   scaleRadius(id: number, k: number): void {
-    this.ensure();
+    this.ensureActive();
     const e = this.sandbox.entityOf(id);
     if (e) this.sandbox.setRadius(id, e.radius * k);
   }
-  setRadius(id: number, r: number): void { this.ensure(); this.sandbox.setRadius(id, r); }
-  preset(id: number, what: Parameters<Sandbox['preset']>[1]): void { this.ensure(); this.sandbox.preset(id, what); }
+  setRadius(id: number, r: number): void { this.ensureActive(); this.sandbox.setRadius(id, r); }
+  preset(id: number, what: Parameters<Sandbox['preset']>[1]): void { this.ensureActive(); this.sandbox.preset(id, what); }
   remove(id: number): void {
-    this.ensure();
+    this.ensureActive();
     const e = this.sandbox.entityOf(id);
     if (!e) return;
     const name = e.name;
@@ -338,7 +344,7 @@ export class God {
   }
   /** Spin: multiply the rate, reverse it, or tilt the axis to `tiltDeg` from the orbit normal. */
   spin(id: number, op: 'faster' | 'slower' | 'reverse' | 'stop' | { tiltDeg: number }): void {
-    this.ensure();
+    this.ensureActive();
     const e = this.sandbox.entityOf(id);
     if (!e) return;
     const rate = e.spin.locked ? null : e.spin.rate;
@@ -363,8 +369,8 @@ export class God {
     const { r, v } = this.sandbox.relative(e);
     return r.lengthSq() > 0 ? r.clone().cross(v).length() / r.lengthSq() : 0;
   }
-  setVelocity(id: number, v: Vector3): void { this.ensure(); this.sandbox.setVelocity(id, v); }
-  setPosition(id: number, p: Vector3, v?: Vector3): void { this.ensure(); this.sandbox.setPosition(id, p, v); }
+  setVelocity(id: number, v: Vector3): void { this.ensureActive(); this.sandbox.setVelocity(id, v); }
+  setPosition(id: number, p: Vector3, v?: Vector3): void { this.ensureActive(); this.sandbox.setPosition(id, p, v); }
 
   undo(): void {
     if (this.sandbox.undo()) this.app.hud.toast('Undone', 1.2);
@@ -386,7 +392,7 @@ export class God {
    * about the dominant body there. Returns the new entity's id.
    */
   spawn(type: SpawnType, massValue: number, pos: Vector3, vel?: Vector3): number | null {
-    this.ensure();
+    this.ensureActive();
     const sb = this.sandbox;
     const info = SPAWN_TYPES.find((t) => t.type === type)!;
     const seed = Math.floor(Math.random() * 1e6);
@@ -431,9 +437,12 @@ export class God {
 
   /** Point on the plane through the dominant body (its orbital plane) under the screen point. */
   placeAt(x: number, y: number): Vector3 | null {
+    return this.placeOnRay(this.app.rig.upos.toVector3(), this.screenRay(x, y));
+  }
+
+  /** Point on the plane of the selection's orbit along a ray (absolute origin, unit direction). */
+  placeOnRay(cam: Vector3, dir: Vector3): Vector3 | null {
     const app = this.app;
-    const dir = this.screenRay(x, y);
-    const cam = app.rig.upos.toVector3();
     const sel = this.entityOf(app.selection) ?? this.entityOf(app.rig.anchor);
     const ref = sel ? (sel.kind === 'body' && sel.body?.kind === 'star' ? sel : this.sandbox.primaryOf(sel) ?? sel) : null;
     const center = ref?.pos ?? (app.selection ? app.selection.upos.toVector3() : app.system.sun.pos.clone());
@@ -458,6 +467,45 @@ export class God {
     const t = Math.tan((v.fovY * Math.PI) / 360);
     const nx = (x / v.width) * 2 - 1, ny = -((y / v.height) * 2 - 1);
     return new Vector3(nx * t * v.aspect, ny * t, -1).normalize().applyQuaternion(v.quat);
+  }
+
+  /** Select an entity's drawable. */
+  selectEntity(id: number): void {
+    const ent = this.sandbox.entityOf(id);
+    if (ent && ent.kind !== 'swarm') { const o = this.objectOf(ent); if (o) this.app.select(o); }
+  }
+
+  /**
+   * Drop a grabbed body at `at` moving with `shown` (m/s of what is seen, real time): divided by
+   * the time rate and kept below a few times the local escape speed.
+   */
+  drop(id: number, at: Vector3, shown: Vector3): void {
+    const e = this.sandbox.entityOf(id);
+    if (!e) return;
+    const c = this.app.clock;
+    const rate = c.paused ? 1 : Math.max(1, Math.abs(c.rate));
+    const p = this.sandbox.primaryAt(at, e.gm);
+    const rel = shown.clone().divideScalar(rate);
+    const vEsc = p ? Math.sqrt((2 * p.gm) / Math.max(at.distanceTo(p.pos), 1)) : 3e4;
+    if (rel.length() > MAX_THROW * vEsc) rel.setLength(MAX_THROW * vEsc);
+    // a gentle drop keeps it on a circular orbit there; a throw adds the hand's speed to the primary's
+    const vel = rel.length() < 0.05 * vEsc ? this.sandbox.circularVelocity(at, e.gm) : rel.add(p?.vel ?? new Vector3());
+    this.setPosition(id, at, vel);
+    this.audio.whoosh();
+  }
+
+  /** Create the chosen thing a little way from the selection, on a circular orbit about it. */
+  spawnNearSelection(type: SpawnType, mass: number): number | null {
+    const app = this.app;
+    const sel = app.selection;
+    const center = sel ? sel.upos.toVector3() : app.system.sun.pos.clone();
+    // around a planet: well outside it (a moon); a star or hole: a third of an AU away
+    const r = sel ? Math.max((sel.radius || 1e6) * 8, type === 'star' || type === 'hole' ? 0.3 * 1.496e11 : 0) : 1.496e11;
+    let dir = this.screenRay(app.view.width * 0.65, app.view.height * 0.5).sub(this.screenRay(app.view.width * 0.5, app.view.height * 0.5));
+    if (dir.lengthSq() === 0) dir = new Vector3(1, 0, 0);
+    const id = this.spawn(type, mass, center.addScaledVector(dir.normalize(), r));
+    if (id !== null) this.selectEntity(id);
+    return id;
   }
 
   // ---------------------------------------------------------------- mouse tools
@@ -494,7 +542,7 @@ export class God {
     if (this.tool === 'move') {
       const id = this.idOf(app.selection);
       if (id === null) return;
-      this.ensure();
+      this.ensureActive();
       const ent = this.sandbox.entityOf(id);
       if (!ent) return;
       const p = app.project(ent.pos.clone().sub(cam));
