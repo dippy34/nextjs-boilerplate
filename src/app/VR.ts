@@ -309,6 +309,8 @@ export class VRSupport {
       return;
     }
     if (this.travel) return;
+    // God mode's creation tool: the trigger places it at the laser
+    if (this.app.god.vr.trigger(origin, dir)) { this.pulseSrc(src, 0.4, 30); return; }
     const hit = this.app.pickRay(origin, dir);
     if (hit && hit === this.app.selection) {
       this.travelTo(hit);
@@ -322,6 +324,22 @@ export class VRSupport {
     this.app.select(hit);
     this.showCard(hit, dir);
     this.pulseSrc(src, 0.3, 20);
+  }
+
+  /** Test helpers for God mode's tab (scripts/god.mjs). */
+  debugGod(): { tab: boolean } {
+    this.menu.open('god' as never);
+    this.menu.panel.update();
+    this.menu.panel.dirty = true;
+    return { tab: this.menu.panel.has('tab:god') && this.menu.panel.has('god:spawn:hole') };
+  }
+  debugPressGod(id: string): boolean {
+    if (id === 'open') { if (!this.menu.isOpen) this.toggleMenu(); this.menu.open('god' as never); this.menu.panel.update(); return true; }
+    this.menu.open('god' as never);
+    return this.menu.panel.click(`god:${id}`);
+  }
+  debugThrow(): ReturnType<App['god']['vr']['debugThrow']> {
+    return this.app.god.vr.debugThrow();
   }
 
   /** Buzz both controllers (walking: a jump, a landing). */
@@ -559,7 +577,11 @@ export class VRSupport {
         if (edge(5)) this.toggleMenu();
         if (edge(3)) app.realTime();
       } else if (h.handedness === 'right') {
-        if (squeeze) {
+        // God mode: the grip grabs, drags and throws the body under the laser
+        const godRay = this.handRay(h);
+        if (!this.travel && app.god.vr.grip(squeeze, godRay.origin, godRay.dir, h.hoverObj)) {
+          // (the grip is God mode's)
+        } else if (squeeze) {
           rig.ext.orbitX = x;
           rig.ext.zoom = y;
         } else if (!this.travel) {
