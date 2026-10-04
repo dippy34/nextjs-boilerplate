@@ -42,6 +42,25 @@ ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
 
+/**
+ * A nebula too small to resolve: a soft glow of its colour that keeps the nebula's light (its
+ * integrated flux) down to below a pixel, as the volume fades out.
+ */
+const FAR_FRAG = /* glsl */ `
+#include <common>
+#include <logdepthbuf_pars_fragment>
+uniform vec3 uCol;
+uniform float uGain;
+uniform float uAmp;
+varying vec2 vP;
+void main() {
+  float r2 = dot(vP, vP);
+  if (r2 > 1.0) discard;
+  gl_FragColor = vec4(uCol * uAmp * uGain * exp(-4.0 * r2), 1.0);
+${OUTPUT_FRAGMENT}
+  #include <logdepthbuf_fragment>
+}`;
+
 function rnd(seed: number): () => number {
   let a = Math.floor(seed * 4294967296) >>> 0 || 1;
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -117,6 +136,7 @@ uniform float uShape;
 uniform float uSeed;
 uniform float uGain;
 uniform float uBright;
+uniform float uFade;    // gives way to the far glow when a few pixels small
 uniform float uLite;
 uniform float uPixAng;
 uniform vec3 uAxes;     // envelope axes (nebula frame, radii)
@@ -370,7 +390,7 @@ void main() {
       col += vec3(0.8, 0.88, 1.0) * (exp(-sq(d / max(0.0015, uPixAng * 0.8))) * 25.0 + 0.04 / (1.0 + sq(d / 0.008)));
     }
   }
-  gl_FragColor = vec4(col * 0.7 * uGain * uBright, 1.0);
+  gl_FragColor = vec4(col * 0.7 * uGain * uBright * uFade, 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
@@ -439,6 +459,7 @@ export class DeepSkyLayer {
   views: DeepSkyView[] = [];
   private glows = new Map<DeepSkyObject, Mesh>();
   private volumes = new Map<DeepSkyObject, Mesh>();
+  private far = new Map<DeepSkyObject, Mesh>();
   private stars = new Map<DeepSkyObject, Points>();
   readonly gain = { value: 0.6 };
   private pixAng = { value: 1e-3 };
@@ -495,7 +516,7 @@ export class DeepSkyLayer {
         name: 'nebula-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG,
         uniforms: {
           uNoise: { value: noise }, uCenter: { value: new Vector3() }, uRadius: { value: o.radius }, uRot: { value: rot },
-          uType: { value: type }, uShape: { value: look.shape }, uSeed: { value: o.seed }, uGain: this.gain, uBright: { value: look.bright ?? 1 },
+          uType: { value: type }, uShape: { value: look.shape }, uSeed: { value: o.seed }, uGain: this.gain, uBright: { value: look.bright ?? 1 }, uFade: { value: 1 },
           uLite: LITE.uLite, uPixAng: this.pixAng, uAxes: { value: new Vector3(...(look.axes ?? [1, 1, 1])) },
           uAxis: { value: new Vector3(Math.sin(tilt), 0, Math.cos(tilt)) },
           uP: { value: new Vector4(...(look.p ?? [0.2, 0, 0, 0.3])) }, uQ: { value: new Vector4(...(look.q ?? [1, 3, 0, 0])) },
@@ -509,6 +530,20 @@ export class DeepSkyLayer {
       m.name = o.name;
       this.group.add(m);
       this.volumes.set(o, m);
+      // its far glow (about the volume's light when a few pixels across)
+      const col: [number, number, number] = type === 3 ? [0.45, 0.6, 1.0] : type === 0 ? [1.0, 0.32, 0.4] : type === 1 ? [0.45, 0.9, 0.85] : [1.0, 0.55, 0.4];
+      const amp = (type === 3 ? 0.3 : type === 0 ? 2.0 : type === 1 ? 1.5 : 1.0) * (look.bright ?? 1);
+      const far = new Mesh(quad, new ShaderMaterial({
+        name: 'nebula-far', vertexShader: BILL_VERT, fragmentShader: FAR_FRAG,
+        uniforms: { uCol: { value: new Vector3(...col) }, uGain: this.gain, uAmp: { value: 0 }, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK },
+        transparent: true, depthWrite: false, blending: AdditiveBlending,
+      }));
+      far.matrixAutoUpdate = false;
+      far.frustumCulled = false;
+      far.renderOrder = -1;
+      far.userData.amp = amp;
+      this.group.add(far);
+      this.far.set(o, far);
     }
   }
 
@@ -537,9 +572,23 @@ export class DeepSkyLayer {
       this.views.push({ obj: o, rel: rel.clone(), dist, pixelRadius: pr });
       const vol = this.volumes.get(o);
       if (vol) {
-        vol.visible = pr > 0.6;
+        // below a few pixels the volume hands over to a glow that keeps its light
+        const wFar = 1 - Math.min(1, Math.max(0, (pr - 3) / 6));
+        const far = this.far.get(o)!;
+        far.visible = wFar > 0.01 && pr > 0.01;
+        if (far.visible) {
+          const sPx = Math.max(pr, 1.5);
+          const s = (sPx * pixelAngle) * dist;
+          far.matrix.makeScale(s, s, s).setPosition(rel);
+          far.matrixWorldNeedsUpdate = true;
+          const fu = (far.material as ShaderMaterial).uniforms;
+          fu.uAmp.value = far.userData.amp * (pr / sPx) ** 2 * wFar;
+          fu.uClipScale.value = 1 / Math.max(dist, 1);
+        }
+        vol.visible = pr > 3 && wFar < 0.99;
         if (vol.visible) {
           const u = (vol.material as ShaderMaterial).uniforms;
+          u.uFade.value = 1 - wFar;
           (u.uCenter.value as Vector3).copy(rel);
           u.uClipScale.value = 1 / Math.max(dist, o.radius);
           vol.matrix.makeScale(o.radius, o.radius, o.radius).setPosition(rel);
