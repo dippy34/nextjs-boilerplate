@@ -10,7 +10,7 @@ import { EXO_FRAG } from '../src/render/shaders/planet';
 import { DEPRESSIONS, earthWaterLevel, TerrainSource } from '../src/universe/Terrain';
 import { heightFromSpec, heightSpec } from '../src/universe/TerrainHeights';
 import {
-  buildTile, childToward, dirFace, skirtMasks, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileValue,
+  buildTile, childToward, dirFace, skirtMasks, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileSpacing, tileValue,
 } from '../src/universe/TerrainTiles';
 
 const R = 1737e3;
@@ -124,6 +124,31 @@ describe('planet terrain tiles', () => {
     const at = (fs: number) => tileValue({ face: 4, level: 10, x: 600, y: 600 }, t.sun, faceDir(4, s0 + fs * w, t0 + 0.5 * w));
     expect(at(0.5)).toBeLessThan(-0.5);     // in the ridge's shadow
     expect(at(0.75)).toBeGreaterThan(0);    // on the sunward side
+  });
+
+  it('relief shadows: a ridge just beyond the tile, or a narrow one far away, still shades it', () => {
+    // the sun low in the east (+s side); ridges outside the tile (u > 1), narrow (a few cells wide)
+    const [s0, t0, w] = tileRect(10, 600, 600);
+    const c = faceDir(4, s0 + w / 2, t0 + w / 2);
+    const east = faceDir(4, s0 + w, t0 + w / 2).sub(c).normalize();
+    const elev = 0.08;
+    const sun = c.clone().multiplyScalar(Math.sin(elev)).addScaledVector(east, Math.cos(elev)).normalize();
+    const tileM = tileSpacing(R, 10) * TILE_N;
+    const shadeWith = (u0: number, reach: number, width = 0.06) => {
+      // tall enough to shade `reach` tile widths west of the ridge
+      const H = Math.tan(elev) * reach * tileM;
+      const ridge = (n: Vector3) => { const f = dirFace(n); const u = (f.s - s0) / w; return H * Math.exp(-(((u - u0) / width) ** 2)); };
+      const t = buildTile(req(4, 10, 600, 600, { sun: [sun.x, sun.y, sun.z], hTop: H + 100 }), ridge);
+      return (fs: number) => tileValue({ face: 4, level: 10, x: 600, y: 600 }, t.sun, faceDir(4, s0 + fs * w, t0 + 0.5 * w));
+    };
+    // just beyond the east edge: shades the eastern half of the tile
+    const near = shadeWith(1.08, 0.6);
+    for (const fs of [0.6, 0.75, 0.9, 0.97]) expect(near(fs), `ridge just beyond the edge, at ${fs}`).toBeLessThan(-0.5);
+    expect(near(0.2)).toBeGreaterThan(0);
+    // a massif three tiles away (heights that far are smoothed over a sixth of the distance, so
+    // narrower crests are broadened to about this): shades the whole tile
+    const far = shadeWith(4, 5.5, 0.5);
+    for (const fs of [0.05, 0.3, 0.6, 0.95]) expect(far(fs), `narrow ridge far away, at ${fs}`).toBeLessThan(-0.5);
   });
 
   it('worker specs rebuild the same heights (generated planets and Solar System bodies)', () => {
