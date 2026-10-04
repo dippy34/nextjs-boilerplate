@@ -154,6 +154,40 @@ async function desktopSite(page, id, landmark, world, gExpect) {
   check(`${id}: paused time still lets you walk (not paused by Space)`, await page.evaluate(() => window.app.clock.paused), '');
   await frames(10);
   await page.screenshot({ timeout: 400000, path: path.join(outDir, `${id}-landed.png`) });
+
+  // a boulder in the way: walk straight at one taller than 0.8 m from 2 m away; it stops you
+  const setup = await page.evaluate(() => {
+    const a = window.app, w = a.walk, b = w.body;
+    if (!a.rocks.group.visible) return null;
+    const big = a.rocks.rocksNear(b.pos, 60, 0.4)
+      .filter((k) => k.radius > 0.6 && k.centre.length() + k.radius - w.ground(k.centre.clone().normalize()) > 0.8)
+      .sort((p, q) => p.centre.distanceTo(b.pos) - q.centre.distanceTo(b.pos))[0];
+    if (!big) return null;
+    const up = big.centre.clone().normalize();
+    const side = new up.constructor(0, 0, 1).cross(up).normalize();
+    b.placeOn(big.centre.clone().addScaledVector(side, big.radius + 2).normalize(), w.ground);
+    w.visR = b.radius;
+    w.fwd.copy(side).negate();
+    w.pitch = 0;
+    window.__boulder = big;
+    return { radius: big.radius, height: big.centre.length() + big.radius - w.ground(up) };
+  });
+  if (setup) {
+    await page.keyboard.down('KeyW');
+    const into = await sample(page, 40);
+    await page.keyboard.up('KeyW');
+    const geo = await page.evaluate(() => {
+      const a = window.app, w = a.walk, b = w.body, k = window.__boulder;
+      const up = k.centre.clone().normalize();
+      const rel = b.pos.clone().sub(k.centre);
+      return { dist: rel.addScaledVector(up, -rel.dot(up)).length(), aboveTerrain: b.radius - w.ground(b.pos.clone().normalize()) };
+    });
+    const blocked = into.some((s) => s.blocked);
+    check(`${id}: a ${setup.height.toFixed(1)} m boulder stops you instead of letting you walk through or onto it`,
+      blocked && geo.dist > setup.radius * 0.6 && geo.aboveTerrain < 0.5 && into.every((s) => s.finite), JSON.stringify({ ...setup, ...geo, blocked }));
+  } else {
+    console.log(`${id}: no boulder taller than 0.8 m within 60 m (rocks check skipped)`);
+  }
 }
 
 if (which !== 'vr') {
