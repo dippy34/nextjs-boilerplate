@@ -34,11 +34,15 @@ export interface TerrainCandidate {
 }
 
 /**
- * Draw order: the atmosphere shell (19.8, render/Atmospheres.ts), then the terrain over it, then the
- * terrain's own haze, then clouds, cockpits and HUDs. The terrain is in the transparent pass (drawn
- * opaque) only so that it can come after the shell.
+ * Draw order within an atmosphere (below 160 km): the atmosphere shell (19.8, render/Atmospheres.ts),
+ * then the terrain over it, then the terrain's own haze, then clouds, cockpits and HUDs. The terrain
+ * is in the transparent pass (drawn opaque) only so that it can come after the shell. Higher up
+ * there is no per-tile haze: the terrain goes before the shell (ORDER_UNDER_SHELL), which then
+ * scatters over it as over the globe (else the ground seen from orbit would lose its atmosphere,
+ * and the change from globe to terrain would show).
  */
 const ORDER_TERRAIN = 19.9;
+const ORDER_UNDER_SHELL = 19.7;
 const ORDER_HAZE = 19.95;
 /** cell sizes (m) of the shader's fine crater lattices (body.ts uOI0..3 / uOF0..3) */
 const FINE_CELLS = [400, 90, 20, 4.5];
@@ -261,9 +265,15 @@ export class PlanetTerrain {
     return Math.max(40e3, g.radius * 0.03);
   }
 
-  /** altitude (m above the reference surface) below which a world is drawn as terrain */
+  /**
+   * altitude (m above the reference surface) below which a world is drawn as terrain: where its
+   * relief (about twice the generated relief's amplitude, TerrainSource.amplitude) stands a pixel
+   * or two high (~1.5 mrad pixels: altitude < relief / 2.25e-3), at most two radii, at least 200 km.
+   * Farther out the globe (with its relief map) looks the same and costs far less.
+   */
   static reach(g: { radius: number }): number {
-    return Math.max(2 * g.radius, 200e3);
+    const amp = Math.min(4500, g.radius * 0.0024);
+    return Math.max(200e3, Math.min(2 * g.radius, 900 * amp));
   }
 
   // ------------------------------------------------------------------------------ materials
@@ -540,8 +550,8 @@ export class PlanetTerrain {
     for (const n of this.drawn) if (!n.drawn) { if (n.mesh) n.mesh.visible = false; if (n.haze) n.haze.visible = false; }
     this.drawn = sel;
     const rel = c.rel;
-    // aerial perspective over the terrain matters within the atmosphere; from orbit the shell (drawn
-    // behind, render/Atmospheres.ts) covers the limb, so no per-tile haze draws there
+    // aerial perspective over the terrain matters within the atmosphere; from orbit the shell
+    // (render/Atmospheres.ts, drawn after the terrain then) covers it, so no per-tile haze draws there
     const air = c.air && alt < 160e3 ? this.hazeFor(c.air) : null;
     let deepest = 0;
     // near tiles first: the terrain is in the transparent pass (after the atmosphere shell), which
@@ -551,7 +561,8 @@ export class PlanetTerrain {
       const [x, y, z] = n.data!.centre;
       return { n, d: Math.hypot(x - camBF.x, y - camBF.y, z - camBF.z) - n.data!.bound };
     }).sort((a, b) => a.d - b.d);
-    byNear.forEach((e, i) => { e.n.mesh!.renderOrder = ORDER_TERRAIN + i * 1e-5; });
+    const baseOrder = c.air && !air ? ORDER_UNDER_SHELL : ORDER_TERRAIN;
+    byNear.forEach((e, i) => { e.n.mesh!.renderOrder = baseOrder + i * 1e-5; });
     // skirts only where a tile borders one of another level (TerrainTiles.skirtMasks)
     const masks = skirtMasks(sel);
     for (let i = 0; i < sel.length; i++) {
