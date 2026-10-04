@@ -56,6 +56,8 @@ export class Body implements SpaceObject {
   readonly orientation = new Matrix4();
   /** set by the solar system each frame: false when the position could not be computed */
   valid = true;
+  /** drawn by another layer (God mode's spawned planets and stars), not by the bodies layer */
+  hidden = false;
 
   /** raw description from system.json (for the info panel) */
   meta: Record<string, unknown> = {};

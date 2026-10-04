@@ -17,7 +17,9 @@ float spToneCurve(float y) {
   return clamp(a / b, 0.0, 1.0);
 }
 vec3 spTone(vec3 c) {
-  c = max(c, vec3(0.0));
+  // (an overflowed (infinite) value is white, not NaN: additive layers on a disk shown far above
+  // white, while the eye has yet to adapt, can exceed half-float range)
+  c = min(max(c, vec3(0.0)), vec3(1.0e4));
   float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   if (Y < 1e-7) return vec3(0.0);
   float Yt = spToneCurve(Y);

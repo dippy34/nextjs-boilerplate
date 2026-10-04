@@ -70,8 +70,12 @@ export function starLook(key: string, teff: number, radiusSun: number, absMag: n
   // granulation cells around the circumference ∝ R g / T (Sun ~4400)
   const cells = (4400 * mass) / (R * (T / 5772));
   // per unit of radius (the pattern is laid on the unit sphere): cells / 2 pi; the Sun's granules ~1000 km
-  const granFreq = Math.min(900, Math.max(2.2, cells / (2 * Math.PI)));
-  const granAmp = whiteDwarf ? 0.01 : convective ? 0.16 + 0.14 * smooth(3, 200, R) + 0.05 * r3 : 0.025 + 0.02 * r3;
+  // (red supergiants: a handful of giant convection cells across the disk, as interferometric
+  // images of Betelgeuse and simulations show)
+  const granFreq = supergiant && T < 5000 ? 1.6 + 1.6 * r2 : Math.min(900, Math.max(2.2, cells / (2 * Math.PI)));
+  // (giant cells on red giants and supergiants are bright and dark patches across the whole disk, as
+  // interferometric images of Betelgeuse and Antares show)
+  const granAmp = whiteDwarf ? 0.01 : convective ? 0.16 + 0.32 * smooth(3, 200, R) + 0.05 * r3 : 0.025 + 0.02 * r3;
   // activity: cool dwarfs most active, fast-rotating M dwarfs above all
   let activity: number;
   if (whiteDwarf || T > 7200) activity = 0;
@@ -109,7 +113,7 @@ export function starLookUniforms(look: StarLook, axisBF = new Vector3(0, 0, 1)):
     uSeed: { value: look.seed }, uGranFreq: { value: look.granFreq }, uGranAmp: { value: look.granAmp },
     uSpots: { value: look.spots }, uSpotLat: { value: look.spotLat }, uFaculae: { value: look.faculae },
     uLimbA: { value: look.limbA }, uLimbB: { value: look.limbB }, uRotRate: { value: look.rotRate },
-    uGravDark: { value: look.gravDark }, uAxis: { value: axisBF.clone() }, uFlares: { value: look.flares },
+    uGravDark: { value: look.gravDark }, uAxis: { value: axisBF.clone() }, uFlares: { value: look.flares }, uFlat: { value: look.flattening },
   };
 }
 
@@ -119,4 +123,5 @@ export function applyStarLook(u: Record<string, { value: unknown }>, look: StarL
   u.uSpots.value = look.spots; u.uSpotLat.value = look.spotLat; u.uFaculae.value = look.faculae;
   u.uLimbA.value = look.limbA; u.uLimbB.value = look.limbB; u.uRotRate.value = look.rotRate;
   u.uGravDark.value = look.gravDark; u.uFlares.value = look.flares;
+  if (u.uFlat) u.uFlat.value = look.flattening;
 }

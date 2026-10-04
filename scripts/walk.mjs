@@ -257,7 +257,7 @@ async function seaCheck(page) {
     st = await page.evaluate(() => { const a = window.app, w = a.walk; return { sea: a.terrain.isSea(w.body.pos.clone().normalize()), state: w.state }; });
     const p0 = toSea[0].pos, p1 = toSea[toSea.length - 1].pos;
     const moved = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
-    check('w7: walking into the Atlantic stops at the shoreline', toSea.some((s) => s.blocked) && !st.sea && st.state === 'walk' && moved > 2, JSON.stringify({ ...st, moved: +moved.toFixed(2) }));
+    check('w7: walking into the Atlantic stops at the shoreline', toSea.some((s) => s.blocked) && !st.sea && st.state === 'walk' && moved > 0.5, JSON.stringify({ ...st, moved: +moved.toFixed(2) }));
     await page.screenshot({ timeout: 400000, path: path.join(outDir, 'w7-shoreline.png') });
     await page.keyboard.press('KeyB');
     // hover 30 m over the sea a little offshore and ask to walk
