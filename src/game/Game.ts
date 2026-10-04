@@ -13,6 +13,10 @@ import { WarpFx } from './WarpFx';
 import { HudMarkers } from './HudMarkers';
 import { Station } from './Station';
 import { ExoPlanet, type PlanetType } from '../universe/Planets';
+import { Flight, fmtDist, fmtSpeed as fmtSpd, fmtTime, sasLabel } from './Flight';
+import { FlightHud } from './FlightHud';
+import { FlightViz } from './FlightViz';
+import { G0 } from '../sim/ShipPhysics';
 
 /** generated planet types with a surface to land on */
 const SOLID_TYPES = new Set<PlanetType>(['lava', 'hot', 'desert', 'terran', 'ocean', 'ice']);
@@ -42,6 +46,10 @@ export class Game {
   readonly traffic = new Traffic();
   readonly audio = new ShipAudio();
   readonly missions: Missions;
+  /** real-physics flight (on whenever you are in the ship) */
+  readonly flight: Flight;
+  readonly viz = new FlightViz();
+  readonly flightHud: FlightHud;
   private warping = false;
   private time = 0;
   private hudTimer = 0;
@@ -51,6 +59,9 @@ export class Game {
   docked: Station | null = null;
   /** world we have touched down on */
   landed: Body | ExoPlanet | null = null;
+  get isDocking(): boolean {
+    return this.docking !== null;
+  }
   /** seconds before the docking computer may engage again (after undocking) */
   private dockCooldown = 0;
 
@@ -60,6 +71,10 @@ export class Game {
     this.ship.group.position.set(0, -3.4, -22);
     this.ship.group.visible = false;
     app.renderer.scene.add(this.traffic.group);
+    this.flight = new Flight(app);
+    app.renderer.scene.add(this.viz.group);
+    app.renderer.camera.add(this.viz.screen);
+    this.flightHud = new FlightHud(document.getElementById('hud') ?? document.body);
     this.missions = new Missions(app);
     this.missions.onComplete = (m) => {
       app.hud.toast(`Mission complete: ${m.title}!`);
@@ -84,6 +99,13 @@ export class Game {
     this.hud.group.visible = m === 'cockpit';
     this.ship.group.visible = m === 'chase';
     this.app.rig.inertia = m === 'off' ? 0 : 1.2;
+    if (m !== 'off' && !this.flight.on) {
+      // a flight starts in real time
+      this.app.flightClock();
+      this.flight.enable();
+    }
+    else this.flight.disable();
+    this.flightHud.setVisible(m !== 'off' && !this.app.vr.active);
     if (m === 'off') {
       this.docked = null;
       this.docking = null;
@@ -94,9 +116,11 @@ export class Game {
     } else {
       this.audio.start();
     }
-    const say = m === 'off' ? 'Ship mode off' : m === 'cockpit' ? 'Cockpit view: W/S thrust, mouse to steer, X brake, J warp to the selection, V to switch view' : 'Chase view (V: switch)';
-    this.app.hud.toast(say);
-    if (this.app.vr.active) this.app.vr.flash(m === 'off' ? 'Ship mode off' : 'In the cockpit: left stick to fly, A to warp');
+    const say = m === 'off' ? 'Ship mode off' : m === 'cockpit'
+      ? 'In the ship: real physics. W/S throttle, arrows or drag to turn, Y SAS mode, I boosted drive, J warp, V view'
+      : 'Chase view (V: switch)';
+    this.app.hud.toast(say, m === 'cockpit' ? 4 : 2.2);
+    if (this.app.vr.active) this.app.vr.flash(m === 'off' ? 'Ship mode off' : 'Real physics: left grip throttle, right stick steer, left stick RCS, stick click SAS');
   }
 
   /** V: off -> cockpit -> chase -> off (VR: cockpit on/off). */
@@ -110,6 +134,13 @@ export class Game {
     const sel = this.app.selection;
     if (!sel) { this.app.hud.toast('Select a destination first (click it, or search with Enter)'); return; }
     if (!this.active) this.setMode(this.app.vr.active ? 'cockpit' : 'cockpit');
+    // honest physics: the drive cannot be engaged deep in a gravity well
+    const lock = this.flight.massLock();
+    if (lock) {
+      this.app.hud.toast(lock, 4);
+      if (this.app.vr.active) this.app.vr.flash('Mass-locked: climb higher first');
+      return;
+    }
     if (this.app.vr.active) this.app.vr.travelTo(sel); else this.app.goTo(sel);
     this.warping = true;
     this.app.hud.toast(`Warp drive engaged: ${sel.name}`);
@@ -131,9 +162,11 @@ export class Game {
     this.traffic.setBody(world);
     this.traffic.update(rig.upos, app.clock.jdTdb, dt);
     this.updateDocking(dt);
-    this.updateLanding(dt);
+    if (!this.flight.on) this.updateLanding(dt);
+    this.updateFlightFx(dt);
     // engines, warp streaks, sound
-    const throttle = Math.min(1, Math.abs(rig.thrust) * (app.input.keys.has('ShiftLeft') || app.input.keys.has('ShiftRight') ? 1 : 0.6));
+    const throttle = this.flight.on ? this.flight.ship.throttle * (this.flight.ship.fuel > 0 || this.flight.ship.boosted ? 1 : 0)
+      : Math.min(1, Math.abs(rig.thrust) * (app.input.keys.has('ShiftLeft') || app.input.keys.has('ShiftRight') ? 1 : 0.6));
     this.ship.setThrust(this.warping ? 1 : throttle);
     this.warpFx.update(this.time, this.warping && !app.vr.active ? 1 : 0, dt);
     this.audio.update(this.warping ? 1 : throttle, this.warping ? 1 : 0, true);
@@ -146,6 +179,39 @@ export class Game {
     this.cockpit.update(dt);
     if (this.mode === 'cockpit') this.updateHud();
   }
+
+  /** Predicted path, g-force vignette, re-entry plasma, end-of-flight fades and the desktop instruments. */
+  private updateFlightFx(dt: number): void {
+    const app = this.app, f = this.flight;
+    if (!f.on) { this.viz.update(null, null, app.rig.upos, app.view.quat, app.view.pixelAngle, false); this.viz.setEffects(0, 0, 0, 0, [0, 0, 0], 0); return; }
+    const r = f.readout, ship = f.ship;
+    const D = f.core.frame;
+    const travelling = app.rig.autopilot || app.vr.traveling;
+    // (apsides are given as heights over the surface; for a black hole, from its centre)
+    const R = D && D.rs === 0 ? f.core.groundR || D.radius : 0;
+    this.viz.update(f.predictor, f.predictor.frame?.upos ?? null, app.rig.upos, app.view.quat, app.view.pixelAngle, !travelling && !!D, R);
+    this.viz.fitScreen(app.renderer.camera, app.vr.active);
+    // vignette from about 3 g (gentle: comfort in VR), red-out from tides
+    const vig = Math.max(0, Math.min(1, (r.gForce - 3) / 7)) * (app.vr.active ? 0.6 : 1) + Math.min(0.6, r.tidal / (100 * G0));
+    const plasma = Math.max(0, Math.min(1, Math.log10(Math.max(ship.heatFlux, 1) / 3e4) / 2));
+    let fade = 0, fadeCol: [number, number, number] = [0, 0, 0];
+    const e = f.ending;
+    if (e) {
+      const t = f.endingT;
+      if (e.ev.kind === 'horizon') fade = Math.min(1, t / (e.total * 0.6));
+      else { fadeCol = e.ev.kind === 'spaghetti' ? [0.6, 0.05, 0.02] : [1, 0.85, 0.7]; fade = Math.max(0.55, 1 - t * 0.5); }
+      if (e.t < 0.6) fade *= e.t / 0.6;
+    }
+    this.viz.setEffects(vig, Math.min(1, r.tidal / (30 * G0)), plasma, fade, fadeCol, performance.now() / 1000);
+    if (!app.vr.active) {
+      this.flightHud.setVisible(true);
+      this.flightHud.update(dt, r, this.mode === 'cockpit' || this.mode === 'chase');
+      this.flightHud.setEnd(e?.title ?? '', e?.text ?? '', e ? Math.min(1, f.endingT * 2) * (e.t < 0.6 ? e.t / 0.6 : 1) : 0);
+    } else this.flightHud.setVisible(false);
+    if (app.vr.active && r.warnLevel === 2 && r.warning !== this.lastVrWarn) app.vr.flash(r.warning);
+    this.lastVrWarn = r.warning;
+  }
+  private lastVrWarn = '';
 
   /** Canopy markers: target bracket, flight-path marker. */
   private updateHud(): void {
@@ -178,7 +244,7 @@ export class Game {
 
   private updateDocking(dt: number): void {
     const app = this.app, rig = app.rig;
-    const moving = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyR', 'KeyF'].some((k) => app.input.keys.has(k)) || Math.abs(rig.thrust) > 0.05;
+    const moving = ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyR', 'KeyF'].some((k) => app.input.keys.has(k)) || Math.abs(rig.thrust) > 0.05 || (this.flight.on && this.flight.ship.throttle > 0.05);
     this.dockCooldown = Math.max(0, this.dockCooldown - dt);
     if (this.docked) {
       const st = this.docked;
@@ -222,9 +288,11 @@ export class Game {
       const dist = rel.length();
       if (dist > 400 || dist < 1) continue;
       // in front of the port, roughly on the axis, and slow
-      if (rel.dot(st.axis) / dist > 0.75 && rig.speed < 400) {
+      // (in physics flight the docking computer matches velocity itself)
+      if (rel.dot(st.axis) / dist > 0.75 && (rig.speed < 400 || this.flight.on)) {
         const hold = this.holdPoint(st);
         this.docking = { station: st, t: 0, from: hold.negate(), q0: rig.quat.clone() };
+        this.flight.ship.throttle = 0;
         app.hud.toast(`Docking computer engaged: ${st.name}`);
         break;
       }
@@ -281,7 +349,30 @@ export class Game {
     }
     r.time = `${formatUtc(app.clock.jdTdb).slice(0, 16)} · ${app.clock.paused ? 'paused' : app.rateText()}`;
     r.missions = `${this.missions.doneCount} / ${this.missions.total} complete`;
-    r.hint = app.vr.active ? 'left stick: thrust · A: warp · B: back' : 'W/S thrust · X brake · J warp · V view · K missions';
+    r.hint = app.vr.active ? 'L grip: throttle · R stick: steer · L stick: RCS · A: warp' : 'W/S throttle · Y SAS · I boost · J warp · V view';
+    const f = this.flight;
+    if (f.on) {
+      const fr = f.readout;
+      r.speed = fmtSpd(fr.orbitSpeed);
+      r.throttle = fr.throttle;
+      r.boost = fr.boosted;
+      r.altitude = fmtDist(fr.altitude);
+      r.reference = this.docked ? r.reference : fr.landed ? `LANDED · ${fr.landed}` : `orbiting ${fr.frame}`;
+      r.flight = {
+        lines: [
+          `Ap ${Number.isFinite(fr.ap) ? fmtDist(fr.ap) : '—'}  ${Number.isFinite(fr.tAp) ? fmtTime(fr.tAp) : ''}`,
+          `Pe ${Number.isFinite(fr.pe) ? fmtDist(fr.pe) : '—'}  ${Number.isFinite(fr.tPe) ? fmtTime(fr.tPe) : ''}`,
+          Number.isFinite(fr.tImpact) && !fr.landed ? `IMPACT in ${fmtTime(fr.tImpact)}` : `surface ${fmtSpd(fr.surfSpeed)}  vert ${fmtSpd(fr.vertSpeed)}`,
+        ],
+        g: `${fr.gForce.toFixed(1)} g`,
+        sas: sasLabel(fr.sas),
+        fuel: fr.boosted ? 1 : fr.fuel,
+        clocks: `ship ${fmtTime(fr.shipTime)} · univ ${fmtTime(fr.universeTime)}${fr.dilation < 0.9999 ? ` · ×${fr.dilation.toPrecision(3)}` : ''}`,
+        warning: fr.warning,
+        lock: fr.massLock ? 'MASS-LOCKED' : '',
+      };
+      if (fr.massLock && !this.warping) r.warp = 'no target';
+    } else r.flight = null;
   }
 
   /** Light the cockpit and ship by the nearest star (or faintly, in deep space). */
