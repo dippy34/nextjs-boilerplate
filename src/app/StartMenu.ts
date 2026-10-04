@@ -42,6 +42,7 @@ export class StartMenu {
   private vrFrames = 0;
   private labelsBefore = true;
   private orbitsBefore = true;
+  private vrLabelsBefore = true;
   private onKey = (e: KeyboardEvent) => this.key(e);
 
   constructor(host: HTMLElement = document.body) {
@@ -68,7 +69,7 @@ export class StartMenu {
         <div class="sm-status" aria-live="polite"></div>
       </main>
       <footer class="sm-foot">
-        <span><kbd>↑</kbd><kbd>↓</kbd> choose</span><span><kbd>Enter</kbd> start</span><span>Gamepad <kbd>A</kbd></span><span>or tap</span>
+        <span class="sm-keys"><kbd>↑</kbd><kbd>↓</kbd> choose</span><span class="sm-keys"><kbd>Enter</kbd> start</span><span class="sm-keys">Gamepad <kbd>A</kbd></span><span class="sm-tap">Tap to choose</span>
       </footer>`;
     host.appendChild(root);
     this.root = root;
@@ -144,6 +145,8 @@ export class StartMenu {
     this.orbitsBefore = app.orbits.enabled;
     app.labels.enabled = false;
     app.orbits.enabled = false; // orbit lines would streak across the backdrop
+    this.vrLabelsBefore = app.vr.settings.labels;
+    app.vr.settings.labels = false;
     app.hud.setHidden(true);
     app.vr.holdMenu = true;
     this.build();
@@ -176,6 +179,7 @@ export class StartMenu {
     app.hud.setHidden(false);
     app.labels.enabled = this.labelsBefore;
     app.orbits.enabled = this.orbitsBefore;
+    app.vr.settings.labels = this.vrLabelsBefore;
     app.vr.holdMenu = false;
     if (app.vr.active) app.vr.flash('Trigger: select · A: fly there · Y: menu');
     else app.hud.toast('H: help · T: tour · B: walk on the ground below', 4);

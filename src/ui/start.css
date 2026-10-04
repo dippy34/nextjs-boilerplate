@@ -204,6 +204,11 @@
   line-height: 1.6;
   text-align: center;
 }
+#start-menu .sm-tap { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  #start-menu .sm-keys { display: none; }
+  #start-menu .sm-tap { display: inline; }
+}
 @media (max-height: 560px) {
   #start-menu .sm-sub, #start-menu .sm-kicker { display: none; }
   #start-menu .sm-item { padding-top: 10px; padding-bottom: 10px; }

@@ -101,6 +101,22 @@ if (which !== 'vr') {
   await page.screenshot({ path: path.join(outDir, 'start-3-simulator.png'), timeout: 300000 });
   await page.close();
 
+  // 1b. a phone: touch, a narrow screen, tap to start
+  {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+    const phone = await ctx.newPage();
+    phone.on('pageerror', (e) => errors.push(String(e)));
+    await phone.goto(base, { waitUntil: 'load' });
+    await phone.waitForFunction(() => window.app && !document.querySelector('#start-menu [data-id="sim"]').disabled, null, { timeout: 300000 });
+    const fits = await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+    check('phone: the title screen fits the width (no sideways scroll)', fits);
+    await phone.screenshot({ path: path.join(outDir, 'start-5-phone.png'), timeout: 300000 });
+    await phone.tap('#start-menu [data-id="sim"]');
+    await phone.waitForFunction(() => !document.getElementById('start-menu'), null, { timeout: 30000 });
+    check('phone: a tap on Simulator starts', true);
+    await ctx.close();
+  }
+
   // 2. deep links and ?menu=0 skip it; ?menu=1 forces it
   for (const [q, want] of [['?time=2026-10-01T20:00:00Z&paused=1&target=Moon&dist=3', false], ['?menu=0', false], ['?target=Mars', false], ['?menu=1&target=Moon', true]]) {
     page = await openPage(q);
