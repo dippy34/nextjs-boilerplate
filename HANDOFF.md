@@ -61,7 +61,7 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     quadtree on the 6 faces of an equi-angular cube on every solid world within 2 radii
     (`PlanetTerrain.reach`), tiles of 32x32 cells (`universe/TerrainTiles.ts`: heights with a border
     for continuous normals, skirts, the parent's shape for geomorphing, relief shadows), split by
-    screen-space error (`pixPerCell`), horizon-culled, at most `drawCap` drawn, built in Web Workers
+    screen-space error (`pixPerCell`), horizon-culled, about `drawCap` drawn, built in Web Workers
     (`workers/terrainTiles.worker.ts`, `inFlight` jobs a frame; the tile holding the explorer comes
     with its whole column down to the detail wanted, `chain`). The worker rebuilds the same height
     function from plain data (`universe/TerrainHeights.ts`: `TerrainSource`/`ExoGround` state) and
@@ -75,7 +75,9 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     tile of another level, on both sides, and on cube-face borders; their depth is a few times
     the tile's step from its parent's shape along the edges (deep skirts cost fill rate, which a
     software rasteriser pays in full). Tunables (desktop / headset): `pixPerCell` 18/24,
-    `drawCap` 52/44, `inFlight` 8/4, `budgetMs`/`budgetVrMs` 4/2 (main-thread builds only when
+    `drawCap` 96/72 (a soft target: `lodScale` raises the split threshold evenly while the count
+    is over it; a hard stop at 1.5x — a hard cap tested during the depth-first walk let the deep
+    column under a walker starve the far field), `inFlight` 8/4, `budgetMs`/`budgetVrMs` 4/2 (main-thread builds only when
     workers are unavailable), `maxTiles` 420/200. Shader warm-up: `App.warmUp` compiles inside
     `Renderer.withSceneTarget` — three builds one program per output target, and the scene is
     drawn into the HDR target, so compiling against the canvas left every program to compile again
