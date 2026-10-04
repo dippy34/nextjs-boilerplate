@@ -764,23 +764,61 @@ export class GalaxiesLayer {
     this.cloud.renderOrder = -1;
     this.cloud.name = 'galaxy cloud';
     this.group.add(this.cloud);
-    for (const g of galaxies) {
-      const model = this.models.get(g)!;
-      const m = new Mesh(this.box, new ShaderMaterial({
-        name: 'galaxy-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG, side: BackSide,
-        uniforms: {
-          ...model.u, uCam: { value: new Vector3() }, uExt: { value: model.ext }, uPixAng: this.pixAng,
-          uNearF: { value: new Float32Array(F_N) }, uNearOn: { value: 0 }, uRpc: { value: g.radius / 3.0856775814913673e16 },
-          uGain: this.gain, uWeight: { value: 1 }, uYoungW: { value: 1 }, uLite: LITE.uLite, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
-        },
-        transparent: true, depthWrite: false, blending: AdditiveBlending,
-      }));
-      m.matrixAutoUpdate = false;
-      m.frustumCulled = false;
-      m.renderOrder = -1;
-      m.name = g.name;
-      this.group.add(m);
-      this.volumes.set(g, m);
+    this.base = galaxies.length;
+    for (const g of galaxies) this.makeVolume(g);
+  }
+
+  /** galaxies from the start (always kept); later ones (catalogue picks) live in an LRU */
+  private base: number;
+  private lastSeen = new Map<Galaxy, number>();
+  private frameNo = 0;
+  /** volumes (and models) kept for catalogue galaxies added later */
+  static readonly MAX_ADDED = 24;
+
+  /** the model of `g` (rebuilt if it was evicted) */
+  private modelOf(g: Galaxy): GalaxyModel {
+    let model = this.models.get(g);
+    if (!model) {
+      model = new GalaxyModel(g, lookFor(g, this.galaxies), noise3D().data);
+      this.models.set(g, model);
+    }
+    return model;
+  }
+
+  private makeVolume(g: Galaxy): Mesh {
+    const model = this.modelOf(g);
+    const m = new Mesh(this.box, new ShaderMaterial({
+      name: 'galaxy-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG, side: BackSide,
+      uniforms: {
+        ...model.u, uCam: { value: new Vector3() }, uExt: { value: model.ext }, uPixAng: this.pixAng,
+        uNearF: { value: new Float32Array(F_N) }, uNearOn: { value: 0 }, uRpc: { value: g.radius / 3.0856775814913673e16 },
+        uGain: this.gain, uWeight: { value: 1 }, uYoungW: { value: 1 }, uLite: LITE.uLite, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+      },
+      transparent: true, depthWrite: false, blending: AdditiveBlending,
+    }));
+    m.matrixAutoUpdate = false;
+    m.frustumCulled = false;
+    m.renderOrder = -1;
+    m.name = g.name;
+    this.group.add(m);
+    this.volumes.set(g, m);
+    return m;
+  }
+
+  /** Free the volumes and models of the catalogue galaxies seen least recently, beyond MAX_ADDED. */
+  private evict(): void {
+    const added = this.galaxies.slice(this.base).filter((g) => this.volumes.has(g));
+    if (added.length <= GalaxiesLayer.MAX_ADDED) return;
+    added.sort((a, b) => (this.lastSeen.get(a) ?? 0) - (this.lastSeen.get(b) ?? 0));
+    for (const g of added.slice(0, added.length - GalaxiesLayer.MAX_ADDED)) {
+      // (galaxies in view stay: they would be rebuilt straight away)
+      if (g === this.cloudOf || (this.lastSeen.get(g) ?? 0) >= this.frameNo - 1) continue;
+      const v = this.volumes.get(g)!;
+      this.group.remove(v);
+      (v.material as ShaderMaterial).dispose();
+      this.volumes.delete(g);
+      this.models.delete(g);
+      INTERIOR.frames.delete(this.galaxies.indexOf(g));
     }
   }
 
@@ -816,7 +854,7 @@ export class GalaxiesLayer {
           const R = g.radius;
           o.set(-rel.dot(g.major) / R, -rel.dot(g.minor) / R, -rel.dot(g.normal) / R);
           d.set(dir.dot(g.major), dir.dot(g.minor), dir.dot(g.normal));
-          Lr += this.models.get(g)!.radiance(o, d);
+          Lr += this.modelOf(g).radiance(o, d);
         }
         sumLog += wt * Math.log(Lr * 0.9 + 0.02);
         sumW += wt;
@@ -862,7 +900,7 @@ export class GalaxiesLayer {
     this.cloud.visible = wStars > 0.001;
     if (near && this.cloud.visible) {
       const u = (this.cloud.material as ShaderMaterial).uniforms;
-      const model = this.models.get(near)!;
+      const model = this.modelOf(near);
       const geo = this.cloud.geometry;
       if (this.cloudOf !== near) {
         this.filling = fillCloud(model, geo.attributes.aStar.array as Float32Array, geo.attributes.aFlux.array as Float32Array, this.nClouds, this.nStars, this.fill);
@@ -898,11 +936,18 @@ export class GalaxiesLayer {
       const dist = rel.length();
       const pr = Math.atan2(g.radius, dist) / pixelAngle;
       if (fade > 0.001) this.views.push({ galaxy: g, rel: rel.clone(), dist, pixelRadius: pr });
-      const vol = this.volumes.get(g)!;
-      vol.visible = fade > 0.001 && pr > 0.5;
-      if (!vol.visible) continue;
+      let vol = this.volumes.get(g);
+      const show = fade > 0.001 && pr > 0.5;
+      if (!vol) {
+        // an evicted catalogue galaxy back in view
+        if (!show) continue;
+        vol = this.makeVolume(g);
+      }
+      vol.visible = show;
+      if (!show) continue;
+      this.lastSeen.set(g, this.frameNo);
       const R = g.radius;
-      const ext = this.models.get(g)!.ext;
+      const ext = this.modelOf(g).ext;
       m.makeBasis(g.major.clone().multiplyScalar(R * ext.x), g.minor.clone().multiplyScalar(R * ext.y), g.normal.clone().multiplyScalar(R * ext.z)).setPosition(rel);
       vol.matrix.copy(m);
       vol.matrixWorldNeedsUpdate = true;
@@ -916,30 +961,22 @@ export class GalaxiesLayer {
       if (on) (u.uNearF.value as Float32Array).set(act.F);
       const ws = g === near && g === this.cloudOf ? wStars * this.fill.stars : 0, wc = g === near && g === this.cloudOf ? wClouds * this.fill.clouds : 0;
       u.uWeight.value = 1 - STAR_SHARE * ws;
-      u.uYoungW.value = (1 - STAR_SHARE * ws - (this.models.get(g)!.look.cloudShare ?? CLOUD_SHARE) * wc) / (1 - STAR_SHARE * ws);
+      u.uYoungW.value = (1 - STAR_SHARE * ws - (this.modelOf(g).look.cloudShare ?? CLOUD_SHARE) * wc) / (1 - STAR_SHARE * ws);
     }
+    if (++this.frameNo % 60 === 0) this.evict();
   }
 
-  /** [catalog] Add a galaxy after construction (a catalogue destination), set up like the others. */
+  /**
+   * [catalog] Add a galaxy after construction (a catalogue destination), set up like the others:
+   * volume, interior stars when entered (its index in `galaxies` is its interior index), kept in an
+   * LRU of MAX_ADDED volumes.
+   */
   add(g: Galaxy): void {
-    if (this.models.has(g)) return;
-    const model = new GalaxyModel(g, lookFor(g, this.galaxies), noise3D().data);
-    this.models.set(g, model);
-    const m = new Mesh(this.box, new ShaderMaterial({
-      name: 'galaxy-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG, side: BackSide,
-      uniforms: {
-        ...model.u, uCam: { value: new Vector3() }, uExt: { value: model.ext }, uPixAng: this.pixAng,
-        uGain: this.gain, uWeight: { value: 1 }, uYoungW: { value: 1 }, uLite: LITE.uLite, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
-      },
-      transparent: true, depthWrite: false, blending: AdditiveBlending,
-    }));
-    m.matrixAutoUpdate = false;
-    m.frustumCulled = false;
-    m.renderOrder = -1;
-    m.name = g.name;
-    this.group.add(m);
-    this.volumes.set(g, m);
+    if (this.galaxies.includes(g)) return;
     this.galaxies.push(g);
+    this.makeVolume(g);
+    this.lastSeen.set(g, this.frameNo);
+    this.evict();
   }
 }
 

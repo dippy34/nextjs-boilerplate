@@ -205,8 +205,16 @@ export class ProceduralStarLayer {
     } else INTERIOR.active = null;
   }
 
+  private gSent = 0;
   private galaxyWorkers(): Worker[] {
+    // galaxies added since (catalogue picks) are sent before any request for them
+    if (this.gworkers.length && INTERIOR.galaxies.length > this.gSent) {
+      const add = INTERIOR.galaxies.slice(this.gSent).map((g, j) => ({ gi: this.gSent + j, data: g.data }));
+      for (const w of this.gworkers) w.postMessage({ add });
+      this.gSent = INTERIOR.galaxies.length;
+    }
     if (!this.gworkers.length) {
+      this.gSent = INTERIOR.galaxies.length;
       const n = Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1));
       const data = INTERIOR.galaxies.map((g) => g.data);
       for (let i = 0; i < n; i++) {

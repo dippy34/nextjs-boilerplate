@@ -13,9 +13,14 @@ let galaxies: Galaxy[] = [];
 const frames = new Map<number, InteriorFrame>();
 
 self.onmessage = (ev: MessageEvent) => {
-  const d = ev.data as { galaxies?: GalaxyData[]; gi: number; k: number; ix: number; iy: number; iz: number };
+  const d = ev.data as { galaxies?: GalaxyData[]; add?: { gi: number; data: GalaxyData }[]; gi: number; k: number; ix: number; iy: number; iz: number };
   if (d.galaxies) {
     galaxies = d.galaxies.map((g, i) => new Galaxy(g, i));
+    return;
+  }
+  if (d.add) {
+    // galaxies added later (catalogue destinations), at their index in the main thread's list
+    for (const a of d.add) galaxies[a.gi] = new Galaxy(a.data, a.gi);
     return;
   }
   let fr = frames.get(d.gi);
