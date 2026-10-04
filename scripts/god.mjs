@@ -295,6 +295,10 @@ if (!skipVr) {
     // grab with the grip and throw: the selected body leaves at the hand's speed (scaled)
     const s3 = await page.evaluate(() => window.app.vr.debugThrow?.() ?? null);
     check('VR: grip grabs the selection and throws it', !!s3 && s3.thrown && s3.speedChange > 0, JSON.stringify(s3));
+    const m3 = await page.evaluate(() => window.app.god.sandbox.mode);
+    check('VR: grabbing switches Kepler mode to the N-body simulation', m3 === 'nbody', m3);
+    await page.evaluate(() => window.app.god.reset());
+    await frames(3);
     const pre = await press('preset:0');
     const s5 = await page.evaluate(() => { const sb = window.app.god.sandbox; return Math.max(...[399, 499, 599].map((id) => sb.orbitOf(sb.entityOf(id)).el.e)); });
     check('VR: a preset script (circular orbits) runs from the God tab', pre && s5 < 1e-6, `${s5}`);

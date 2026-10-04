@@ -37,6 +37,8 @@ export class GodVR {
       const id = g.idOf(hover);
       if (id === null || !target) return false;
       g.ensureActive();
+      // thrown things fly, collide and get pulled: that is the N-body simulation
+      g.needGravity('what you throw flies, collides and gets pulled');
       const e = g.sandbox.entityOf(id);
       if (!e) return false;
       this.grab = { id, dist: e.pos.distanceTo(absOrigin), samples: [] };
