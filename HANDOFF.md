@@ -22,6 +22,13 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   EXT_clip_control, else log depth; the console says which): `Renderer.reverseXrProjections`
   rebuilds the runtime's eye projections as reversed-Z each frame (three has no reversed-Z path for
   XR cameras), and the far-geometry pull-in is off in that mode. For an A/B on the device.
+* Volume pass (`Renderer.ts`, `VOLUMES`): ray-marched volumes are drawn at reduced resolution
+  (desktop 0.75, headset 0.5) into their own target, then added to the frame by a full-screen quad
+  in the scene at the far plane with the volumes' old draw order (after everything opaque, sky
+  included; whatever opaque is in front still covers it, also in a headset). A layer joins by putting
+  its meshes on `VOLUMES.layer` only and adding them to `VOLUMES.meshes`; DeepSkyLayer's nebulae
+  do. Inside a nebula (SwiftShader, 800x450) frames went from 5.7-8.3 s to 3.1-3.5 s at half
+  resolution; in the emulated headset the cost of being inside Orion fell from 2.7 s to 1.0 s.
 * Visuals: NASA SVS Milky Way, atmospheres, relief maps (LOLA/MOLA/MESSENGER/ETOPO), 8k maps (desktop
   only), Hubble OPAL giants, spectral colours.
 * Earlier: autopilot uses a two-stretch log-distance Hermite curve (`src/app/CameraRig.ts`,
