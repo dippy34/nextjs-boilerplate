@@ -17,6 +17,8 @@ const LUT_LOG_SPAN = 5.5;
 const MAX_ACTIVE = 2;
 /** radius (m) of the camera-centred sphere used when the eye is inside a lensing region */
 const INSIDE_SPHERE = 1e7;
+/** while the eye holds still, a cube face is refreshed every this many frames (exposure changes, slow motions) */
+const IDLE_FRAMES = 6;
 
 export interface BlackHoleView {
   bh: BlackHole;
@@ -52,6 +54,11 @@ export class BlackHoleLayer {
   private face = 0;
   private fullCapture = true;
   private relY = new Map<number, number>();
+  /** the eye at the previous update, and frames since a cube face was last refreshed */
+  private lastCam: UPos | null = null;
+  private moved = true;
+  private idle = 0;
+  private lastCompanion = new Map<BlackHole, UPos>();
 
   /**
    * `reversedDepth`: three maps depth functions for a reversed-Z buffer (Always <-> Never too),
@@ -94,9 +101,15 @@ export class BlackHoleLayer {
     return this.meshes[i];
   }
 
-  /** A mesh to compile the shader with before it is first needed. */
+  /**
+   * Meshes to compile the shader with before it is first needed: seen from outside and from inside
+   * the lensing region (the side is part of three's program, so each is its own program).
+   */
   warmupObjects(): Mesh[] {
-    return [this.mesh(0)];
+    const inside = this.mesh(1);
+    const mat = inside.material as ShaderMaterial;
+    if (mat.side !== BackSide) { mat.side = BackSide; mat.depthFunc = this.reversedDepth ? NeverDepth : AlwaysDepth; mat.needsUpdate = true; }
+    return [this.mesh(0), inside];
   }
 
   /** Radiance of a blackbody at T relative to the Sun's disk temperature (visual luminance). */
@@ -112,6 +125,8 @@ export class BlackHoleLayer {
 
   /** Choose the holes worth drawing from `cam` and set up their meshes. */
   update(cam: UPos, pixelAngle: number, time: number): void {
+    this.moved = !this.lastCam || this.lastCam.sub(cam, new Vector3()).lengthSq() > 1;
+    if (this.lastCam) this.lastCam.copy(cam); else this.lastCam = cam.clone();
     const cands: BlackHoleView[] = [];
     const rel = new Vector3();
     for (const bh of this.holes) {
@@ -133,6 +148,16 @@ export class BlackHoleLayer {
     }
     cands.sort((a, b) => a.dist / a.bh.radius - b.dist / b.bh.radius);
     this.views = cands.slice(0, MAX_ACTIVE);
+    // a companion star crossing the lensed sky (fast with time running quickly) needs fresh faces too
+    for (const v of this.views) {
+      const c = v.bh.companion;
+      if (!c) continue;
+      const last = this.lastCompanion.get(v.bh);
+      if (!last) { this.lastCompanion.set(v.bh, c.upos.clone()); this.moved = true; continue; }
+      const step = last.sub(c.upos, rel).length();
+      if (step > 1e-3 * c.upos.sub(cam, rel).length()) this.moved = true;
+      last.copy(c.upos);
+    }
     for (const m of this.meshes) m.visible = false;
     this.views.forEach((v, i) => {
       const m = this.mesh(i);
@@ -172,8 +197,9 @@ export class BlackHoleLayer {
 
   /**
    * Refresh the environment the holes lens: the scene from the eye without the holes, the
-   * explorer's rig (controllers, panels) or `hide`. One face per call; all six when a hole
-   * first comes into view. `psf` is adjusted so point sprites are sized for the cube's pixels.
+   * explorer's rig (controllers, panels) or `hide`. One face per call while the eye moves, one
+   * every `IDLE_FRAMES` while it holds still (turning the head does not change a cube map); all
+   * six when a hole first comes into view. `psf` is adjusted so point sprites are sized for the cube's pixels.
    */
   capture(gl: WebGLRenderer, scene: Scene, hide: Object3D[], psf: Record<string, { value: number }>): void {
     if (!this.views.length) {
@@ -192,6 +218,8 @@ export class BlackHoleLayer {
       this.cubeCam.updateCoordinateSystem();
     }
     this.cubeCam.updateMatrixWorld(true);
+    if (!this.fullCapture && !this.moved && ++this.idle < IDLE_FRAMES) return;
+    this.idle = 0;
     const faces = this.fullCapture ? [0, 1, 2, 3, 4, 5] : [this.face];
     this.fullCapture = false;
     this.face = (this.face + 1) % 6;

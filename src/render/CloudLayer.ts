@@ -1,4 +1,4 @@
-import { CustomBlending, DoubleSide, Matrix3, Matrix4, Mesh, OneFactor, OneMinusSrcAlphaFactor, ShaderMaterial, SphereGeometry, type Texture, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, CustomBlending, DoubleSide, Matrix3, Matrix4, Mesh, OneFactor, OneMinusSrcAlphaFactor, ShaderMaterial, type Texture, Vector3 } from 'three';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 /**
@@ -89,11 +89,13 @@ void main() {
   // the same cover as the clouds painted on the surface (seen from orbit), drifting with them
   float ang = uCloudShift * 6.2831853;
   vec3 nc = vec3(cos(ang) * nB.x - sin(ang) * nB.y, sin(ang) * nB.x + cos(ang) * nB.y, nB.z);
+  float pix = length(fwidth(nB));
+  // beyond 450 km the layer has faded out: skip the noise there
+  float fade = uOpacity * smoothstep(450e3, 120e3, length(vWorld));
+  if (fade < 0.004) discard;
   float thick;
-  float cov = cloudField(nc, uv, length(fwidth(nB)), uLite, thick);
+  float cov = cloudField(nc, uv, pix, uLite, thick) * fade;
   float d = thick;
-  float dist = length(vWorld);
-  cov *= uOpacity * smoothstep(450e3, 120e3, dist);
   if (cov < 0.004) discard;
   // sunlit tops, greyer from below; dark on the night side
   float mu = dot(n, uSunDir);
@@ -115,8 +117,9 @@ export class CloudLayer {
   private mat: ShaderMaterial;
   /** height of the layer above the reference radius (m) */
   static readonly HEIGHT = 7000;
+  private capAngle = -1;
 
-  constructor(clouds: Texture, exposure: { value: number }) {
+  constructor(clouds: Texture | null, exposure: { value: number }) {
     this.mat = new ShaderMaterial({
       name: 'cloud-layer',
       vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
@@ -129,13 +132,28 @@ export class CloudLayer {
       transparent: true, depthWrite: false, side: DoubleSide,
       blending: CustomBlending, blendSrc: OneFactor, blendDst: OneMinusSrcAlphaFactor,
     });
-    // three's sphere has its poles on y; the body frame has them on z
-    this.mesh = new Mesh(new SphereGeometry(1, 384, 192).rotateX(Math.PI / 2), this.mat);
+    this.mesh = new Mesh(capGeometry(CAP_RINGS, CAP_SEGMENTS), this.mat);
     this.mesh.matrixAutoUpdate = false;
     this.mesh.frustumCulled = false;
     this.mesh.visible = false;
     this.mesh.renderOrder = 19.97; // after the terrain and its haze (TerrainPatch)
     this.mesh.name = 'cloud layer';
+  }
+
+  setMap(clouds: Texture): void {
+    this.mat.uniforms.uClouds.value = clouds;
+  }
+
+  /** Spread the cap's rings over `ang` radians from its pole (only when the angle changes). */
+  private setCap(ang: number): void {
+    this.capAngle = ang;
+    const pos = this.mesh.geometry.getAttribute('position') as BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const ring = Math.floor(i / (CAP_SEGMENTS + 1)), seg = i % (CAP_SEGMENTS + 1);
+      const t = (ring / CAP_RINGS) * ang, ph = (seg / CAP_SEGMENTS) * 2 * Math.PI;
+      pos.setXYZ(i, Math.sin(t) * Math.cos(ph), Math.sin(t) * Math.sin(ph), Math.cos(t));
+    }
+    pos.needsUpdate = true;
   }
 
   /**
@@ -160,8 +178,36 @@ export class CloudLayer {
     const k = camBF.clone().normalize();
     const ell = 1 / Math.sqrt((k.x / radius) ** 2 + (k.y / radius) ** 2 + (k.z / polar) ** 2);
     u.uUnder.value = camBF.length() - ell < CloudLayer.HEIGHT ? 1 : 0;
-    // the sphere's z is the body's pole: follow the planet's flattening
-    this.mesh.matrix.copy(orient).scale(new Vector3(r, r, polar + CloudLayer.HEIGHT)).setPosition(rel);
+    // a cap of the layer under the explorer (the shader fades the clouds out 450 km away), turned
+    // from +z to the explorer's direction, then stretched to the flattened layer
+    const ang = Math.min(Math.PI, (CAP_REACH / r) * 1.1);
+    const x = new Vector3(Math.abs(k.z) < 0.9 ? 0 : 1, 0, Math.abs(k.z) < 0.9 ? 1 : 0).cross(k).normalize();
+    const turn = new Matrix4().makeBasis(x, new Vector3().crossVectors(k, x), k);
+    this.mesh.matrix.copy(orient).scale(new Vector3(r, r, polar + CloudLayer.HEIGHT)).multiply(turn).setPosition(rel);
+    if (this.capAngle !== ang) this.setCap(ang);
     this.mesh.matrixWorldNeedsUpdate = true;
   }
+}
+
+/** distance (m) out to which the layer is drawn around the explorer (the shader's fade ends at 450 km) */
+const CAP_REACH = 450e3;
+const CAP_RINGS = 64;
+const CAP_SEGMENTS = 128;
+
+/**
+ * A polar grid: rings from the pole out, `segments` around (vertex i: ring i / (segments + 1),
+ * segment i % (segments + 1)); `CloudLayer.setCap` places the vertices.
+ */
+function capGeometry(rings: number, segments: number): BufferGeometry {
+  const n = (rings + 1) * (segments + 1);
+  const idx: number[] = [];
+  for (let i = 0; i < rings; i++) for (let j = 0; j < segments; j++) {
+    const a = i * (segments + 1) + j, b = a + segments + 1;
+    if (i > 0) idx.push(a, b, a + 1);
+    idx.push(a + 1, b, b + 1);
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new BufferAttribute(new Float32Array(n * 3), 3));
+  g.setIndex(idx);
+  return g;
 }
