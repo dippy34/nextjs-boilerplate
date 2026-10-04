@@ -542,7 +542,7 @@ export class App {
     const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
     const air = this.atmospheres.warmupObjects()[0];
     if (air) terrain.push(this.terrain.warmupHaze(air.material as ShaderMaterial));
-    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh];
+    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh, ...this.cometTails.warmupObjects(), ...this.jets.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     // (into the HDR target the scene is drawn to: programs differ per output target)
@@ -1103,7 +1103,7 @@ export class App {
         : ((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1);
       wBest = w;
       lBest = L;
-      keyBest = b.kind === 'star' ? STAR_KEY : 0.45;
+      keyBest = b.kind === 'star' ? STAR_KEY * (1 - 0.15 * smoothstep(0.3, 0.9, coverage)) : 0.45;
     }
     for (const cv of this.craft.views) {
       if (cv.pixelRadius < 2) continue;
@@ -1159,7 +1159,9 @@ export class App {
       if (w > wBest && this.project(rel)) {
         wBest = w;
         lBest = (magToIrradiance(s.absMag + 5 * Math.log10(d / PC) - 5) * d * d) / (Math.PI * s.radius * s.radius);
-        keyBest = STAR_KEY;
+        // a disk filling the view is shown a little darker, so its surface keeps its contrast and
+        // colour below the tone curve's shoulder
+        keyBest = STAR_KEY * (1 - 0.15 * smoothstep(0.3, 0.9, coverage));
       }
     }
     const lx = Math.log(xDark);
@@ -1745,6 +1747,8 @@ export class App {
     const dpr = this.view.pixelRatio;
     psf.uPixelSA.value = (this.view.pixelAngle * dpr) ** 2;
     psf.uDpr.value = dpr;
+    // a headset's pixels are large and the head never still: slightly wider cores keep faint stars from shimmering
+    if (psf.uMinSigma) psf.uMinSigma.value = this.vr.active ? 0.8 : 0.6;
     this.bodies.surfaceExposure.value = xSurf;
     for (const c of this.catalogs) c.update(this.camPc, mLim, this.fieldMinDistPc);
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);

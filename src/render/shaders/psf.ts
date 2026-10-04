@@ -25,6 +25,7 @@ uniform float uDpr;
 uniform float uMaxEnergy;
 uniform float uSat;
 uniform float uHalo;   // halo/spike strength (1 for stars; small bodies use less)
+uniform float uMinSigma; // core width of the faintest stars (px): wider in the headset, against shimmer
 `;
 
 /*
@@ -49,7 +50,7 @@ float psfSetup(float irradiance, out float energy) {
   if (!(raw >= uMinEnergy)) { energy = 0.0; return 0.0; }
   energy = min(uPointGain * pow(raw, uPointGamma), uMaxEnergy);
   float g = max(0.0, log2(raw / uMinEnergy));
-  float sigma = 0.6 + 0.16 * clamp(g - 2.0, 0.0, 12.0);
+  float sigma = uMinSigma + 0.16 * clamp(g - 2.0, 0.0, 12.0);
   float rh = 1.3 + 0.55 * max(g - 4.0, 0.0);
   float halo = g > 3.0 ? rh * 3.0 * uHalo : 0.0;
   float spikes = g > 10.0 ? 5.0 * rh * uGlare * uHalo : 0.0;
@@ -63,7 +64,7 @@ vec3 psfShade(vec2 pointCoord, float radius, float energy, vec3 color) {
   float r2 = dot(p, p);
   float raw = pow(max(energy, 1e-6) / uPointGain, 1.0 / uPointGamma);
   float g = max(0.0, log2(raw / uMinEnergy));
-  float sigma = 0.6 + 0.16 * clamp(g - 2.0, 0.0, 12.0);
+  float sigma = uMinSigma + 0.16 * clamp(g - 2.0, 0.0, 12.0);
   // the core's peak saturates softly at ~1; brighter stars are wider points
   float core = (1.0 - exp(-energy * 0.35)) * exp(-r2 / (2.0 * sigma * sigma));
   float halo = 0.0, spikes = 0.0;
@@ -79,14 +80,18 @@ vec3 psfShade(vec2 pointCoord, float radius, float energy, vec3 color) {
     }
   }
   float edge = 1.0 - smoothstep(0.8, 1.0, sqrt(r2) / radius);
-  // the faintest stars drawn fade in over the last ~1.3 magnitudes above the cut-off instead of all
+  // the faintest stars drawn fade in over the last ~0.6 magnitudes above the cut-off instead of all
   // showing as equal specks (which read as a photograph's grain); the eye barely sees stars near
   // its limit, and their combined light is in the sky's glow already
-  float lum = (core + halo + spikes) * edge * smoothstep(0.0, 1.8, g);
+  float lum = (core + halo + spikes) * edge * smoothstep(0.0, 0.8, g);
   // faint stars show little colour (the eye's colour vision fades with brightness); bright ones
   // their full (gently boosted) blackbody colour
-  float sat = mix(0.55, uSat, smoothstep(2.0, 7.0, g));
-  vec3 c = max(mix(vec3(dot(color, vec3(0.2126, 0.7152, 0.0722))), color, sat), 0.0);
+  // (strongly coloured stars, blue OB stars above all, keep most of it: crowded fields of faint
+  // blue points are what star-forming regions and galaxies seen from inside look like)
+  float Yc = dot(color, vec3(0.2126, 0.7152, 0.0722));
+  float chroma = length(color - vec3(Yc)) / max(Yc, 1e-3);
+  float sat = mix(mix(0.6, 0.95, smoothstep(0.15, 0.5, chroma)), uSat, smoothstep(2.0, 7.0, g));
+  vec3 c = max(mix(vec3(Yc), color, sat), 0.0);
   return c * lum;
 }
 `;
