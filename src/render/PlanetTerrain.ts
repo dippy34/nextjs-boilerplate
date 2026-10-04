@@ -189,9 +189,15 @@ export class PlanetTerrain {
   /** tiles in flight (and so finished + uploaded) per frame: bounds the per-frame refinement cost */
   inFlight = 8;
   inFlightVr = 4;
-  /** most tiles drawn at once: bounds the draw count (and so the per-frame cost) at any altitude */
-  drawCap = 52;
-  drawCapVr = 44;
+  /** tiles drawn at once, about (see lodScale): bounds the draw count at any altitude */
+  drawCap = 96;
+  drawCapVr = 72;
+  /**
+   * scale on the split threshold, raised while the selection runs into `drawCap` and eased back
+   * when it is well under: the threshold rises evenly over the view, rather than the cap starving
+   * whatever the walk reaches last (the far field, behind the deep column under the explorer)
+   */
+  lodScale = 1;
   /** most tiles kept (desktop, headset) */
   maxTiles = 420;
   maxTilesVr = 200;
@@ -438,9 +444,10 @@ export class PlanetTerrain {
       if (!n.data) { ready = false; return; }
       if (n.stale && !n.job) want.push({ n, p: 0.5 });
       const { sse, inView } = errorOf(n);
-      const lim = (inView ? P : P * 3) * (n.split ? 0.8 : 1);
+      const lim = (inView ? P : P * 3) * (n.split ? 0.8 : 1) * this.lodScale;
       // (the tile under the explorer always refines: the cap only trims the surroundings)
-      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && (sel.length < drawCap || this.holds(n, up));
+      // (`lodScale` keeps the count near `drawCap` evenly; this hard stop only bounds a runaway)
+      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && (sel.length < drawCap * 1.5 || this.holds(n, up));
       const wantSplit = !merging && canSplit && sse > lim;
       if (wantSplit) {
         if (!n.kids) n.kids = [0, 1, 2, 3].map((q) => new Node(n.face, n.level + 1, n.x * 2 + (q & 1), n.y * 2 + (q >> 1), n));
@@ -476,6 +483,10 @@ export class PlanetTerrain {
     // walk the face under the explorer first, so the detail budget (drawCap) goes to what is nearest
     const order = [...w.roots].sort((a, b) => a.dir.angleTo(up) - b.dir.angleTo(up));
     if (ready) for (const r of order) walk(r, false);
+    if (ready) {
+      if (sel.length > drawCap) this.lodScale = Math.min(16, this.lodScale * 1.05);
+      else if (sel.length < drawCap * 0.8) this.lodScale = Math.max(1, this.lodScale / 1.03);
+    }
     // the star has moved since a tile's shadows were made: rebuild it (near the terminator only)
     if (ready) {
       for (const n of sel) {

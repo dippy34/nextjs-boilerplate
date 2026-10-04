@@ -334,19 +334,42 @@ function shadeTile(req: TileRequest, height: HeightFn, P: Float64Array, E: numbe
   if (elevC - tileAng > 0.6 || elevC + tileAng < -0.08) return;
   const V = TILE_V;
   const dq = new Vector3();
-  const inTile = (qx: number, qy: number, qz: number): number => {
-    // ground radius at the direction of q from the tile's own grid (bilinear), NaN outside
-    const f = dirFace({ x: qx, y: qy, z: qz });
-    if (f.face !== face) return NaN;
-    const gi = ((f.s - s0) / w) * TILE_N, gj = ((f.t - t0) / w) * TILE_N;
-    if (gi < 0 || gj < 0 || gi > TILE_N || gj > TILE_N) return NaN;
-    const i0 = Math.min(TILE_N - 1, Math.floor(gi)), j0 = Math.min(TILE_N - 1, Math.floor(gj));
+  // the tile's grid plus an apron of APRON cells around it, so rays from the tile's edges see the
+  // ridges just beyond them (heights there from the height function, on demand: only the sunward
+  // side is ever sampled); the face's own parameters extend past its edges
+  const APRON = 8, GW = TILE_N + 2 * APRON + 1;
+  const apron = new Float64Array(GW * GW).fill(NaN);
+  const [fn, fu, fv] = FACES[face];
+  const gridR = new Float64Array(E * E);
+  for (let k = 0; k < E * E; k++) gridR[k] = Math.hypot(P[k * 3], P[k * 3 + 1], P[k * 3 + 2]);
+  const rad = (i: number, j: number): number => {
+    if (i >= -1 && j >= -1 && i <= TILE_N + 1 && j <= TILE_N + 1) return gridR[(j + 1) * E + (i + 1)];
+    const a = (j + APRON) * GW + (i + APRON);
+    let r = apron[a];
+    if (Number.isNaN(r)) {
+      faceDir(face, s0 + (i / TILE_N) * w, t0 + (j / TILE_N) * w, dq);
+      r = apron[a] = ellipsoidRadius(radii, dq.x, dq.y, dq.z) + height(dq, spacing);
+    }
+    return r;
+  };
+  // grid coordinates (cells) of a point's direction, NaN behind the face
+  const toGrid = (qx: number, qy: number, qz: number, out: number[]): void => {
+    const dn = qx * fn[0] + qy * fn[1] + qz * fn[2];
+    if (dn <= 0) { out[0] = out[1] = NaN; return; }
+    out[0] = ((Math.atan((qx * fu[0] + qy * fu[1] + qz * fu[2]) / dn) / Q - s0) / w) * TILE_N;
+    out[1] = ((Math.atan((qx * fv[0] + qy * fv[1] + qz * fv[2]) / dn) / Q - t0) / w) * TILE_N;
+  };
+  const gq = [0, 0];
+  const onGrid = (qx: number, qy: number, qz: number): number => {
+    toGrid(qx, qy, qz, gq);
+    return gridAt(gq[0], gq[1]);
+  };
+  const gridAt = (gi: number, gj: number): number => {
+    // ground radius at grid coordinates (bilinear over the grid and apron), NaN outside
+    if (!(gi >= -APRON && gj >= -APRON && gi <= TILE_N + APRON && gj <= TILE_N + APRON)) return NaN;
+    const i0 = Math.min(TILE_N + APRON - 1, Math.floor(gi)), j0 = Math.min(TILE_N + APRON - 1, Math.floor(gj));
     const fi = gi - i0, fj = gj - j0;
-    const r = (i: number, j: number) => {
-      const k = ((j + 1) * E + (i + 1)) * 3;
-      return Math.hypot(P[k], P[k + 1], P[k + 2]);
-    };
-    return (r(i0, j0) * (1 - fi) + r(i0 + 1, j0) * fi) * (1 - fj) + (r(i0, j0 + 1) * (1 - fi) + r(i0 + 1, j0 + 1) * fi) * fj;
+    return (rad(i0, j0) * (1 - fi) + rad(i0 + 1, j0) * fi) * (1 - fj) + (rad(i0, j0 + 1) * (1 - fi) + rad(i0 + 1, j0 + 1) * fi) * fj;
   };
   const vis = new Float32Array(V * V).fill(SUN_CLEAR);
   const tileSize = spacing * TILE_N;
@@ -361,13 +384,15 @@ function shadeTile(req: TileRequest, height: HeightFn, P: Float64Array, E: numbe
       const rP = Math.hypot(px, py, pz);
       if ((px * sx + py * sy + pz * sz) / rP < -0.05) continue;
       let v = SUN_CLEAR;
-      for (let dd = tileSize * 0.25; dd < tileSize * 400; dd *= 1.35) {
+      // (steps of an eighth of the distance out to 16 tile widths, under the width the occluder's
+      // heights are smoothed over; beyond, where only big relief matters, longer ones)
+      for (let dd = tileSize * 0.05; dd < tileSize * 400; dd *= dd < tileSize * 6 ? 1.12 : 1.3) {
         const qx = px + sx * dd, qy = py + sy * dd, qz = pz + sz * dd;
         const rQ = Math.hypot(qx, qy, qz);
         dq.set(qx / rQ, qy / rQ, qz / rQ);
         const base = ellipsoidRadius(radii, dq.x, dq.y, dq.z);
         if (rQ - base > hTop) break;
-        if (!Number.isNaN(inTile(qx, qy, qz))) continue;
+        if (!Number.isNaN(onGrid(qx, qy, qz))) continue;
         const gr = base + height(dq, Math.max(spacing, dd / 6));
         v = Math.min(v, ((rQ - gr) / dd + 0.003) / SUN_PEN);
         if (v <= -SUN_CLEAR) { v = -SUN_CLEAR; break; }
@@ -383,12 +408,20 @@ function shadeTile(req: TileRequest, height: HeightFn, P: Float64Array, E: numbe
       if ((px * sx + py * sy + pz * sz) / rP < -0.05) continue;
       // near part over the tile's own grid
       let v = SUN_CLEAR;
-      for (let dd = spacing * 1.5; dd < tileSize * 1.5; dd *= 1.3) {
-        const qx = px + sx * dd, qy = py + sy * dd, qz = pz + sz * dd;
-        const rQ = Math.hypot(qx, qy, qz);
-        const gr = inTile(qx, qy, qz);
+      // (steps of at most a cell, so no crest on the grid is stepped over; the ray's grid
+      // coordinates are linear in distance to well under a cell over the grid and apron)
+      // (the reference surface's radius is linear along the ray too, closely enough)
+      const ex = px + sx * tileSize, ey = py + sy * tileSize, ez = pz + sz * tileSize, re = Math.sqrt(ex * ex + ey * ey + ez * ez);
+      toGrid(ex, ey, ez, gq);
+      const di = (gq[0] - i) / tileSize, dj = (gq[1] - j) / tileSize;
+      const b0 = ellipsoidRadius(radii, px / rP, py / rP, pz / rP), db = (ellipsoidRadius(radii, ex / re, ey / re, ez / re) - b0) / tileSize;
+      const rP2 = rP * rP, ps = px * sx + py * sy + pz * sz;
+      // (from half a cell: a coarse tile's slope turned from the star shades itself)
+      for (let dd = spacing * 0.5; dd < tileSize * 2; dd += Math.min(dd * 0.3, spacing)) {
+        const rQ = Math.sqrt(rP2 + dd * (2 * ps + dd));
+        if (rQ - (b0 + db * dd) > hTop) break;   // above everything
+        const gr = gridAt(i + di * dd, j + dj * dd);
         if (Number.isNaN(gr)) break;
-        if (rQ - ellipsoidRadius(radii, qx / rQ, qy / rQ, qz / rQ) > hMaxTile) break;   // above everything in the tile
         v = Math.min(v, ((rQ - gr) / dd + 0.003) / SUN_PEN);
         if (v <= -SUN_CLEAR) { v = -SUN_CLEAR; break; }
       }
