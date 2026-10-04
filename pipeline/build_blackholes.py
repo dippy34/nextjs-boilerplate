@@ -40,6 +40,18 @@ EXTRA = [
      "ref": "GRAVITY Collaboration 2022, A&A 657, L12 (mass, distance R0)"},
     {"name": "M87*", "simbad": "M 87", "kind": "supermassive", "massSun": 6.5e9, "distPc": 16.8e6,
      "ref": "Event Horizon Telescope Collaboration 2019, ApJL 875, L6 (mass, distance)"},
+    # central black holes of nearby galaxies, at their galaxy's catalogued centre and distance
+    # (public/data/galaxies.json), so they sit exactly in the middle of the drawn galaxy
+    {"name": "M31*", "simbad": "M 31", "kind": "supermassive", "massSun": 1.4e8, "distPc": 779500.0,
+     "ref": "Bender et al. 2005, ApJ 631, 280 (mass); distance: galaxies.json (SIMBAD median)"},
+    {"name": "M32*", "simbad": "M 32", "kind": "supermassive", "massSun": 2.5e6, "distPc": 780000.0,
+     "ref": "van den Bosch & de Zeeuw 2010, MNRAS 401, 1770 (mass); distance: galaxies.json (SIMBAD median)"},
+    {"name": "M81*", "simbad": "M 81", "kind": "supermassive", "massSun": 7.0e7, "distPc": 3610000.0,
+     "ref": "Devereux et al. 2003, AJ 125, 1226 (mass); distance: galaxies.json (SIMBAD median)"},
+    {"name": "Centaurus A*", "simbad": "NAME Centaurus A", "kind": "supermassive", "massSun": 5.5e7, "distPc": 3715000.0,
+     "ref": "Cappellari et al. 2009, MNRAS 394, 660 (mass); distance: galaxies.json (SIMBAD median)"},
+    {"name": "M104*", "simbad": "M 104", "kind": "supermassive", "massSun": 6.6e8, "distPc": 11270000.0,
+     "ref": "Kormendy & Ho 2013, ARA&A 51, 511 (mass); distance: galaxies.json (SIMBAD median)"},
     {"name": "Cygnus X-1", "simbad": "Cyg X-1", "kind": "stellar", "massSun": 21.2, "distPc": 2220.0,
      "companion": {"spType": "O9.7Iab", "teff": 31100, "massSun": 40.6, "radiusSun": 22.3, "periodDays": 5.599829, "incDeg": 27.5, "roche": False},
      "ref": "Miller-Jones et al. 2021, Science 371, 1046 (BH 21.2 Msun, donor 40.6 Msun, d = 2.22 kpc); Orosz et al. 2011, ApJ 742, 84 (P, donor)"},
