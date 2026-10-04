@@ -92,7 +92,9 @@ def main() -> None:
 
     url = USGS + "Mercury_Messenger_USGS_DEM_Global_665m_v2.tif"
     h = fill_nan_zonal(StripTiff(url).decimated(W, H, rows_per_out=2, nodata=-32768)[..., :1])[..., 0]
-    out["mercury"] = save("mercury", h) | {"credit": "NASA/JHUAPL/CIW, MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology", "source": url}
+    # the GeoTIFF stores heights in 0.5 m units (its scale tag); the published terrain.json applies
+    # it as scale 0.5 over the earlier PNG, a rebuild bakes it into the samples
+    out["mercury"] = save("mercury", h * 0.5) | {"credit": "NASA/JHUAPL/CIW, MESSENGER USGS global DEM 665 m v2, via USGS Astrogeology", "source": url}
 
     out["earth"] = earth()
     out["ceres"] = ceres()
