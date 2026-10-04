@@ -2,10 +2,12 @@ import {
   BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, NoBlending, Quaternion, ShaderMaterial, Sphere, Vector3,
 } from 'three';
 import type { UPos } from '../core/upos';
+import type { Body } from '../universe/Body';
+import { ExoGround } from '../universe/ExoTerrain';
 import { baseRadius, type Ground, type TerrainSource } from '../universe/Terrain';
 import { heightSpec, type HeightSpec } from '../universe/TerrainHeights';
 import {
-  buildTile, childToward, dirFace, faceDir, SUN_CLEAR, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
+  buildTile, childToward, dirFace, faceDir, SUN_CLEAR, skirtMasks, TILE_N, TILE_VERTS, tileGroundRadius, tileIndices, tileRect, tileSpacing,
   type TileData, type TileRequest, tileValue,
 } from '../universe/TerrainTiles';
 import { ATMO_HAZE_FRAG } from './shaders/atmosphere';
@@ -526,25 +528,10 @@ export class PlanetTerrain {
       return { n, d: Math.hypot(x - camBF.x, y - camBF.y, z - camBF.z) - n.data!.bound };
     }).sort((a, b) => a.d - b.d);
     byNear.forEach((e, i) => { e.n.mesh!.renderOrder = ORDER_TERRAIN + i * 1e-5; });
-    // skirts only where a tile borders one of another level (on a face's border: always): the
-    // finer side's skirt covers its edge rising above the coarser chord, the coarser side's covers
-    // the finer edge dipping below it (a grazing sight line would slip under the coarser tile)
-    const drawnKeys = new Set(sel.map((n) => `${n.face}:${n.level}:${n.x}:${n.y}`));
-    const aboveDrawn = new Set<string>();
-    for (const n of sel) for (let l = n.level - 1; l >= 0; l--) aboveDrawn.add(`${n.face}:${l}:${n.x >> (n.level - l)}:${n.y >> (n.level - l)}`);
-    const NB = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-    for (const n of sel) {
-      let mask = 0;
-      const size = 2 ** n.level;
-      for (let e = 0; e < 4; e++) {
-        const nx = n.x + NB[e][0], ny = n.y + NB[e][1];
-        if (nx < 0 || ny < 0 || nx >= size || ny >= size) { mask |= 1 << e; continue; }
-        if (aboveDrawn.has(`${n.face}:${n.level}:${nx}:${ny}`)) { mask |= 1 << e; continue; }
-        for (let l = n.level - 1; l >= 0; l--) {
-          const sh = n.level - l;
-          if (drawnKeys.has(`${n.face}:${l}:${nx >> sh}:${ny >> sh}`)) { mask |= 1 << e; break; }
-        }
-      }
+    // skirts only where a tile borders one of another level (TerrainTiles.skirtMasks)
+    const masks = skirtMasks(sel);
+    for (let i = 0; i < sel.length; i++) {
+      const n = sel[i], mask = masks[i];
       const g = n.mesh!.geometry;
       if (g.index !== this.indices[mask]) g.setIndex(this.indices[mask]);
     }
@@ -939,6 +926,35 @@ export class PlanetTerrain {
   }
   private static probe: HTMLCanvasElement | undefined;
   private static mapMeans = new WeakMap<object, number>();
+
+  /**
+   * Water level (m above the reference surface) of the current world at body-fixed unit direction
+   * `n`, or null where it has no water: Earth's sea (and its lakes below sea level, but not its dry
+   * depressions, Terrain.DEPRESSIONS), the seas of ocean and Earth-like generated planets (at 0).
+   */
+  waterLevel(n: Vector3): number | null {
+    const w = this.world;
+    if (!w) return null;
+    const g = w.ground;
+    if (g instanceof ExoGround) {
+      const type = (g as unknown as { type: number }).type;
+      return type === 3 || type === 4 ? 0 : null;
+    }
+    return this.source && g.owner ? this.source.waterLevel(g.owner as Body, n) : null;
+  }
+
+  /**
+   * Whether the ground drawn at body-fixed unit direction `n` (of the current world) is open water:
+   * the drawn ground lies flat at the local water level (heights below it are drawn as water).
+   * False with no terrain, and on worlds without water.
+   */
+  isSea(n: Vector3): boolean {
+    const w = this.world;
+    if (!w || !this.current) return false;
+    const lvl = this.waterLevel(n);
+    if (lvl === null) return false;
+    return this.groundRadius(n) - baseRadius(w.ground, n) <= lvl + 0.05;
+  }
 
   groundRadius(n: Vector3): number {
     const w = this.world;

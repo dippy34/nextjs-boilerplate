@@ -4,12 +4,13 @@ import { ExoGround } from '../src/universe/ExoTerrain';
 import type { ExoPlanet } from '../src/universe/Planets';
 import type { Body } from '../src/universe/Body';
 import { tileFragment } from '../src/render/PlanetTerrain';
+import { Renderer } from '../src/render/Renderer';
 import { BODY_FRAG } from '../src/render/shaders/body';
 import { EXO_FRAG } from '../src/render/shaders/planet';
-import { TerrainSource } from '../src/universe/Terrain';
+import { DEPRESSIONS, earthWaterLevel, TerrainSource } from '../src/universe/Terrain';
 import { heightFromSpec, heightSpec } from '../src/universe/TerrainHeights';
 import {
-  buildTile, childToward, dirFace, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileValue,
+  buildTile, childToward, dirFace, skirtMasks, ellipsoidRadius, faceDir, TILE_N, TILE_V, tileGroundRadius, tileIndices, tileRect, type TileRequest, tileValue,
 } from '../src/universe/TerrainTiles';
 
 const R = 1737e3;
@@ -181,5 +182,66 @@ describe('tile shaders', () => {
       expect(f).toContain('#define uHScale vHScale');
       expect(f).not.toMatch(/uniform float uHScale;/);
     }
+  });
+});
+
+describe('skirts and warm-up', () => {
+  it('skirts both sides of a level boundary, never between tiles of one level, always on face borders', () => {
+    // face 0 at level 1, its tile (0, 0) split into four level-2 tiles
+    const t = (level: number, x: number, y: number) => ({ face: 0, level, x, y });
+    const tiles = [t(2, 0, 0), t(2, 1, 0), t(2, 0, 1), t(2, 1, 1), t(1, 1, 0), t(1, 0, 1), t(1, 1, 1)];
+    const m = skirtMasks(tiles);
+    // edge bits: 0 = y-1, 1 = x+1, 2 = y+1, 3 = x-1
+    expect(m[0]).toBe(0b1001); // two face borders; its siblings get none
+    expect(m[3]).toBe(0b0110); // against the coarser (1, 0) and (0, 1)
+    expect(m[4]).toBe(0b1011); // face borders, and against the finer tiles at x-1
+    expect(m[5]).toBe(0b1101); // face borders, and against the finer tiles at y-1
+    expect(m[6]).toBe(0b0110); // face borders only: its neighbours are of its own level
+    // one level everywhere: face borders only
+    expect(skirtMasks([t(1, 0, 0), t(1, 1, 0), t(1, 0, 1), t(1, 1, 1)])).toEqual([0b1001, 0b0011, 0b1100, 0b0110]);
+  });
+
+  it('warm-up compiles with the scene target bound, then restores the one bound before', () => {
+    const hdr = { name: 'hdr' }, was = { name: 'before' };
+    let bound: unknown = was, seen: unknown = null;
+    const fake = { presenting: false, hdr, gl: { getRenderTarget: () => bound, setRenderTarget: (t: unknown) => { bound = t; } } };
+    const r = Renderer.prototype.withSceneTarget.call(fake as never, () => { seen = bound; return 7; });
+    expect(r).toBe(7);
+    expect(seen).toBe(hdr);
+    expect(bound).toBe(was);
+    // in a headset the XR target three binds is left alone
+    bound = was;
+    Renderer.prototype.withSceneTarget.call({ ...fake, presenting: true } as never, () => { seen = bound; });
+    expect(seen).toBe(was);
+  });
+});
+
+describe('water on Earth', () => {
+  const at = (lat: number, lon: number) => {
+    const la = (lat * Math.PI) / 180, lo = (lon * Math.PI) / 180;
+    return new Vector3(Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la));
+  };
+  it('dry depressions are land with a floor, lakes below sea level keep their own level, open sea stays at 0', () => {
+    const w = (lat: number, lon: number) => earthWaterLevel(at(lat, lon), 0);
+    expect(w(36.25, -116.85)).toMatchObject({ level: -80, water: false });   // Death Valley
+    expect(w(29.6, 27.0)).toMatchObject({ water: false });                   // Qattara
+    expect(w(31.5, 35.5)).toMatchObject({ level: -199, water: true });       // Dead Sea (the data stops at -200 m)
+    expect(w(32.82, 35.59)).toMatchObject({ water: true });                  // Sea of Galilee, not the dry rift around it
+    expect(w(37.0, 51.5)).toMatchObject({ level: -28, water: true });        // southern Caspian
+    expect(w(46.8, 50.5)).toMatchObject({ level: -28, water: true });        // northern Caspian
+    expect(w(43.4, 51.4)).toMatchObject({ water: false });                   // Karagiye, a dry basin by the Caspian
+    expect(w(30, -40)).toMatchObject({ level: 0, water: true });             // mid-Atlantic
+  });
+  it('no depression circle reaches the open sea next to it', () => {
+    const sea: [string, number, number][] = [
+      ['Mediterranean off Tel Aviv', 32.1, 34.7], ['Mediterranean off Haifa', 32.85, 34.95], ['Mediterranean off Gaza', 31.5, 34.35],
+      ['Mediterranean off El Alamein', 30.95, 28.9], ['Mediterranean off Marsa Matruh', 31.45, 27.2], ['Gulf of Gabes', 33.9, 10.4],
+      ['Red Sea off Thio', 14.75, 41.0], ['Gulf of Zula', 15.3, 39.75], ['Gulf of Tadjoura', 11.6, 43.0], ['Ghoubbet', 11.55, 42.6],
+      ['Black Sea off Batumi', 41.65, 41.5], ['Persian Gulf', 29.9, 48.6], ['Gulf of California', 31.6, -114.6],
+      ['Pacific off Los Angeles', 33.7, -118.5], ['Atlantic off Tarfaya', 27.9, -13.1], ['Caribbean off Barahona', 18.15, -71.05],
+      ['Atlantic off Patagonia', -49.6, -67.6], ['Spencer Gulf', -33.0, 137.6], ['Gulf of Suez', 29.5, 32.6],
+    ];
+    for (const [name, lat, lon] of sea) expect(earthWaterLevel(at(lat, lon), 0), name).toMatchObject({ level: 0, water: true });
+    expect(DEPRESSIONS.length).toBeGreaterThan(10);
   });
 });

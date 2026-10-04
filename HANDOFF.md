@@ -59,7 +59,7 @@ procedural generation for the rest. Never use SpaceEngine's own files.
   - VR quality tier: `LITE.uLite` (1 while presenting) trims the heavy procedural shaders.
   - Planet terrain (replaces the old single landing patch): `src/render/PlanetTerrain.ts` — a
     quadtree on the 6 faces of an equi-angular cube on every solid world within 2 radii
-    (`PlanetTerrain.reach`), tiles of 64x64 cells (`universe/TerrainTiles.ts`: heights with a border
+    (`PlanetTerrain.reach`), tiles of 32x32 cells (`universe/TerrainTiles.ts`: heights with a border
     for continuous normals, skirts, the parent's shape for geomorphing, relief shadows), split by
     screen-space error (`pixPerCell`), horizon-culled, at most `drawCap` drawn, built in Web Workers
     (`workers/terrainTiles.worker.ts`, `inFlight` jobs a frame; the tile holding the explorer comes
@@ -70,13 +70,27 @@ procedural generation for the rest. Never use SpaceEngine's own files.
     (the drawn triangles, exactly) never jump. The world's sphere is cut away entirely (`uHoleCos`
     -2) while the terrain covers it; the surface shader reads the close-up weight per vertex
     (`tileFragment`: `uHScale` -> `vHScale`, fading out with distance), so far tiles shade like the
-    globe. `TerrainPatch.ts` is now an alias kept for importers. Heights: `pipeline/build_terrain.py`
+    globe, and drops the sphere's `discard` (a discard anywhere turns off early depth rejection).
+    Skirts (`skirtMasks`: one of 16 shared index buffers per tile) hang only on edges bordering a
+    tile of another level, on both sides, and on cube-face borders; their depth is a few times
+    the tile's step from its parent's shape along the edges (deep skirts cost fill rate, which a
+    software rasteriser pays in full). Tunables (desktop / headset): `pixPerCell` 18/24,
+    `drawCap` 52/44, `inFlight` 8/4, `budgetMs`/`budgetVrMs` 4/2 (main-thread builds only when
+    workers are unavailable), `maxTiles` 420/200. Shader warm-up: `App.warmUp` compiles inside
+    `Renderer.withSceneTarget` — three builds one program per output target, and the scene is
+    drawn into the HDR target, so compiling against the canvas left every program to compile again
+    on first use (the terrain's on arrival at a planet). `TerrainPatch.ts` is now an alias kept for importers. Heights: `pipeline/build_terrain.py`
     -> `public/data/terrain/` (coarse global maps), `src/universe/Terrain.ts` (map or pyramid +
     generated hills and craters below their resolution). Shot script: `scripts/shots/terrain-lod.mjs`.
     `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`. Shadows: `aSun`
     is the Sun's clearance over the relief in penumbra widths (ray-marched per vertex, signed),
     and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`. Earth: the map's `"sea": 0` makes
-    lower ground flat water and limits generated hills to land (more on high ground); the painted
+    lower ground flat water and limits generated hills to land (more on high ground); the data
+    stores everything at or below 0 m as -200 m, so `Terrain.DEPRESSIONS` (circles) gives dry
+    basins a dry floor (Death Valley -80 m, Qattara, ...) and lakes below sea level their own
+    surface (Caspian -28 m, ...). Sea query for walking: `PlanetTerrain.isSea(nBF)` (the drawn
+    ground lies flat at the local water level) and `waterLevel(nBF)` (m, or null where no water;
+    generated ocean and Earth-like planets: 0); the painted
     clouds fade out on descent (`uCloudVis`, set in `Bodies`) while `render/CloudLayer.ts` (a
     sphere 7 km up, same map + generated billows) fades in, clearing again below 12-30 km. Draw order: atmosphere shell (19.8),
     terrain (19.9, transparent pass but opaque), terrain haze (19.95: `ATMO_HAZE_FRAG` on the

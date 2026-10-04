@@ -353,6 +353,9 @@ export class Rocks {
     this.lastSerial = serial;
     if (!still) this.lastCam.copy(camBF);
     let pending = false;
+    // every wanted cell of every tier, nearest first relative to its tier's reach (the pebbles at
+    // the explorer's feet and the boulders nearby come before far pebbles)
+    const list: { k: string; d: number; x: number; y: number; z: number; tier: Tier }[] = [];
     for (const tier of (still ? [] : TIERS)) {
       const s = tier.cell;
       // tiers that would be under a pixel are left out from high up
@@ -360,24 +363,28 @@ export class Rocks {
       if (reach < s) continue;
       const ground = below.dir.clone().multiplyScalar(R);
       const lo = ground.clone().subScalar(reach).divideScalar(s).floor(), hi = ground.clone().addScalar(reach).divideScalar(s).floor();
-      const list: { k: string; d: number; x: number; y: number; z: number }[] = [];
       for (let x = lo.x; x <= hi.x; x++) for (let y = lo.y; y <= hi.y; y++) for (let z = lo.z; z <= hi.z; z++) {
         const cx = (x + 0.5) * s, cy = (y + 0.5) * s, cz = (z + 0.5) * s;
         const r = Math.hypot(cx, cy, cz);
         if (Math.abs(r - R) > s * 0.9) continue;           // cells crossing the surface only
         const d = Math.hypot(cx - ground.x, cy - ground.y, cz - ground.z);
         if (d > reach) continue;
-        list.push({ k: `${s}:${x}:${y}:${z}`, d, x, y, z });
+        list.push({ k: `${s}:${x}:${y}:${z}`, d: d / reach, x, y, z, tier });
       }
-      list.sort((a, b) => a.d - b.d);
-      for (const e of list) {
-        want.add(e.k);
-        const old = this.cells.get(e.k);
-        if (old && old.serial === serial) continue;
-        if (performance.now() - t0 > this.budgetMs) { pending = true; continue; }
-        this.cells.set(e.k, this.makeCell(e.k, e.x, e.y, e.z, tier, density, c.lonLeft, serial));
-        this.dirty = true;
-      }
+    }
+    list.sort((a, b) => a.d - b.d);
+    // catching up (new ground, or arrived somewhere): a larger share of the frame until all is placed
+    const budget = this.settled ? this.budgetMs : this.budgetMs * (this.vr ? 1.5 : 3);
+    for (const e of list) {
+      want.add(e.k);
+      const old = this.cells.get(e.k);
+      if (old && old.serial === serial) continue;
+      if (performance.now() - t0 > budget) { pending = true; continue; }
+      // new ground drawn (tiles swapped or morphed): rocks are placed again only where the ground
+      // under the cell actually moved (one height probe instead of several per rock)
+      if (old && this.groundUnchanged(old)) { old.serial = serial; continue; }
+      this.cells.set(e.k, this.makeCell(e.k, e.x, e.y, e.z, e.tier, density, c.lonLeft, serial));
+      this.dirty = true;
     }
     if (!still) {
       for (const k of [...this.cells.keys()]) if (!want.has(k)) { this.cells.delete(k); this.dirty = true; }
@@ -550,6 +557,18 @@ export class Rocks {
       }
     }
   }
+
+  /** the ground under every rock of a cell is where it was when they were placed (within 1 cm) */
+  private groundUnchanged(c: RockCell): boolean {
+    const v = this.probeV;
+    for (let i = 0; i < c.n; i++) {
+      v.set(c.pos[i * 3], c.pos[i * 3 + 1], c.pos[i * 3 + 2]);
+      const was = v.length() + c.data[i * D + 12];   // (stored at its lowest side: plus the drop there)
+      if (Math.abs(this.terrain.groundRadius(v.normalize()) - was) > 0.01) return false;
+    }
+    return true;
+  }
+  private probeV = new Vector3();
 
   /** how far out a tier's rocks are drawn (m) */
   private reachOf(tier: Tier): number {
