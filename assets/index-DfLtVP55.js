@@ -6094,10 +6094,10 @@ vec3 psfShade(vec2 pointCoord, float radius, float energy, vec3 color) {
     }
   }
   float edge = 1.0 - smoothstep(0.8, 1.0, sqrt(r2) / radius);
-  // the faintest stars drawn fade in over the last ~0.6 magnitudes above the cut-off instead of all
+  // the faintest stars drawn fade in over the last ~0.4 magnitudes above the cut-off instead of all
   // showing as equal specks (which read as a photograph's grain); the eye barely sees stars near
   // its limit, and their combined light is in the sky's glow already
-  float lum = (core + halo + spikes) * edge * smoothstep(0.0, 0.8, g);
+  float lum = (core + halo + spikes) * edge * smoothstep(0.0, 0.55, g);
   // faint stars show little colour (the eye's colour vision fades with brightness); bright ones
   // their full (gently boosted) blackbody colour
   // (strongly coloured stars, blue OB stars above all, keep most of it: crowded fields of faint
@@ -7299,7 +7299,9 @@ float spToneCurve(float y) {
   return clamp(a / b, 0.0, 1.0);
 }
 vec3 spTone(vec3 c) {
-  c = max(c, vec3(0.0));
+  // (an overflowed (infinite) value is white, not NaN: additive layers on a disk shown far above
+  // white, while the eye has yet to adapt, can exceed half-float range)
+  c = min(max(c, vec3(0.0)), vec3(1.0e4));
   float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   if (Y < 1e-7) return vec3(0.0);
   float Yt = spToneCurve(Y);
@@ -7346,14 +7348,15 @@ ${ju}
                  + 4.0 * texture2D(tSrc, vUv).rgb + 2.0 * texture2D(tSrc, vUv + vec2(o.x, 0.0)).rgb
                  + texture2D(tSrc, vUv + vec2(-o.x, -o.y)).rgb + 2.0 * texture2D(tSrc, vUv + vec2(0.0, -o.y)).rgb
                  + texture2D(tSrc, vUv + vec2(o.x, -o.y)).rgb;
-          gl_FragColor = vec4(s / 16.0 + texture2D(tPrev, vUv).rgb, 1.0);
+          // (clamped: the sum of the levels can exceed half-float range and turn into infinity)
+          gl_FragColor = vec4(min(s / 16.0 + texture2D(tPrev, vUv).rgb, vec3(6.0e4)), 1.0);
         }`,uniforms:{tSrc:{value:null},tPrev:{value:null},uTexel:{value:new V},uRadius:{value:1}},depthTest:!1,depthWrite:!1,blending:0}),this.compositeMat=new J({vertexShader:ng,fragmentShader:`
         uniform sampler2D tScene; uniform sampler2D tBloom; uniform float uExposure; uniform float uBloom; varying vec2 vUv;
         ${$h}
         vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
         float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
         void main() {
-          vec3 hdr = texture2D(tScene, vUv).rgb + uBloom * texture2D(tBloom, vUv).rgb;
+          vec3 hdr = min(texture2D(tScene, vUv).rgb, vec3(6.0e4)) + uBloom * min(texture2D(tBloom, vUv).rgb, vec3(6.0e4));
           vec3 c = toSRGB(spTone(hdr * uExposure));
           c += (hash(gl_FragCoord.xy) - 0.5) / 255.0; // dither
           gl_FragColor = vec4(c, 1.0);
