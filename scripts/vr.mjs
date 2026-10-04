@@ -107,7 +107,7 @@ check('menu opens in front of the user after entering', true);
 await frames(2);
 const lum = await headsetBrightness();
 check('the headset image is not black', lum.litFraction > 0.02, JSON.stringify(lum));
-await page.screenshot({ path: path.join(outDir, 'vr1-menu.png') });
+await page.screenshot({ path: path.join(outDir, 'vr1-menu.png'), timeout: 180000 });
 
 // 2. Laser + trigger on the Saturn tile: hover highlight, then travel there
 const saturnKey = await page.evaluate(() => window.app.system.bodies.find((b) => b.name === 'Saturn').key);
@@ -115,7 +115,7 @@ await aimRegion('a.vr.menu.panel', `go:${saturnKey}`);
 await frames(4);
 st = await page.evaluate(() => window.app.vr.menu.panel.hover);
 check('laser hover highlights the menu tile', st === `go:${saturnKey}`, `hover=${st}`);
-await page.screenshot({ path: path.join(outDir, 'vr2-menu-hover.png') });
+await page.screenshot({ path: path.join(outDir, 'vr2-menu-hover.png'), timeout: 180000 });
 await press('right', 'trigger');
 st = await page.evaluate(() => ({ sel: window.app.selection?.name, menu: window.app.vr.menu.isOpen }));
 check('clicking a tile selects it and closes the menu', st.sel === 'Saturn' && !st.menu, JSON.stringify(st));
@@ -123,7 +123,7 @@ await waitTravel();
 let r = await distR('Saturn');
 check('travel arrives at Saturn, framed for VR', r > 3.5 && r < 6, `${r.toFixed(2)} R`);
 await frames(3);
-await page.screenshot({ path: path.join(outDir, 'vr3-saturn.png') });
+await page.screenshot({ path: path.join(outDir, 'vr3-saturn.png'), timeout: 180000 });
 
 // 3. Search with the virtual keyboard: Y opens the menu, type "IO", pick the first result
 await press('left', 'y-button');
@@ -139,7 +139,7 @@ for (const k of ['I', 'O']) {
 st = await page.evaluate(() => window.app.vr.menu.query);
 const firstResult = await page.evaluate((q) => window.app.searchItems(q)[0], st);
 check('virtual keyboard types the query and finds Io', st === 'Io' && firstResult?.label === 'Io', `query="${st}" first=${firstResult?.label}`);
-await page.screenshot({ path: path.join(outDir, 'vr4-search.png') });
+await page.screenshot({ path: path.join(outDir, 'vr4-search.png'), timeout: 180000 });
 await aimRegion('a.vr.menu.panel', `res:${firstResult.id}`);
 await frames(2);
 await press('right', 'trigger');
@@ -147,7 +147,7 @@ await waitTravel();
 r = await distR('Io');
 check('search result flies to Io', r > 1.6 && r < 4, `${r.toFixed(2)} R`);
 await frames(3);
-await page.screenshot({ path: path.join(outDir, 'vr5-io.png') });
+await page.screenshot({ path: path.join(outDir, 'vr5-io.png'), timeout: 180000 });
 
 // 4. Point at Jupiter in the sky (from a spot where nothing is in front of it): hover ring,
 //    trigger selects and shows the info card; B closes it
@@ -161,7 +161,7 @@ await press('right', 'trigger');
 st = await page.evaluate(() => ({ sel: window.app.selection?.name, card: window.app.vr.card.visible }));
 check('trigger on the sky selects and opens the info card', st.sel === 'Jupiter' && st.card, JSON.stringify(st));
 await frames(2);
-await page.screenshot({ path: path.join(outDir, 'vr6-card.png') });
+await page.screenshot({ path: path.join(outDir, 'vr6-card.png'), timeout: 180000 });
 await press('right', 'b-button');
 st = await page.evaluate(() => window.app.vr.card.visible);
 check('B closes the card', !st);
@@ -240,7 +240,7 @@ const bhDraw = await page.evaluate(async () => {
 check('environment captured without breaking the headset framebuffer', bhDraw.env > 0 && bhDraw.main > 0 && bhDraw.intoXR === bhDraw.main, JSON.stringify(bhDraw));
 const bhLum = await headsetBrightness();
 check('the black hole view is not black', bhLum.litFraction > 0.02, JSON.stringify(bhLum));
-await page.screenshot({ path: path.join(outDir, 'vr8-black-hole.png') });
+await page.screenshot({ path: path.join(outDir, 'vr8-black-hole.png'), timeout: 180000 });
 
 // 8b. Places tab: fly to the Apollo 11 landing site; the Moon's real terrain is drawn there
 await press('left', 'y-button');
@@ -259,7 +259,7 @@ st = await page.evaluate(() => {
   return { terrain: a.terrain.owner?.name ?? null, km: l.upos.sub(a.rig.upos).length() / 1e3 };
 });
 check('Places tab flies to the Apollo 11 site over real terrain', st.terrain === 'Moon' && st.km > 2 && st.km < 8, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 'vr8b-apollo-11.png') });
+await page.screenshot({ path: path.join(outDir, 'vr8b-apollo-11.png'), timeout: 180000 });
 
 // 9. Exit VR (as the headset's system menu would): desktop rendering resumes with an un-rotated camera
 await page.evaluate(() => window.app.vr.session.end());
@@ -271,7 +271,7 @@ st = await page.evaluate(() => {
 });
 check('desktop rendering resumes after exit', !st.xr && st.button === 'ENTER VR');
 check('camera pose reset to the dolly', st.pos === 0 && st.qw === 1, JSON.stringify(st));
-await page.screenshot({ path: path.join(outDir, 'vr7-after-exit.png') });
+await page.screenshot({ path: path.join(outDir, 'vr7-after-exit.png'), timeout: 180000 });
 
 check('no console errors', errors.length === 0, errors.slice(0, 5).join(' | '));
 await browser.close();

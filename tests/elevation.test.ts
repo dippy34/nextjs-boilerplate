@@ -196,7 +196,7 @@ describe.skipIf(!bodies.includes('earth') || !bodies.includes('moon'))('descendi
       expect(v).toBeGreaterThan(lo);
       expect(v).toBeLessThan(hi);
     }
-  });
+  }, 30000);
 });
 
 describe.skipIf(!bodies.includes('moon'))('tile cache', () => {

@@ -1,6 +1,7 @@
 import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, Points, Quaternion, ShaderMaterial, Vector2, Vector3, Vector4 } from 'three';
 import type { UPos } from '../core/upos';
 import { discFrame, type Galaxy } from '../universe/Galaxies';
+import { F_LOG0, F_N, F_STEP, INTERIOR } from './interiorState';
 import { noise3D, sampleNoise } from './Noise3D';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, POINT_CLIP, PROJECT_PARS } from './shaders/xr';
 
@@ -112,6 +113,11 @@ uniform float uWeight;
 uniform float uYoungW;    // share of the young stars' light left to the volume (the cloud has the rest)
 uniform float uLite;
 uniform float uPixAng;    // radians per pixel
+// inside a galaxy: the share of its light carried by the resolved stars drawn around the eye, by
+// log10 distance (pc); the volume leaves it out (no double counting as the stars stream in)
+uniform float uNearF[${F_N}];
+uniform float uNearOn;
+uniform float uRpc;       // galaxy radius (pc)
 varying vec3 vBox;
 ${GAL_MODEL}
 void main() {
@@ -183,6 +189,11 @@ void main() {
         float hd = 0.4 * hz;
         k = uDustP.x * dustSheet(fil) * (exp(-az / hd) / (2.0 * hd) + uDustP.z * exp(-az / 0.03) * 16.7 * smoothstep(0.55, 0.85, gA.a) * 3.0) * win;
       }
+    }
+    if (uNearOn > 0.5) {
+      float x = clamp((log2(max(tt * uRpc, 1e-3)) * 0.30103 - (${F_LOG0.toFixed(2)})) / ${F_STEP.toFixed(2)}, 0.0, ${(F_N - 1).toFixed(1)});
+      int i0 = int(floor(x));
+      j *= 1.0 - mix(uNearF[i0], uNearF[min(i0 + 1, ${F_N - 1})], fract(x));
     }
     vec3 a = exp(-k * EXT * ds);
     L += T * j * ds * (k > 1e-4 ? (1.0 - a) / max(k * EXT * ds, 1e-6) : vec3(1.0));
@@ -284,7 +295,7 @@ function mulberry(seed: number): () => number {
 }
 
 /** How a galaxy is built: light shares of its parts (any scale; normalised) and their shapes. */
-interface Look {
+export interface Look {
   arms: number; pitchDeg: number; irreg: number;
   bulge: number; bulgeRe: number; bulgeN: number; bulgeQ: number;
   old: number; thick: number; young: number; knots: number; bar: number; barLen: number;
@@ -310,7 +321,7 @@ interface Look {
 
 const C_OLD = [1.0, 0.84, 0.67], C_BULGE = [1.0, 0.79, 0.57], C_YOUNG = [0.58, 0.73, 1.0], C_HII = [1.0, 0.38, 0.55];
 
-function lookFor(g: Galaxy, all: Galaxy[] = []): Look {
+export function lookFor(g: Galaxy, all: Galaxy[] = []): Look {
   const m = g.data.morph;
   const stage = /S[AB_()s]*[ab]?([abcdm])/.exec(m)?.[1] ?? (g.shape === 'spiral' || g.shape === 'barred' ? 'b' : '');
   const base: Look = {
@@ -383,10 +394,10 @@ function meanSB(g: Galaxy): number {
   return Math.min(25, Math.max(20, sb));
 }
 
-const sersicB = (n: number) => 2 * n - 1 / 3 + 0.009876 / n;
+export const sersicB = (n: number) => 2 * n - 1 / 3 + 0.009876 / n;
 
 /** Uniforms + CPU mirror of one galaxy's model. */
-class GalaxyModel {
+export class GalaxyModel {
   readonly u: Record<string, { value: unknown }>;
   readonly ext: Vector3;
   /** light shares (sum 1) of bulge, old, thick, young, knots, bar, spot */
@@ -394,7 +405,7 @@ class GalaxyModel {
   /** galaxy frame <-> disc frame */
   readonly rot = new Matrix3();
   readonly rotT = new Matrix3();
-  private readonly coef: { bulge: number; old: number; thick: number; young: number; knots: number; bar: number; spot: number };
+  readonly coef: { bulge: number; old: number; thick: number; young: number; knots: number; bar: number; spot: number };
   private readonly bulgeCdf: Float64Array;
   private readonly bulgeSMax: number;
   private readonly nzv = new Float32Array(4);
@@ -529,9 +540,9 @@ class GalaxyModel {
   /** the noise at texture coordinates */
   private nz(x: number, y: number, z: number): Float32Array { return sampleNoise(this.noise, x, y, z, this.nzv); }
 
-  private dA = new Float32Array(4);
-  private dS = new Float32Array(4);
-  private dI = new Float32Array(4);
+  readonly dA = new Float32Array(4);
+  readonly dS = new Float32Array(4);
+  readonly dI = new Float32Array(4);
   /**
    * Disc-frame quantities at p (as discNoise() in GAL_MODEL): radius, spiral phase, arm-width noise
    * and the big-scale noise (into `dA`); `streaks()` adds the isotropic (`dI`) and spiral-coordinate
@@ -644,7 +655,7 @@ class GalaxyModel {
   }
 }
 
-function smooth(a: number, b: number, x: number): number {
+export function smooth(a: number, b: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 }
@@ -735,6 +746,9 @@ export class GalaxiesLayer {
     cg.setAttribute('position', new BufferAttribute(new Float32Array(n * 3), 3));
     cg.setDrawRange(0, 0);
     for (const g of galaxies) this.models.set(g, new GalaxyModel(g, lookFor(g, galaxies), noise.data));
+    // (shared with the procedural stars, which draw the stars inside the galaxy being entered)
+    INTERIOR.galaxies = galaxies;
+    INTERIOR.models = this.models;
     const first = this.models.values().next().value as GalaxyModel | undefined;
     const modelU = () => first ? Object.fromEntries(Object.entries(first.u).map(([k, v]) => [k, { value: v.value instanceof Vector4 || v.value instanceof Vector3 || v.value instanceof Matrix3 ? v.value.clone() : v.value }])) : {};
     this.cloud = new Points(cg, new ShaderMaterial({
@@ -750,22 +764,61 @@ export class GalaxiesLayer {
     this.cloud.renderOrder = -1;
     this.cloud.name = 'galaxy cloud';
     this.group.add(this.cloud);
-    for (const g of galaxies) {
-      const model = this.models.get(g)!;
-      const m = new Mesh(this.box, new ShaderMaterial({
-        name: 'galaxy-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG, side: BackSide,
-        uniforms: {
-          ...model.u, uCam: { value: new Vector3() }, uExt: { value: model.ext }, uPixAng: this.pixAng,
-          uGain: this.gain, uWeight: { value: 1 }, uYoungW: { value: 1 }, uLite: LITE.uLite, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
-        },
-        transparent: true, depthWrite: false, blending: AdditiveBlending,
-      }));
-      m.matrixAutoUpdate = false;
-      m.frustumCulled = false;
-      m.renderOrder = -1;
-      m.name = g.name;
-      this.group.add(m);
-      this.volumes.set(g, m);
+    this.base = galaxies.length;
+    for (const g of galaxies) this.makeVolume(g);
+  }
+
+  /** galaxies from the start (always kept); later ones (catalogue picks) live in an LRU */
+  private base: number;
+  private lastSeen = new Map<Galaxy, number>();
+  private frameNo = 0;
+  /** volumes (and models) kept for catalogue galaxies added later */
+  static readonly MAX_ADDED = 24;
+
+  /** the model of `g` (rebuilt if it was evicted) */
+  private modelOf(g: Galaxy): GalaxyModel {
+    let model = this.models.get(g);
+    if (!model) {
+      model = new GalaxyModel(g, lookFor(g, this.galaxies), noise3D().data);
+      this.models.set(g, model);
+    }
+    return model;
+  }
+
+  private makeVolume(g: Galaxy): Mesh {
+    const model = this.modelOf(g);
+    const m = new Mesh(this.box, new ShaderMaterial({
+      name: 'galaxy-volume', vertexShader: VOL_VERT, fragmentShader: VOL_FRAG, side: BackSide,
+      uniforms: {
+        ...model.u, uCam: { value: new Vector3() }, uExt: { value: model.ext }, uPixAng: this.pixAng,
+        uNearF: { value: new Float32Array(F_N) }, uNearOn: { value: 0 }, uRpc: { value: g.radius / 3.0856775814913673e16 },
+        uGain: this.gain, uWeight: { value: 1 }, uYoungW: { value: 1 }, uLite: LITE.uLite, uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+      },
+      transparent: true, depthWrite: false, blending: AdditiveBlending,
+    }));
+    m.matrixAutoUpdate = false;
+    m.frustumCulled = false;
+    m.renderOrder = -1;
+    m.name = g.name;
+    this.group.add(m);
+    this.volumes.set(g, m);
+    return m;
+  }
+
+  /** Free the volumes and models of the catalogue galaxies seen least recently, beyond MAX_ADDED. */
+  private evict(): void {
+    const added = this.galaxies.slice(this.base).filter((g) => this.volumes.has(g));
+    if (added.length <= GalaxiesLayer.MAX_ADDED) return;
+    added.sort((a, b) => (this.lastSeen.get(a) ?? 0) - (this.lastSeen.get(b) ?? 0));
+    for (const g of added.slice(0, added.length - GalaxiesLayer.MAX_ADDED)) {
+      // (galaxies in view stay: they would be rebuilt straight away)
+      if (g === this.cloudOf || (this.lastSeen.get(g) ?? 0) >= this.frameNo - 1) continue;
+      const v = this.volumes.get(g)!;
+      this.group.remove(v);
+      (v.material as ShaderMaterial).dispose();
+      this.volumes.delete(g);
+      this.models.delete(g);
+      INTERIOR.frames.delete(this.galaxies.indexOf(g));
     }
   }
 
@@ -801,7 +854,7 @@ export class GalaxiesLayer {
           const R = g.radius;
           o.set(-rel.dot(g.major) / R, -rel.dot(g.minor) / R, -rel.dot(g.normal) / R);
           d.set(dir.dot(g.major), dir.dot(g.minor), dir.dot(g.normal));
-          Lr += this.models.get(g)!.radiance(o, d);
+          Lr += this.modelOf(g).radiance(o, d);
         }
         sumLog += wt * Math.log(Lr * 0.9 + 0.02);
         sumW += wt;
@@ -839,12 +892,15 @@ export class GalaxiesLayer {
     }
     // single stars from 30 radii in; the young star clouds only up close (from 5 radii), where the
     // volume's noise runs out of detail
-    const wStars = fade > 0.001 && near ? smooth(30, 12, nearK) : 0;
-    const wClouds = fade > 0.001 && near ? smooth(5, 2, nearK) : 0;
+    // (inside, the resolved stars of ProceduralStarLayer take over from both)
+    const act = INTERIOR.active;
+    const wIn = act && near && this.galaxies[act.gi] === near ? act.w : 0;
+    const wStars = fade > 0.001 && near ? smooth(30, 12, nearK) * (1 - wIn) : 0;
+    const wClouds = fade > 0.001 && near ? smooth(5, 2, nearK) * (1 - wIn) : 0;
     this.cloud.visible = wStars > 0.001;
     if (near && this.cloud.visible) {
       const u = (this.cloud.material as ShaderMaterial).uniforms;
-      const model = this.models.get(near)!;
+      const model = this.modelOf(near);
       const geo = this.cloud.geometry;
       if (this.cloudOf !== near) {
         this.filling = fillCloud(model, geo.attributes.aStar.array as Float32Array, geo.attributes.aFlux.array as Float32Array, this.nClouds, this.nStars, this.fill);
@@ -880,11 +936,18 @@ export class GalaxiesLayer {
       const dist = rel.length();
       const pr = Math.atan2(g.radius, dist) / pixelAngle;
       if (fade > 0.001) this.views.push({ galaxy: g, rel: rel.clone(), dist, pixelRadius: pr });
-      const vol = this.volumes.get(g)!;
-      vol.visible = fade > 0.001 && pr > 0.5;
-      if (!vol.visible) continue;
+      let vol = this.volumes.get(g);
+      const show = fade > 0.001 && pr > 0.5;
+      if (!vol) {
+        // an evicted catalogue galaxy back in view
+        if (!show) continue;
+        vol = this.makeVolume(g);
+      }
+      vol.visible = show;
+      if (!show) continue;
+      this.lastSeen.set(g, this.frameNo);
       const R = g.radius;
-      const ext = this.models.get(g)!.ext;
+      const ext = this.modelOf(g).ext;
       m.makeBasis(g.major.clone().multiplyScalar(R * ext.x), g.minor.clone().multiplyScalar(R * ext.y), g.normal.clone().multiplyScalar(R * ext.z)).setPosition(rel);
       vol.matrix.copy(m);
       vol.matrixWorldNeedsUpdate = true;
@@ -893,10 +956,27 @@ export class GalaxiesLayer {
       (u.uCam.value as Vector3).set(-rel.dot(g.major) / R, -rel.dot(g.minor) / R, -rel.dot(g.normal) / R);
       // up close the cloud carries part of the light (as star clouds and single stars)
       // (as far as the cloud is filled yet)
+      const on = !!act && this.galaxies[act.gi] === g;
+      u.uNearOn.value = on ? 1 : 0;
+      if (on) (u.uNearF.value as Float32Array).set(act.F);
       const ws = g === near && g === this.cloudOf ? wStars * this.fill.stars : 0, wc = g === near && g === this.cloudOf ? wClouds * this.fill.clouds : 0;
       u.uWeight.value = 1 - STAR_SHARE * ws;
-      u.uYoungW.value = (1 - STAR_SHARE * ws - (this.models.get(g)!.look.cloudShare ?? CLOUD_SHARE) * wc) / (1 - STAR_SHARE * ws);
+      u.uYoungW.value = (1 - STAR_SHARE * ws - (this.modelOf(g).look.cloudShare ?? CLOUD_SHARE) * wc) / (1 - STAR_SHARE * ws);
     }
+    if (++this.frameNo % 60 === 0) this.evict();
+  }
+
+  /**
+   * [catalog] Add a galaxy after construction (a catalogue destination), set up like the others:
+   * volume, interior stars when entered (its index in `galaxies` is its interior index), kept in an
+   * LRU of MAX_ADDED volumes.
+   */
+  add(g: Galaxy): void {
+    if (this.galaxies.includes(g)) return;
+    this.galaxies.push(g);
+    this.makeVolume(g);
+    this.lastSeen.set(g, this.frameNo);
+    this.evict();
   }
 }
 

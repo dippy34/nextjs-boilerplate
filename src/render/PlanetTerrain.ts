@@ -189,13 +189,18 @@ export class PlanetTerrain {
   /** tiles in flight (and so finished + uploaded) per frame: bounds the per-frame refinement cost */
   inFlight = 8;
   inFlightVr = 4;
-  /** tiles drawn at once, about (see lodScale): bounds the draw count at any altitude */
-  drawCap = 96;
-  drawCapVr = 72;
   /**
-   * scale on the split threshold, raised while the selection runs into `drawCap` and eased back
-   * when it is well under: the threshold rises evenly over the view, rather than the cap starving
-   * whatever the walk reaches last (the far field, behind the deep column under the explorer)
+   * tiles drawn at once besides the explorer's column (the tiles whose parent holds the explorer)
+   * and the ground within 30 m, which lodScale does not thin, about (see lodScale): bounds the
+   * draw count at any altitude
+   */
+  drawCap = 64;
+  drawCapVr = 40;
+  /**
+   * scale on the split threshold beyond some tens of metres (1 to 6), raised while the tiles it can
+   * thin run over `drawCap` and eased back when well under: the threshold rises evenly over the view,
+   * rather than a cap starving whatever the walk reaches last (the far field, behind the deep
+   * column under the explorer). Back to 1 on a new world.
    */
   lodScale = 1;
   /** most tiles kept (desktop, headset) */
@@ -366,6 +371,7 @@ export class PlanetTerrain {
       for (let f = 0; f < 6; f++) roots.push(new Node(f, 0, 0, 0, null));
       const tops = topOf(g, spec);
       w = this.world = { ground: g, id, version, roots, tiles: new Set(), hTop: tops.hTop, rMin: tops.rMin, rMax: tops.rMax };
+      this.lodScale = 1;
       (w as World & { spec: HeightSpec | null }).spec = spec;
       if (spec) for (const wk of this.workers) wk.postMessage({ type: 'spec', id, spec });
     } else if (w.version !== version) {
@@ -417,6 +423,7 @@ export class PlanetTerrain {
     const horEye = Math.acos(Math.min(1, rOcc / D));
     const want: { n: Node; p: number }[] = [];
     const sel: Node[] = [];
+    let unbudgeted = 0;
     const sunBF = c.sunBF;
     const R = g.radius;
     const tmp = new Vector3();
@@ -427,7 +434,7 @@ export class PlanetTerrain {
     // beyond the horizon of a sphere that lies under all ground near the eye (horizon culling)
     const visible = (n: Node) => D <= rOcc
       || n.dir.angleTo(up) - n.ang < horEye + Math.acos(Math.min(1, rOcc / (w.rMax + (n.data ? n.data.hMax : w.hTop))));
-    const errorOf = (n: Node): { sse: number; inView: boolean } => {
+    const errorOf = (n: Node): { sse: number; inView: boolean; d: number } => {
       // distance from the eye to the tile's bounds
       let cx: number, cy: number, cz: number, rb: number;
       if (n.data) { [cx, cy, cz] = n.data.centre; rb = n.data.bound; }
@@ -436,18 +443,21 @@ export class PlanetTerrain {
       const dc = tmp.length();
       const d = Math.max(dc - rb, Math.max(altG, 0.2) * 0.5);
       const inView = dc < rb * 1.2 || tmp.dot(viewBF) / dc > Math.cos(Math.min(Math.PI, halfFov + Math.atan(rb / dc)));
-      return { sse: tileSpacing(R, n.level) / d / pa, inView };
+      return { sse: tileSpacing(R, n.level) / d / pa, inView, d };
     };
     const walk = (n: Node, merging: boolean): void => {
       n.used = frame;
       if (!visible(n)) { n.m = n.level === 0 ? 1 : 0; this.mergeAway(n); return; }
       if (!n.data) { ready = false; return; }
       if (n.stale && !n.job) want.push({ n, p: 0.5 });
-      const { sse, inView } = errorOf(n);
-      const lim = (inView ? P : P * 3) * (n.split ? 0.8 : 1) * this.lodScale;
-      // (the tile under the explorer always refines: the cap only trims the surroundings)
-      // (`lodScale` keeps the count near `drawCap` evenly; this hard stop only bounds a runaway)
-      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && (sel.length < drawCap * 1.5 || this.holds(n, up));
+      const { sse, inView, d } = errorOf(n);
+      // (lodScale only thins the distance: the ground within some tens of metres keeps its detail,
+      // so what a walker stands on and walks towards, a shoreline say, does not move with it)
+      const far = Math.min(1, Math.max(0, (d - 30) / 300));
+      const lim = (inView ? P : P * 3) * (n.split ? 0.8 : 1) * (1 + (this.lodScale - 1) * far);
+      // (the tile under the explorer always refines: the cap only trims the surroundings;
+      // `lodScale` keeps the count near `drawCap` evenly, this hard stop only bounds a runaway)
+      const canSplit = tileSpacing(R, n.level) * 0.5 >= minSp && n.level < 24 && (sel.length - unbudgeted < drawCap * 1.5 || this.holds(n, up));
       const wantSplit = !merging && canSplit && sse > lim;
       if (wantSplit) {
         if (!n.kids) n.kids = [0, 1, 2, 3].map((q) => new Node(n.face, n.level + 1, n.x * 2 + (q & 1), n.y * 2 + (q >> 1), n));
@@ -475,6 +485,8 @@ export class PlanetTerrain {
       // draw this tile
       n.m = merging ? Math.max(0, n.m - dt / 0.35) : Math.min(1, n.m + dt / 0.45);
       sel.push(n);
+      // tiles lodScale cannot thin (the explorer's column, the ground close by) are not budgeted
+      if ((n.parent && this.holds(n.parent, up)) || d < 30) unbudgeted++;
     };
     for (const r of w.roots) {
       r.used = frame;
@@ -484,8 +496,9 @@ export class PlanetTerrain {
     const order = [...w.roots].sort((a, b) => a.dir.angleTo(up) - b.dir.angleTo(up));
     if (ready) for (const r of order) walk(r, false);
     if (ready) {
-      if (sel.length > drawCap) this.lodScale = Math.min(16, this.lodScale * 1.05);
-      else if (sel.length < drawCap * 0.8) this.lodScale = Math.max(1, this.lodScale / 1.03);
+      const others = sel.length - unbudgeted;
+      if (others > drawCap) this.lodScale = Math.min(6, this.lodScale * 1.05);
+      else if (others < drawCap * 0.8) this.lodScale = Math.max(1, this.lodScale / 1.03);
     }
     // the star has moved since a tile's shadows were made: rebuild it (near the terminator only)
     if (ready) {

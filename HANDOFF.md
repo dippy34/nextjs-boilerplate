@@ -220,6 +220,37 @@ Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/ele
   areoid/geoid but the engine adds them to the ellipsoid (as before: the difference is a smooth,
   very long-wavelength undulation, kilometre-scale on Mars, ~100 m on Earth). Earth land below sea level (Dead Sea, Caspian) is stored as ocean in the fine levels.
 
+## The catalogue of real objects (catalog worker)
+
+`pipeline/build_catalog.py` (downloads: `pipeline/catalog_sources.py`, raw in `data-raw/catalog/`;
+the ATNF `psrcat` program is compiled there to get pulsar distances) -> `public/data/catalog/`
+(20 MB): `manifest.json`, `rec/<category>/<k>.tsv` (4,000 records a file), `idx/<k>.txt` (the search
+index: 356,000 names sorted by normalised key, 8,000 a file; 102 files in all; the manifest has each file's first
+key). 199,996 objects: stars 112,879 (Hipparcos/Gliese, HD/HR/HIP/Gl/Bayer/Flamsteed names), galaxies
+62,301 (Cosmicflows-4 + OpenNGC + UNGC), clusters 7,186, TESS planet hosts 6,266, pulsars 4,319, nebulae
+2,336 (PNe, SNRs, WISE H II), white dwarfs 2,132 (50 pc), quasars 1,908 (with SMBH masses; incl. 3C 273, OJ 287, TON 618), X-ray
+binaries 419, brown dwarfs 250. Sources and licences: CREDITS.md.
+
+* Runtime: `src/universe/CatalogSearch.ts` (no DOM: `normKey` mirrors the pipeline's `norm`; a query
+  loads 1-3 index files, ~60 kB; records load per file) and `src/universe/Catalog.ts` (results with
+  their records preloaded so picking is synchronous, `resolve('cat:<c>:<row>')`, `featured(code,
+  page)` for browsing, `onUpdate` when async results land). Objects become the engine's own kinds:
+  `CatalogStar` subclasses (stars, white/brown dwarfs, planet hosts, neutron-star X-ray binaries),
+  `BlackHole` (black-hole X-ray binaries with a Roche-lobe companion; quasars as supermassive holes),
+  `Galaxy`, `DeepSkyObject` (clusters, nebulae); pulsars are 12 km stars at ~500,000 K. Catalogue
+  stars the star tiles lack join the near-star list when close (`Catalog.nearStars`). If the app already has the
+  object (curated galaxies/nebulae/holes, named stars) that one is used (`App.catalogExisting`).
+* Hooks (all marked `[catalog]`): `App.objCatalog`, created in `App.create` with callbacks that push
+  black holes into `app.blackHoles` and call the new `GalaxiesLayer.add(g)` /
+  `DeepSkyLayer.add(o, psf, lut, vr)` (appended methods; they set objects up like the constructors);
+  `App.searchItems` merges catalogue results (exact designation matches rank first);
+  `App.resolveSearchId` handles `cat:` ids; `Hud.refreshSearch` is public so late results show; the VR
+  Search tab shows a category browser (6 per page) when nothing is typed.
+* Not yet: catalogue objects are not labelled in the sky or pickable by pointing until selected
+  (search/browse only); TESS hosts get the engine's generated planets besides their candidates'
+  info row; picking many galaxies adds one volume mesh each (never removed).
+* Regenerate: `cd pipeline && python3 build_catalog.py` (downloads ~260 MB once).
+
 ## Next
 
 1. Quest performance pass on a real headset (cockpit, planet/galaxy/nebula shaders, tile atlas size,

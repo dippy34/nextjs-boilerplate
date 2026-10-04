@@ -78,6 +78,10 @@ export class VRSupport {
   private button: HTMLButtonElement | null = null;
   /** comfort vignette strength asked for by walking (src/app/Walk.ts), 0..1 */
   comfort = 0;
+  /** panels other modules add to the scene that the laser should also use (the title screen, src/app/StartMenu.ts) */
+  readonly extraPanels: Panel[] = [];
+  /** don't open the menu on entering VR (the title screen shows its own choices) */
+  holdMenu = false;
 
   constructor(private app: App, readonly supported: boolean, dataBase: string) {
     this.labelsGroup.name = 'vr-labels';
@@ -183,7 +187,7 @@ export class VRSupport {
     this.vig.fade.value = 1;
     this.travel = { phase: 'enter', t: 0, target: app.selection ?? app.system.sun };
     app.warmupPending = true; // tone mapping changed: compile the headset's shader variants while black
-    this.pendingMenu = true;
+    this.pendingMenu = !this.holdMenu;
     this.flash('Trigger: select · A: fly there · Y: menu');
   }
 
@@ -254,7 +258,7 @@ export class VRSupport {
 
   // ------------------------------------------------------------------ pointing
   private interactivePanels(): Panel[] {
-    return [this.menu.panel, this.card, this.wrist].filter((p) => p.visible && p.mesh.parent);
+    return [this.menu.panel, this.card, this.wrist, ...this.extraPanels].filter((p) => p.visible && p.mesh.parent);
   }
 
   /** UI hit along a world-space ray. */
