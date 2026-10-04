@@ -259,6 +259,18 @@ export class Flight {
     const D = core.chooseFrame();
     this.frameEnv();
     if (!D) { ship.vel.set(0, 0, 0); core.syncRel(); return; }
+    // next to a station, ship or spacecraft: matched to its velocity (ready to dock)
+    const t = this.anchorTrack, anc = this.app.rig.anchor;
+    const orb = anc as unknown as { vel?: Vector3; body?: Body };
+    if (anc && anc.upos.sub(ship.upos, this.tmp).length() < 50e3 && ((t && t.ok && t.obj === anc) || (orb.vel && orb.body))) {
+      // stations and traffic ships know their orbital velocity (about their world); others are tracked
+      if (orb.vel && orb.body instanceof Body) ship.vel.copy(orb.body.vel).add(orb.vel);
+      else ship.vel.copy(t!.vel);
+      core.landed = null;
+      core.syncRel();
+      if (announce) this.app.hud.toast(`Matched velocity with ${anc.name}`);
+      return;
+    }
     const rel = ship.upos.sub(D.upos, new Vector3());
     const r = rel.length();
     const ground = core.groundR;
@@ -311,6 +323,20 @@ export class Flight {
     this.app.rig.upos.copy(ship.upos);
   }
 
+  /** Velocity of what the camera rides with when it is not a gravitating body (stations, ships, spacecraft). */
+  private trackAnchor(): void {
+    const a = this.app.rig.anchor, jd = this.app.clock.jdTdb;
+    if (!a || this.cache.has(a)) { this.anchorTrack = null; return; }
+    const t = this.anchorTrack;
+    if (t && t.obj === a) {
+      const dt = (jd - t.jd) * DAY;
+      if (dt > 0) { a.upos.sub(t.pos, t.vel).divideScalar(dt); t.ok = true; }
+      t.pos.copy(a.upos);
+      t.jd = jd;
+    } else this.anchorTrack = { obj: a, pos: a.upos.clone(), jd, vel: new Vector3(), ok: false };
+  }
+  private anchorTrack: { obj: object; pos: UPos; jd: number; vel: Vector3; ok: boolean } | null = null;
+
   /** Warp drive check: mass-locked by strong gravity. Returns the reason, or '' when free. */
   massLock(): string {
     if (!this.on) return '';
@@ -325,6 +351,9 @@ export class Flight {
     return `Mass-locked: gravity ${g.toFixed(g < 10 ? 2 : 0)} m/s² (limit ${MASS_LOCK_G}).${need}`;
   }
 
+  /** VR grip throttle this frame (-1 = none) */
+  gripThrottle = -1;
+
   /** true while something else flies the ship: the warp drive, the VR travel, the docking computer */
   get external(): boolean {
     const app = this.app;
@@ -338,6 +367,7 @@ export class Flight {
     const rig = () => app.rig;
     this.limited = false;
     gravity.refresh();
+    this.gripThrottle = app.rig.ext.throttle;
     if (this.external) {
       // the warp drive (or docking computer) carries the ship: physics resumes at drop-out
       this.simDt = clock.paused ? 0 : Math.max(0, Math.min(rawDt, 1) * clock.rate);
@@ -420,6 +450,7 @@ export class Flight {
     const app = this.app, rig = app.rig, ship = this.ship, core = this.core;
     this.universeTime += this.simDt;
     this.exoVelocities((app.clock.jdTdb - this.lastJd) * DAY);
+    this.trackAnchor();
     if (this.external) {
       // in warp the ship is where the drive puts it
       ship.upos.copy(rig.upos);
