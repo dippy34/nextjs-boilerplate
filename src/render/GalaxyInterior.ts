@@ -236,6 +236,19 @@ export function generateGalaxyCell(fr: InteriorFrame, k: number, ix: number, iy:
       }
     }
     if (!ok) continue;
+    if (young && r() < 0.75) {
+      // most young stars are born together: snap to an association on a fixed 300 pc grid (shared
+      // by all bands, so bright and faint members gather at the same places), spread ~10-40 pc
+      const G = 300 / fr.rpc;
+      const gx = Math.floor(q.x / G), gy = Math.floor(q.y / G);
+      const h = rng(cellSeed(fr.index, 99, gx, gy, 0));
+      const spread = (10 + 30 * h()) / fr.rpc;
+      const cx = (gx + h()) * G, cy = (gy + h()) * G, cz = (h() - 0.5) * 0.2 * spread * 4;
+      const gs = () => Math.sqrt(-2 * Math.log(Math.max(r(), 1e-12))) * Math.cos(2 * Math.PI * r());
+      const nx = cx + gs() * spread, ny = cy + gs() * spread, nz = cz + gs() * spread * 0.5;
+      // (kept inside this cell, so cells never overlap)
+      if (nx >= x0 && nx < x0 + s && ny >= y0 && ny < y0 + s && nz >= z0 && nz < z1) q.set(nx, ny, nz);
+    }
     // spectral class consistent with the population (young: hot stars and supergiants)
     const choices = band.classes.filter((c) => c.young === young);
     const list = choices.length ? choices : band.classes;
