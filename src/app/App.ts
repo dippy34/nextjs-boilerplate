@@ -1747,6 +1747,8 @@ export class App {
     const dpr = this.view.pixelRatio;
     psf.uPixelSA.value = (this.view.pixelAngle * dpr) ** 2;
     psf.uDpr.value = dpr;
+    // a headset's pixels are large and the head never still: slightly wider cores keep faint stars from shimmering
+    if (psf.uMinSigma) psf.uMinSigma.value = this.vr.active ? 0.8 : 0.6;
     this.bodies.surfaceExposure.value = xSurf;
     for (const c of this.catalogs) c.update(this.camPc, mLim, this.fieldMinDistPc);
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);
