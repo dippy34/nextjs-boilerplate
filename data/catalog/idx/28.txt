@@ -5879,7 +5879,7 @@ HR 996	s	gi	1
 HR 997	s	1n8	2
 HR 998	s	4dk	2
 HR 999	s	4t9	2
-HS 1053+3624	g	v2	4
+HS 1053+3624	g	v3	4
 HS 117	g	5s	3
 HSC 1	c	14f	6
 HSC 10	c	3te	6

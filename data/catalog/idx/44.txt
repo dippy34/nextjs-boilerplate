@@ -115,16 +115,16 @@ V934 Her	x	27	5
 Van Maanen's Star	s	s	0
 vBe 3	n	18y	6
 VBRC 7	n	x9	6
-VCC 0114	g	u0	4
-VCC 0169	g	vk	4
-VCC 0381	g	qv	4
-VCC 0565	g	vn	4
-VCC 0841	g	tg	4
-VCC 1675	g	sx	4
-VCC 1713	g	sb	4
+VCC 0114	g	u1	4
+VCC 0169	g	vl	4
+VCC 0381	g	qw	4
+VCC 0565	g	vo	4
+VCC 0841	g	th	4
+VCC 1675	g	sy	4
+VCC 1713	g	sc	4
 VCC 1725	g	c6	3
-VCC 1822	g	tv	4
-VCC 2033	g	w1	4
+VCC 1822	g	tw	4
+VCC 2033	g	w2	4
 VCC 2037	g	ai	3
 Vd 1-6	n	12p	6
 vdB 1	c	2op	6
@@ -189,7 +189,7 @@ Vindemiatrix	s	5f	0
 Virgo Cluster Pinwheel	g	1r	0
 Virgo Galaxy	g	1a	0
 VRO 42.05.01	n	q	3
-VV 747	g	v3	4
+VV 747	g	v4	4
 VVV-GC05	c	2r	2
 Vy 2-1	n	187	6
 Vy 2-3	n	17v	6
@@ -2361,13 +2361,13 @@ WeSb 3	n	15p	6
 Westerlund 2	c	554	6
 Wezen	s	fr	0
 Whale Galaxy	g	n	0
-WHI B0619-07	g	uc	4
+WHI B0619-07	g	ud	4
 WHI B0717-07	n	14f	6
 Whirlpool Galaxy	g	p	0
 WHTZ 1	n	yj	6
 WHTZ 3	n	14q	6
 Wild Duck Cluster	c	8	0
-Willman 1	g	oq	4
+Willman 1	g	or	4
 WISEA J030237.53-581740.3	d	4m	5
 WISEA J030919.70-501614.2	d	45	5
 WISEA J030919.70-501614.2	d	46	5
@@ -4005,7 +4005,7 @@ XDOCC 9	c	17n	6
 Xihe	s	dd	0
 ξ Her	s	mo	1
 ξ Hya	s	m7	1
-XIII	g	pk	4
+XIII	g	pl	4
 ξ Leo	s	tg	1
 ξ Men	s	yt	1
 ξ Oct	s	159	1
@@ -4084,8 +4084,8 @@ XTE J1946+274	x	b4	5
 XTE J2012+381	x	w	2
 XTE J2123-058	x	a4	5
 Xuange	s	52	0
-XXVII	g	pi	4
-XXVIII	g	pb	4
+XXVII	g	pj	4
+XXVIII	g	pc	4
 Yed Posterior	s	5e	0
 Yed Prior	s	7q	0
 Yildun	s	8v	0
