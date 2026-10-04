@@ -259,10 +259,17 @@ export class Catalog {
       }
       case 'q': {
         const mass = 10 ** (num(r.logMassSun) ?? 8);
-        return this.host.addBlackHole({
+        const bh = this.host.addBlackHole({
           name: r.name, aliases: [`quasar, z = ${r.z}`], kind: 'supermassive', raDeg: ra, decDeg: dec, distPc: dist, massSun: mass,
           ref: `${cat.credit}: virial mass ±0.4 dex; comoving distance from z = ${r.z} (Planck 2018)`,
         });
+        // a quasar's disk is the opposite of the faint flows of Sgr A* and M87*: say so on the card
+        const lbol = num(r.logLbol);
+        const base = bh.info.bind(bh);
+        bh.info = () => base().map(([k, v]) => (k === 'Accretion disk'
+          ? [k, `a quasar: a hot (~100,000 K), extremely bright disk${lbol !== null ? `, ${fmt(10 ** lbol / 3.828e33, 2)} Suns of light` : ''}; drawn here as an illustrative, dimmer disk`]
+          : [k, v]) as [string, string]);
+        return bh;
       }
       case 'g': {
         const maj = num(r.majArcmin) ?? (Math.atan(15000 / dist) * 180 * 60) / Math.PI;
