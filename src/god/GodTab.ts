@@ -2,12 +2,15 @@ import type { App } from '../app/App';
 import { COLORS, type Panel } from '../vr/Panel';
 import { bodyView, type BodyView } from './BodyView';
 import { SPAWN_TYPES } from './God';
+import { PRESETS } from './script/ConsoleUI';
 import {
   AU, type Derived, density, equilibriumTemp, escapeVelocity, M_EARTH, M_SUN, num, orbitalPeriod, schwarzschildRadius, surfaceGravity, surfaceTemp,
 } from './physics';
 
 /** derived value whose working is shown at the bottom of the tab */
 let shownMath: string | null = null;
+/** what the last preset script said */
+let scriptSaid: string | null = null;
 
 /**
  * The headset menu's God tab: the same editor as the desktop panel, with nudge buttons instead
@@ -91,6 +94,16 @@ export function paintGodTab(p: Panel, a: { x: number; y: number; w: number; h: n
       p.button('god:del', a.x + 10 + 765, y0 + 48, 236, 48, '✕ Delete', act(() => g.remove(v.id)), { size: 21, color: COLORS.warn });
     }
     if (mathLine) p.text(mathLine, a.x + 10, a.y + a.h - 172, 19, '#cfe3ff', 400, 'left', a.w - 20);
+    else if (scriptSaid) p.text(scriptSaid, a.x + 10, a.y + a.h - 172, 19, '#ffd27a', 400, 'left', a.w - 20);
+  }
+  // ready-made scripts (the console's examples), right column
+  {
+    const y = a.y + 76 + 48 + 7 * 56, x0 = a.x + 10 + 765, bw = (735 - 5 * 6) / 6;
+    PRESETS.forEach((pr, i) => p.button(`god:preset:${i}`, x0 + i * (bw + 6), y, bw, 48, pr.label, act(() => {
+      const r = g.console.run(pr.script);
+      scriptSaid = r.lines.filter((l) => !l.startsWith('  ')).slice(-2).join('  ·  ') || pr.label;
+      shownMath = null;
+    }), { size: 15 }));
   }
   // creation
   const cy = a.y + a.h - 150;

@@ -209,6 +209,36 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
       spawned: a.system.bodies.filter((b) => b.meta.spawned).length, holes: a.blackHoles.filter((h) => h.key.startsWith('god:')).length };
   });
   check('Reset restores the real universe', !st.active && /Real/.test(st.badge) && st.earth && st.moon && Math.abs(st.marsGm - 4.2828e13) < 1e10 && st.spawned === 0 && st.holes === 0, JSON.stringify(st));
+  // 11. the universe console: a loop, a print with its formula, a creation, an error, undo
+  await page.keyboard.press('Backquote');
+  await frames(2);
+  const type = async (line) => { await page.fill('.god-console input', line); await page.press('.god-console input', 'Enter'); await frames(3); };
+  await type('for p in planets: p.e = 0');
+  st = await page.evaluate(() => {
+    const g = window.app.god, sb = g.sandbox;
+    const es = [199, 299, 399, 499, 599, 699, 799, 899].map((id) => sb.orbitOf(sb.entityOf(id)).el.e);
+    return { maxE: Math.max(...es), open: !document.querySelector('.god-console').classList.contains('hidden'), undo: sb.undoStack?.length };
+  });
+  check('console: for p in planets: p.e = 0 circularizes every planet', st.open && st.maxE < 1e-6, JSON.stringify(st));
+  await type('undo');
+  st = await page.evaluate(() => { const sb = window.app.god.sandbox; return sb.orbitOf(sb.entityOf(499)).el.e; });
+  check('console: one undo restores the whole loop', st > 0.09, `${st}`);
+  await type('print Earth.T_s');
+  await type('create planet "Nova" mass=3 Mearth density=4.5 g/cm3 a=1.6 AU around Sun');
+  await type('Earth.mass = 2');
+  st = await page.evaluate(() => {
+    const g = window.app.god, out = [...document.querySelectorAll('.god-console .out div')].map((d) => d.textContent);
+    const id = g.console.runner.world.find('Nova'), v = id !== null ? g.sandbox.entityOf(id) : null;
+    const o = v ? g.sandbox.orbitOf(v) : null;
+    return { ts: out.find((l) => l.startsWith('Earth.T_s = ')), math: out.find((l) => l.includes('T_s = T_eq + ΔT_greenhouse')), nova: !!v,
+      rho: v ? v.gm / 6.6743e-11 / (4 / 3 * Math.PI * v.radius ** 3) / 1000 : 0, a: o ? o.el.q / (1 - o.el.e) / 1.495978707e11 : 0, err: out[out.length - 1] };
+  });
+  check('console: print shows the formula; create makes Nova (4.5 g/cm³ at 1.6 AU)', /K/.test(st.ts ?? '') && !!st.math && st.nova && Math.abs(st.rho - 4.5) < 0.01 && Math.abs(st.a - 1.6) < 0.01, JSON.stringify(st));
+  check('console: a missing unit is explained', /mass needs a unit/.test(st.err ?? ''), st.err);
+  await shot(page, 'god7-console.png');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => window.app.god.reset());
+  await frames(2);
   check('no errors on the desktop', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.close();
 }
@@ -265,6 +295,9 @@ if (!skipVr) {
     // grab with the grip and throw: the selected body leaves at the hand's speed (scaled)
     const s3 = await page.evaluate(() => window.app.vr.debugThrow?.() ?? null);
     check('VR: grip grabs the selection and throws it', !!s3 && s3.thrown && s3.speedChange > 0, JSON.stringify(s3));
+    const pre = await press('preset:0');
+    const s5 = await page.evaluate(() => { const sb = window.app.god.sandbox; return Math.max(...[399, 499, 599].map((id) => sb.orbitOf(sb.entityOf(id)).el.e)); });
+    check('VR: a preset script (circular orbits) runs from the God tab', pre && s5 < 1e-6, `${s5}`);
     await press('reset');
     const s4 = await page.evaluate(() => window.app.god.active);
     check('VR: reset to the real universe', s4 === false, `${s4}`);
