@@ -1,4 +1,4 @@
-import { DataTexture, RGBAFormat, Texture, UnsignedByteType, Vector2, type WebGLRenderer } from 'three';
+import { DataTexture, LinearFilter, NearestFilter, RGBAFormat, Texture, UnsignedByteType, Vector2, type WebGLRenderer } from 'three';
 
 /**
  * Texture streaming without main-thread stalls (the Quest's CPU makes a 4096×2048 map a 50+ ms
@@ -135,7 +135,8 @@ export async function uploadBitmap(bmp: ImageBitmap, setup?: (tex: Texture) => v
   tex.flipY = false;
   tex.premultiplyAlpha = false;
   setup?.(tex);
-  const wantMips = tex.generateMipmaps;
+  // (DataTexture defaults to no mipmaps: follow the filter instead)
+  const wantMips = tex.minFilter !== LinearFilter && tex.minFilter !== NearestFilter;
   const r = renderer;
   const src = new Texture();
   src.flipY = false;
