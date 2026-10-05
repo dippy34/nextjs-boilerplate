@@ -27,6 +27,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 
 const report = { base, started: new Date().toISOString(), scenes: [], anomalies: [], metrics: {} };
 let current = { name: '', errors: [] };
+const scenePages = new Set();
+let onSceneFail = () => {};
 const flag = (kind, detail, shot = null, severity = 2) => {
   const a = { scene: current.name, kind, detail: String(detail).slice(0, 400), shot, severity };
   report.anomalies.push(a);
@@ -37,6 +39,7 @@ const metric = (k, v) => { report.metrics[`${current.name}.${k}`] = v; console.l
 // ------------------------------------------------------------------ page helpers
 async function openPage(query, { vr = false, w = 1280, h = 720 } = {}) {
   const page = await browser.newPage({ viewport: { width: w, height: h } });
+  scenePages.add(page);
   page.__errors = [];
   page.on('console', (m) => { if (m.type() === 'error') page.__errors.push(m.text()); });
   page.on('pageerror', (e) => page.__errors.push(String(e)));
@@ -64,10 +67,10 @@ const frameMs = async (page, n = 6) => {
 
 // Image statistics of a PNG, decoded in the page: mean/std luminance, lit/white fractions, and a
 // 32x18 grid of block means (for frame-to-frame popping).
-const imgStats = (page, png) => page.evaluate(async (b64) => {
+const imgStats = (page, png, fromPng = false) => page.evaluate(async ([b64, fromPng]) => {
   // the 3D view alone (the canvas keeps its drawing buffer), so HUD text can't hide a black frame
   const cv = document.querySelector('canvas');
-  const bmp = cv && cv.width > 0 ? cv : await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+  const bmp = !fromPng && cv && cv.width > 0 ? cv : await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
   const W = 160, H = 90; const c = new OffscreenCanvas(W, H); const ctx = c.getContext('2d');
   ctx.drawImage(bmp, 0, 0, W, H);
   const d = ctx.getImageData(0, 0, W, H).data; let s = 0, s2 = 0, lit = 0, white = 0, magenta = 0;
@@ -80,7 +83,7 @@ const imgStats = (page, png) => page.evaluate(async (b64) => {
   }
   const n = W * H; const mean = s / n;
   return { mean: +mean.toFixed(1), std: +Math.sqrt(Math.max(0, s2 / n - mean * mean)).toFixed(1), lit: +(lit / n).toFixed(3), white: +(white / n).toFixed(3), magenta: +(magenta / n).toFixed(4), grid };
-}, png.toString('base64'));
+}, [png.toString('base64'), fromPng]);
 
 // DOM checks: NaN/undefined in visible text, overflowing text, overlapping panels, off-screen UI.
 const domCheck = (page) => page.evaluate(() => {
@@ -139,7 +142,7 @@ const stateNaN = (page) => page.evaluate(() => {
 async function look(page, name, { pop = true, label = true, vr = false } = {}) {
   const file = path.join(outDir, `${name}.png`);
   const png = await page.screenshot({ path: file, timeout: 180000 });
-  const st = await imgStats(page, png);
+  const st = await imgStats(page, png, vr);
   const rel = path.relative('.', file);
   if (st.mean < 4 && st.std < 3) flag('black frame', `mean ${st.mean}, std ${st.std}`, rel, 1);
   else if (st.white > 0.6) flag('white frame', `${Math.round(st.white * 100)}% white`, rel, 1);
@@ -164,7 +167,7 @@ async function look(page, name, { pop = true, label = true, vr = false } = {}) {
     await frames(page, 2);
     const png2 = await page.screenshot({ timeout: 180000 });
     await page.evaluate((p) => { window.app.clock.paused = p; }, paused);
-    const st2 = await imgStats(page, png2);
+    const st2 = await imgStats(page, png2, vr);
     let worst = 0, n = 0;
     for (let i = 0; i < st.grid.length; i++) { const d = Math.abs(st.grid[i] - st2.grid[i]); worst = Math.max(worst, d); if (d > 25) n++; }
     if (n > 3 || worst > 60) {
@@ -176,14 +179,20 @@ async function look(page, name, { pop = true, label = true, vr = false } = {}) {
   return st;
 }
 
-async function scene(name, fn) {
+async function scene(name, fn, ms = SCENE_MS) {
   if (only && !only.has(name)) return;
   current = { name, errors: [] };
   const t0 = Date.now(); console.log(`== ${name}`);
   let ok = true, err = null;
   try {
-    await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error(`scene timed out after ${SCENE_MS / 1000} s`)), SCENE_MS))]);
-  } catch (e) { ok = false; err = String(e?.message ?? e).split('\n')[0]; flag('scene failed', err, null, 1); }
+    await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error(`scene timed out after ${ms / 1000} s`)), ms))]);
+  } catch (e) {
+    ok = false; err = String(e?.message ?? e).split('\n')[0]; flag('scene failed', err, null, 1);
+    for (const pg of scenePages) await pg.close().catch(() => undefined);
+    onSceneFail();
+  }
+  scenePages.clear();
+  current = { name: `${name} (after end)`, errors: [] };
   report.scenes.push({ name, ok, err, s: Math.round((Date.now() - t0) / 1000) });
 }
 const drainErrors = (page) => {
@@ -216,7 +225,7 @@ if (which !== 'vr') {
 
   // one page for the solar-system places: deep links skip the title
   let page = null;
-  const solar = async () => { if (!page) { page = await openPage(`?time=${T}&paused=1&target=Earth&dist=3&menu=0`); await ready(page); } return page; };
+  const solar = async () => { if (page) await page.close().catch(() => undefined); page = await openPage(`?time=${T}&paused=1&target=Earth&dist=3&menu=0`); await ready(page); return page; };
 
   await scene('earth', async () => {
     const p = await solar();
@@ -404,7 +413,7 @@ if (which !== 'vr') {
     if (!(alt1 > alt0 + 5)) flag('cannot launch from the Moon (W/Shift held 20 frames)', `alt ${alt0.toFixed(1)} -> ${alt1.toFixed(1)} m`, null, 1);
     await look(p, 'd24-ship-launch', { pop: false });
     drainErrors(p); await p.close();
-  });
+  }, 20 * 60e3);
 
   await scene('god', async () => {
     const p = await openPage(`?time=${T}&target=Earth&dist=60&az=60&el=25&menu=0`);
@@ -447,8 +456,9 @@ if (which !== 'vr') {
 // ================================================================== Quest 3 (IWER)
 if (which !== 'desktop') {
   let page = null;
+  onSceneFail = () => { page = null; };
   const vrPage = async () => {
-    if (page) return page;
+    if (page && !page.isClosed()) { scenePages.add(page); return page; }
     page = await openPage(`?time=${T}&paused=1&target=Earth&dist=4&az=40&el=10&menu=0`, { vr: true, w: 960, h: 540 });
     await ready(page);
     await page.evaluate(() => window.app.vr.enter());
