@@ -293,7 +293,8 @@ export class Bench {
   /** the headset session's frame rate, else estimated from the run's fastest frames */
   private refreshHz(): number {
     const fr = this.xrSession()?.frameRate;
-    return fr && fr > 0 ? Math.round(fr) : estimateHz(this.sceneDts.flat());
+    // (at least 60: a desktop that never reaches its refresh rate must not lower the bar it is measured against)
+    return fr && fr > 0 ? Math.round(fr) : Math.max(60, estimateHz(this.sceneDts.flat()));
   }
 
   private finish(done: boolean): void {
