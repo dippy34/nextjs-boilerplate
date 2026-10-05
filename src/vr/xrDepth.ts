@@ -34,10 +34,12 @@ export function keepDepthFromCompositor(): boolean {
   if (!B || typeof B.prototype.createProjectionLayer !== 'function') return false;
   const create = B.prototype.createProjectionLayer;
   B.prototype.createProjectionLayer = function (this: Binding, init?: Record<string, unknown>) {
-    const layer = create.call(this, depthlessInit(init));
+    const made = depthlessInit(init);
+    const layer = create.call(this, made);
     // the runtime has no depth to read; three must then allocate (and resolve into) its own buffer.
     // (a layer without depth reports this anyway; an emulator may not, so say it on the object)
     try {
+      Object.defineProperty(layer, 'madeWith', { value: made }); // for the headset tests (scripts/vr.mjs)
       Object.defineProperty(layer, 'ignoreDepthValues', { configurable: true, get: () => true, set: () => { /* the runtime's own initialisation: there is still no depth */ } });
     } catch { /* a native layer that cannot be told: it reports true itself without a depth texture */ }
     return layer;

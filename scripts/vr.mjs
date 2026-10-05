@@ -36,13 +36,6 @@ await page.addInitScript(() => {
 });
 // the real Quest 3's eye frusta are asymmetric (IWER's are not): stereo checks must hold with them
 await page.addInitScript(asymmetricFrusta);
-// record how the headset layer is made (its depth must not reach the compositor: src/vr/xrDepth.ts)
-await page.addInitScript(() => {
-  const B = window.XRWebGLBinding;
-  if (!B) return;
-  const create = B.prototype.createProjectionLayer;
-  B.prototype.createProjectionLayer = function (init) { window.__layerInit = { ...init }; return create.call(this, init); };
-});
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${detail}`); };
 const frames = (n) => page.evaluate((k) => new Promise((res) => {
@@ -140,7 +133,7 @@ await page.screenshot({ path: path.join(outDir, 'vr1-menu.png'), timeout: 180000
 
 // 1b. Scale: the layer's depth stays away from the compositor (log depth would read as centimetres
 //     there), Earth at 2 radii has no parallax, a rock 5 m away has true 6.3 cm stereo
-st = await page.evaluate(() => ({ init: window.__layerInit ?? null, ignore: window.app.renderer.gl.xr.getBaseLayer()?.ignoreDepthValues }));
+st = await page.evaluate(() => { const L = window.app.renderer.gl.xr.getBaseLayer(); return { init: L?.madeWith ?? null, ignore: L?.ignoreDepthValues }; });
 check('headset layer is made without depth for the compositor', !!st.init && st.init.depthFormat === 0 && st.ignore === true, JSON.stringify(st));
 await page.evaluate(() => { const a = window.app; const e = a.system.bodies.find((b) => b.name === 'Earth'); a.placeNear(e, 2 * e.radius, 40, 10); a.rig.lookAt(e.upos.sub(a.rig.upos).normalize()); });
 await quietHead();
