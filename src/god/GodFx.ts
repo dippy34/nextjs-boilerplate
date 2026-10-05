@@ -37,7 +37,6 @@ uniform float uPixAng;  // radians per pixel
 uniform float uFade;    // 0..1 overall
 varying vec2 vUv;
 varying vec4 vCol;
-const float PI = 3.14159265;
 vec3 rotAxis(vec3 v, vec3 k, float a) { float c = cos(a), s = sin(a); return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c); }
 void main() {
   vUv = position.xy;
