@@ -200,8 +200,10 @@ const SHOTS = {
       w.fwd.copy(eh).multiplyScalar(Math.cos(yawDeg * Math.PI / 180)).addScaledVector(side, Math.sin(yawDeg * Math.PI / 180)).normalize();
       w.pitch = pitchRad;
     };
-    await page.evaluate(setPose, [Number(process.env.YAW || 25), Number(process.env.PITCH || 0.32)]);
-    for (let k = 0; k < 96; k++) await frame(page, null); // settle: terrain, rocks, exposure
+    await page.evaluate(setPose, [Number(process.env.YAW || 8), Number(process.env.PITCH || 0.46)]);
+    await page.waitForTimeout(6000);
+    clockMs = await page.evaluate(() => performance.now()); // continue from the real clock: a jump confuses terrain streaming
+    for (let k = 0; k < 48; k++) await frame(page, null); // settle: terrain, rocks, exposure
     const n = Math.round(5 * FPS);
     const dir = path.join(outDir, 'b'); fs.mkdirSync(dir, { recursive: true });
     const JUMP = Number(process.env.JUMP || 48);
@@ -213,7 +215,7 @@ const SHOTS = {
       await frame(page, ([i]) => {
         const w = window.app.walk;
         // the view lifts a little toward Earth over the clip
-        w.pitch = 0.30 + 0.12 * Math.sin((i / 119) * Math.PI);
+        w.pitch = 0.46 + 0.10 * Math.sin((i / 119) * Math.PI);
       }, [i]);
       if (i % STRIDE === 0) { await raf(page); await grab(cdp, path.join(dir, `f${String(i).padStart(4, '0')}.jpg`)); }
       if (i % 24 === 0) console.log('b', i, JSON.stringify(await page.evaluate(() => { const d = window.app.walk.debug(); return { g: d.onGround, apex: +d.apex?.toFixed?.(2), spd: +d.speed.toFixed(2) }; })));
