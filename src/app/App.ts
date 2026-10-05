@@ -34,6 +34,7 @@ import { Galaxy, loadGalaxies } from '../universe/Galaxies';
 import { loadSpacecraft, Spacecraft } from '../universe/Spacecraft';
 import { Hud } from '../ui/Hud';
 import { BlackHole, loadBlackHoles } from '../universe/BlackHoles';
+import { Awe } from './Awe';
 import { Body, type SpaceObject } from '../universe/Body';
 import { GALAXY, glowColumn } from '../universe/Galaxy';
 import { MilkyWay } from '../universe/MilkyWay';
@@ -102,6 +103,8 @@ export class App {
   blackHoles: BlackHole[] = [];
   holes!: BlackHoleLayer;
   jets!: JetsLayer;
+  /** scale cues: dust parallax, Earth for scale, the rumble of giants (src/app/Awe.ts) */
+  awe!: Awe;
   /** the Milky Way's unresolved light (from the galaxy model) */
   galaxy!: GalaxyGlow;
   /** procedural stars filling the galaxy beyond the catalogues */
@@ -252,6 +255,7 @@ export class App {
     app.game = new Game(app);
     app.game.flight.setAtmospheres(atmoData);
     app.walk = new Walk(app); // walking hook
+    app.awe = new Awe(app);
     app.god = new God(app);
     renderer.scene.add(app.god.layer.group);
     bodies.uploader = (t) => renderer.gl.initTexture(t);
@@ -396,6 +400,7 @@ export class App {
         case 'KeyJ': this.game.warp(); break;
         case 'KeyN': this.game.audio.setEnabled(!this.game.audio.enabled); this.hud.toast(`Sound ${this.game.audio.enabled ? 'on' : 'off'}`); break;
         case 'KeyK': this.showMissions(); break;
+        case 'Comma': this.hud.toast(this.awe.toggleEarth()); break;
         case 'KeyY': if (this.game.flight.on) this.game.flight.cycleSas(e.shiftKey); break;
         case 'KeyI': if (this.game.flight.on) this.game.flight.toggleBoost(); break;
         default:
@@ -565,7 +570,7 @@ export class App {
     const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
     const air = this.atmospheres.warmupObjects()[0];
     if (air) terrain.push(this.terrain.warmupHaze(air.material as ShaderMaterial));
-    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh, ...this.cometTails.warmupObjects(), ...this.jets.warmupObjects()];
+    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh, ...this.cometTails.warmupObjects(), ...this.jets.warmupObjects(), ...this.awe.cues.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     // (into the HDR target the scene is drawn to: programs differ per output target)
@@ -1715,6 +1720,7 @@ export class App {
     // 2. camera: co-move with the reference body, then apply controls
     this.rig.followAnchor();
     this.chooseAnchor();
+    this.awe?.beginFrame();
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
     if (this.nearTimer-- <= 0) {
       this.updateNearStars();
@@ -1847,7 +1853,9 @@ export class App {
     PERF.lap('game');
     this.god.update(dt);
     HITCH.lap('god');
-    PERF.lap('god');
+    this.awe?.update(dt);
+    HITCH.lap('awe');
+    PERF.lap('god'); // god mode + awe cues
 
     // 4. draw
     if (this.warmupPending) {
@@ -1890,6 +1898,7 @@ export class App {
     if (this.selection) {
       const d = this.selection.upos.sub(this.rig.upos, new Vector3()).length();
       const rows = this.selection.info();
+      rows.push(...this.awe.rows(this.selection, d));
       if (this.selection instanceof CatalogStar && !this.isCompanion(this.selection)) {
         const sys = this.systems.of(this.selection);
         if (sys) rows.push(['Planets', sys.real ? `${sys.planets.length} confirmed (NASA Exoplanet Archive)` : `${sys.planets.length} generated (not observed)`]);
