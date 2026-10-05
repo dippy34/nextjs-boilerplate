@@ -90,7 +90,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
     const before = a.god.layer.fx.countOf(1);
     const id = a.god.spawnOnOrbit('moon', 0.02, j.radius * 1.4, 599, 'Doomed moon');
     a.placeNear(a.system.byId.get(599), j.radius * 5, 60, 35);
-    a.select(a.system.byId.get(599));
+    a.select(null); // (the info panel would cover Jupiter)
     a.clock.rate = 60; a.clock.paused = false;
     return { id, before };
   });

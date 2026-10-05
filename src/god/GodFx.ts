@@ -214,6 +214,9 @@ function randDir(out: Float32Array | number[], o = 0): void {
   out[o] = s * Math.cos(phi); out[o + 1] = s * Math.sin(phi); out[o + 2] = u;
 }
 
+/** Roughly normal, mean 0, deviation 1. */
+function gauss(): number { return (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.732; }
+
 /** A frame (e1, e2) perpendicular to n. */
 export function basis(n: Vector3): [Vector3, Vector3] {
   const e1 = Math.abs(n.x) < 0.9 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0);
@@ -362,8 +365,9 @@ export class GodFx {
     const [e1, e2] = basis(n);
     this.add({
       mode: FxMode.Ring, count: 1600, at: around.pos, follow: around, R: r, life, jd, n, e1, e2, persistent: life === Infinity,
-      p: [7, omega, theta0, 0.0035], color, hot: [1, 0.6, 0.3],
-      fill: (_i, a) => { a[0] = Math.random() * 2 - 1; a[1] = 0.72 + 0.56 * Math.random(); a[2] = Math.random() * 2 - 1; a[3] = Math.random(); },
+      p: [7, omega, theta0, 0.005], color, hot: [1, 0.6, 0.3],
+      // soft (near-Gaussian) spreads: a clump with no corners
+      fill: (_i, a) => { a[0] = Math.max(-1, Math.min(1, gauss() * 0.45)); a[1] = 1 + Math.max(-0.3, Math.min(0.3, gauss() * 0.11)); a[2] = gauss() * 0.5; a[3] = Math.random(); },
     });
   }
 
