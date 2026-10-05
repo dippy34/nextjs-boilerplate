@@ -38,7 +38,7 @@ export class PerfHud {
     if (vr) {
       if (!this.vrPanel) {
         const p = this.vrPanel = new Panel(680, 600, 0.3, (pp) => this.draw(pp.ctx, pp.width, pp.height));
-        p.mesh.position.set(-0.17, -0.13, -0.55);
+        p.mesh.position.set(-0.24, -0.16, -0.55);
         p.mesh.renderOrder = 1001;
         this.app.renderer.camera.add(p.mesh);
       }

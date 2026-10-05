@@ -133,7 +133,7 @@ class BenchUi {
   private vrShow(t: { title: string; lines: string[]; code?: string }): void {
     this.vrText = t;
     if (!this.vrPanel) {
-      const p = this.vrPanel = new Panel(1300, 820, 1.25, (pp) => this.paintVr(pp));
+      const p = this.vrPanel = new Panel(1300, 820, 1.5, (pp) => this.paintVr(pp));
       this.app.renderer.rig.add(p.mesh);
       this.app.vr.extraPanels.push(p);
       // in front of the head, a little low, facing it
@@ -142,8 +142,8 @@ class BenchUi {
       const fwd = new Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
       fwd.y = 0;
       if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
-      const pos = head.clone().addScaledVector(fwd.normalize(), 1.6);
-      pos.y -= 0.2;
+      const pos = head.clone().addScaledVector(fwd.normalize(), 1.15);
+      pos.y -= 0.12;
       p.mesh.position.copy(pos);
       p.mesh.quaternion.setFromRotationMatrix(new Matrix4().lookAt(head, pos, new Vector3(0, 1, 0)));
     }
