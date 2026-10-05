@@ -13,7 +13,7 @@ import { POOL_VERT, type PoolHandle, StarPool } from './StarPool';
 const ABS_MIN = -12;
 const ABS_STEP = 0.125;
 /** generated cells kept in memory */
-const MAX_CELLS = 2500;
+const MAX_CELLS = 4000;
 /** stars resident on the GPU (one draw call): a headset's budget, and a desktop's */
 export const STAR_BUDGET = { vr: 150_000, desktop: 450_000 };
 
@@ -230,7 +230,7 @@ export class ProceduralStarLayer {
     // with room to spare, let it back out towards the limiting magnitude
     const fill = this.pool.used / this.pool.capacity;
     if (starved > 0 || fill > 0.92 || want.length > MAX_CELLS * 0.8) this.mGen = Math.max(mTop - 6, this.mGen - 0.05);
-    else if (fill < 0.75 && this.pending < 8) this.mGen = Math.min(mTop, this.mGen + 0.02);
+    else if (fill < 0.75 && this.pending < 8 && want.length < MAX_CELLS * 0.7) this.mGen = Math.min(mTop, this.mGen + 0.02);
     // the share of the galaxy's light carried by the stars drawn, by distance from the eye: bands
     // drawn out to their reach, counted as far as their cells are ready
     if (inside) {
