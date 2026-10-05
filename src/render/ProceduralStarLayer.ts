@@ -74,6 +74,8 @@ export class ProceduralStarLayer {
    * point budget is short (faint bands then thin out first, their light left to the volume).
    */
   mGen = 10;
+  /** how far (mag) the point budget holds the generation magnitude above the limiting magnitude */
+  private cut = 0;
   private frame = 0;
   private stars = new Map<string, ProceduralStar>();
   pending = 0;
@@ -160,8 +162,7 @@ export class ProceduralStarLayer {
     if (!this.enabled) { INTERIOR.active = null; return; }
     // the point budget: generate to a brighter magnitude while the pool is (nearly) full
     const mTop = mLim + 0.3;
-    this.mGen = Math.min(this.mGen, mTop);
-    const mGen = this.mGen;
+    const mGen = (this.mGen = mTop - this.cut);
     const camGal = GALAXY.toGal(camPc);
     const want: { k: number; ix: number; iy: number; iz: number; d: number; gi: number }[] = [];
     // (far outside the Milky Way its model holds no stars)
@@ -229,8 +230,8 @@ export class ProceduralStarLayer {
     // over budget (cells waiting for room, or the pool nearly full): bring the faint end in;
     // with room to spare, let it back out towards the limiting magnitude
     const fill = this.pool.used / this.pool.capacity;
-    if (starved > 0 || fill > 0.92 || want.length > MAX_CELLS * 0.8) this.mGen = Math.max(mTop - 6, this.mGen - 0.05);
-    else if (fill < 0.75 && this.pending < 8 && want.length < MAX_CELLS * 0.7) this.mGen = Math.min(mTop, this.mGen + 0.02);
+    if (starved > 0 || fill > 0.92 || want.length > MAX_CELLS * 0.8) this.cut = Math.min(6, this.cut + 0.05);
+    else if (fill < 0.75 && this.pending < 8 && want.length < MAX_CELLS * 0.7) this.cut = Math.max(0, this.cut - 0.02);
     // the share of the galaxy's light carried by the stars drawn, by distance from the eye: bands
     // drawn out to their reach, counted as far as their cells are ready
     if (inside) {
