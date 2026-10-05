@@ -4,7 +4,7 @@ import { UPos } from '../core/upos';
 import { DUST_NORM, GALAXY, LUM } from '../universe/Galaxy';
 import { GALAXY_GLSL } from './shaders/galaxy';
 import { VOLUMES } from './Renderer';
-import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS, QUALITY_LEVEL } from './shaders/xr';
 
 const f = (x: number) => (Number.isInteger(x) ? `${x}.0` : `${x}`);
 
@@ -43,6 +43,7 @@ uniform float uModelK;
 uniform float uModelRef;
 uniform float uModelExp;
 uniform float uLite;
+uniform float uQuality;
 varying vec3 vBox;
 void main() {
   vec3 pf = vBox * uExt;
@@ -57,8 +58,9 @@ void main() {
   float disc = B * B - 4.0 * A * C;
   if (A > 1e-12 && disc > 0.0) { float q = sqrt(disc); t0 = max(t0, (-B - q) / (2.0 * A)); t1 = min(t1, (-B + q) / (2.0 * A)); }
   if (t1 <= t0) discard;
-  int N = uLite > 0.5 ? 60 : 160;
-  float dsMax = uLite > 0.5 ? 900.0 : 400.0;
+  // (headset: fewer, longer steps, and fewer still at the governor's lower levels)
+  int N = uLite > 0.5 ? 60 - 10 * int(uQuality) : 160;
+  float dsMax = uLite > 0.5 ? 900.0 * (1.0 + 0.3 * uQuality) : 400.0;
   float adz = max(abs(d.z), 0.02);
   float jit = gHash(vec3(gl_FragCoord.xy, 3.7));
   vec3 L = vec3(0.0);
@@ -123,7 +125,7 @@ export class MilkyWayVolume {
       name: 'milky-way-volume', vertexShader: VERT, fragmentShader: FRAG, side: BackSide,
       uniforms: {
         uCam: { value: new Vector3() }, uExt: { value: EXT.clone() }, uWeight: { value: 0 },
-        uModelK: { value: 0 }, uModelRef: { value: 81.3 }, uModelExp: { value: 0.6 }, uLite: LITE.uLite,
+        uModelK: { value: 0 }, uModelRef: { value: 81.3 }, uModelExp: { value: 0.6 }, uLite: LITE.uLite, uQuality: QUALITY_LEVEL.uQuality,
         uClipScale: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       transparent: true, depthWrite: false, blending: AdditiveBlending,

@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { PERF_TOOLS } from '../perf/tools';
 import { Landmark } from '../universe/Landmarks';
 import { RingSpot } from '../universe/RingSpot';
 import type { App } from '../app/App';
@@ -410,7 +411,9 @@ export class VRMenu {
     tb('t:fast', 1, 'Faster ▶▶', () => app.timeFaster());
     tb('t:rev', 2, '⇄ Reverse', () => app.timeReverse());
     tb('t:now', 3, 'Now', () => app.realTime());
-    p.button('exit', tx, a.y + 400, 505, 90, 'Exit VR', () => this.host.exitVR(), { size: 32, color: COLORS.warn });
+    p.button('exit', tx, a.y + 400, 160, 90, 'Exit VR', () => this.host.exitVR(), { size: 26, color: COLORS.warn });
+    p.button('perf:hud', tx + 172, a.y + 400, 160, 90, PERF_TOOLS.hud?.on ? 'Perf HUD ✓' : 'Perf HUD', () => { PERF_TOOLS.toggleHud(); p.dirty = true; }, { size: 24, active: !!PERF_TOOLS.hud?.on });
+    p.button('perf:bench', tx + 344, a.y + 400, 161, 90, 'Benchmark', () => { this.host.closeMenu(); PERF_TOOLS.runBench(); }, { size: 24 });
     // walking options (src/app/Walk.ts)
     const ws = app.walk.settings;
     p.text('Walking', tx, a.y + 530, 30, COLORS.text, 600);

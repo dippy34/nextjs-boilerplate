@@ -1,4 +1,5 @@
 import { Quaternion, type ShaderMaterial, Vector3 } from 'three';
+import { HITCH } from '../core/hitch';
 import { blackbodyRGB, irradianceToMag, luminance, magToIrradiance, sunIrradianceAt } from '../astro/photometry';
 import { formatUtc, SimClock, utcToTdb, dateToJdUtc } from '../core/time';
 import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/units';
@@ -33,6 +34,7 @@ import { Galaxy, loadGalaxies } from '../universe/Galaxies';
 import { loadSpacecraft, Spacecraft } from '../universe/Spacecraft';
 import { Hud } from '../ui/Hud';
 import { BlackHole, loadBlackHoles } from '../universe/BlackHoles';
+import { Awe } from './Awe';
 import { Body, type SpaceObject } from '../universe/Body';
 import { GALAXY, glowColumn } from '../universe/Galaxy';
 import { MilkyWay } from '../universe/MilkyWay';
@@ -51,6 +53,7 @@ import { Systems } from './Systems';
 import { VRSupport } from './VR';
 import { Walk } from './Walk';
 import { God } from '../god/God';
+import { PERF } from '../perf/Perf';
 
 /** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
 const STAR_KEY = 0.9;
@@ -79,6 +82,8 @@ export class App {
   private logExposure = 0;
   private logStarCap = 0;
   private lastTime = performance.now();
+  /** the hitch detector over this loop (src/core/hitch.ts) */
+  readonly hitch = HITCH;
   private fps = 60;
   private hudTimer = 0;
   private nearTimer = 0;
@@ -98,6 +103,8 @@ export class App {
   blackHoles: BlackHole[] = [];
   holes!: BlackHoleLayer;
   jets!: JetsLayer;
+  /** scale cues: dust parallax, Earth for scale, the rumble of giants (src/app/Awe.ts) */
+  awe!: Awe;
   /** the Milky Way's unresolved light (from the galaxy model) */
   galaxy!: GalaxyGlow;
   /** procedural stars filling the galaxy beyond the catalogues */
@@ -211,7 +218,7 @@ export class App {
     app.holes = new BlackHoleLayer(blackHoles, bodies.surfaceExposure, renderer.depthMode === 'reversed-z');
     app.jets = new JetsLayer(blackHoles);
     app.galaxy = new GalaxyGlow();
-    app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
+    app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut, xrCapable);
     app.exo = new ExoPlanetLayer(starField.psf, bodies.surfaceExposure);
     app.exo.gl = renderer.gl;
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
@@ -248,6 +255,7 @@ export class App {
     app.game = new Game(app);
     app.game.flight.setAtmospheres(atmoData);
     app.walk = new Walk(app); // walking hook
+    app.awe = new Awe(app);
     app.god = new God(app);
     renderer.scene.add(app.god.layer.group);
     bodies.uploader = (t) => renderer.gl.initTexture(t);
@@ -392,6 +400,7 @@ export class App {
         case 'KeyJ': this.game.warp(); break;
         case 'KeyN': this.game.audio.setEnabled(!this.game.audio.enabled); this.hud.toast(`Sound ${this.game.audio.enabled ? 'on' : 'off'}`); break;
         case 'KeyK': this.showMissions(); break;
+        case 'Comma': this.hud.toast(this.awe.toggleEarth()); break;
         case 'KeyY': if (this.game.flight.on) this.game.flight.cycleSas(e.shiftKey); break;
         case 'KeyI': if (this.game.flight.on) this.game.flight.toggleBoost(); break;
         default:
@@ -561,11 +570,12 @@ export class App {
     const terrain = [bodyObjs.find((m) => m.name === 'Saturn'), exoObjs[0]].filter((m) => !!m).map((m) => this.terrain.warmupMesh(m.material as ShaderMaterial));
     const air = this.atmospheres.warmupObjects()[0];
     if (air) terrain.push(this.terrain.warmupHaze(air.material as ShaderMaterial));
-    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh, ...this.cometTails.warmupObjects(), ...this.jets.warmupObjects()];
+    const objs = [...bodyObjs, ...terrain, ...this.atmospheres.warmupObjects(), ...this.holes.warmupObjects(), ...this.near.warmupObjects(), ...exoObjs, ...this.craft.warmupObjects(), ...this.game.warmupObjects(), ...this.deepSky.warmupObjects(), ...this.galaxies.warmupObjects(), ...this.rocks.warmupObjects(), this.mwVolume.mesh, ...this.cometTails.warmupObjects(), ...this.jets.warmupObjects(), ...this.awe.cues.warmupObjects()];
     const was = objs.map((o) => o.visible);
     for (const o of objs) o.visible = true;
     // (into the HDR target the scene is drawn to: programs differ per output target)
-    void this.renderer.withSceneTarget(() => this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera)).catch(() => undefined);
+    HITCH.markWarm(false);
+    void this.renderer.withSceneTarget(() => this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera)).catch(() => undefined).finally(() => HITCH.markWarm());
     this.galaxy.compile(this.renderer.gl);
     objs.forEach((o, i) => { o.visible = was[i]; });
   }
@@ -1669,12 +1679,14 @@ export class App {
 
   frame(): void {
     const now = performance.now();
+    PERF.frameStart(now);
     const rawDt = Math.max(0, (now - this.lastTime) / 1000);
     // Camera/controls use a clamped step for stability; the simulation clock follows real time.
     const dt = Math.min(0.1, rawDt);
     this.lastTime = now;
     if (rawDt > 0) this.fps += (1 / rawDt - this.fps) * 0.05;
     this.frameCount++;
+    HITCH.begin();
 
     // 1. time and ephemerides
     // (in the ship, physics picks the universe step: time warp limits, dilation; the ship moves first)
@@ -1698,6 +1710,8 @@ export class App {
     // planets and spacecraft move before the camera follows its anchor (which may be one of them)
     for (const sys of this.activeSystems) sys.update(jd);
     for (const c of this.craft.craft) c.update(jd);
+    HITCH.lap('ephemeris');
+    PERF.lap('sim');
 
     if (this.selection instanceof CatalogStar && !this.selection.exact && this.selection.ref) {
       const r = this.selection.ref;
@@ -1706,6 +1720,7 @@ export class App {
     // 2. camera: co-move with the reference body, then apply controls
     this.rig.followAnchor();
     this.chooseAnchor();
+    this.awe?.beginFrame();
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
     if (this.nearTimer-- <= 0) {
       this.updateNearStars();
@@ -1731,6 +1746,7 @@ export class App {
     // The dolly carries the explorer's orientation; a headset pose is applied on top of it.
     this.renderer.rig.quaternion.copy(this.rig.quat);
     this.renderer.rig.updateMatrixWorld(true);
+    PERF.lap('cam');
     const cam = this.renderer.camera;
     cam.fov = this.rig.fov;
     cam.updateProjectionMatrix();
@@ -1743,6 +1759,7 @@ export class App {
     GLOBALS.uPullIn.value = finiteFar ? this.view.far * 0.5 : 0;
     LITE.uLite.value = this.vr.active ? 1 : 0;
     GLOBALS.uDepthK.value = finiteFar ? depthK(this.renderer.camera.far) : 1;
+    HITCH.lap('camera');
 
     // 3. exposure and level of detail
     const pixelAngle = this.view.pixelAngle;
@@ -1751,13 +1768,21 @@ export class App {
     this.bodies.glareVr = this.vr.active;
     this.bodies.allowHi = !this.vr.active;
     this.bodies.update(this.rig.upos, pixelAngle, dt, this.view.quat);
+    HITCH.lap('bodies');
     this.bodies.updateDetail(this.renderer.gl, this.tiles, pixelAngle, new Vector3(0, 0, -1).applyQuaternion(this.view.quat));
+    HITCH.lap('bodyDetail');
+    PERF.lap('bodies');
     this.atmospheres.steps = this.vr.active ? 10 : 16;
     this.atmospheres.update(this.rig.upos, this.bodies.views);
+    HITCH.lap('atmospheres');
+    PERF.lap('atmo');
     this.updateActiveSystems();
+    HITCH.lap('systems');
     this.exo.showOrbits = this.orbits.enabled;
     this.exo.update(this.rig.upos, pixelAngle, this.activeSystems, jd, now / 1000);
     this.atmospheres.updateExo(this.exo.atmospheres());
+    HITCH.lap('exo');
+    PERF.lap('exo');
     // landing terrain on the nearest solid world (Solar System body or generated planet)
     {
       const cands = [this.bodies.terrainCandidate(), this.exo.terrainCandidate()].filter((c) => c !== null);
@@ -1768,22 +1793,34 @@ export class App {
       this.terrain.view = this.view;
       this.terrain.update(c);
       this.rocks.update(this.rig.upos, this.renderer.gl);
+      HITCH.lap('terrain');
     }
+    PERF.lap('terrain');
     this.craft.update(this.rig.upos, pixelAngle, jd, this.system.sun, this.system.byId.get(399)!);
+    HITCH.lap('craft');
+    PERF.lap('craft');
     this.holes.vr = this.vr.active;
     this.holes.update(this.rig.upos, pixelAngle, now / 1000);
     this.jets.update(this.rig.upos, pixelAngle, now / 1000);
+    HITCH.lap('holes');
+    PERF.lap('holes');
     const { xStar, xSurf, mLim, xDark } = this.updateExposure(dt);
+    HITCH.lap('exposure');
     const sunDistPc = this.camPc.length();
     GALAXY.toGal(this.camPc, this.camGal);
     this.galaxy.vr = this.vr.active;
     // one face per frame while travelling; all at once if we find ourselves far out with no map yet
     if (sunDistPc > 60) this.galaxy.update(this.renderer.gl, this.camGal, !this.galaxy.ready && sunDistPc > 150 ? 6 : 1);
+    HITCH.lap('galaxyCube');
     this.sky.updateWith(xStar / xDark, sunDistPc, this.galaxy.ready ? this.galaxy.target.texture : null, this.camGal);
     this.mwVolume.update(this.rig.upos, this.camGal, this.sky.modelK, SkyLayer.MODEL_REF, this.sky.modelExp);
+    HITCH.lap('sky');
     this.galaxies.update(this.rig.upos, pixelAngle, xStar / xDark, smoothstep(300, 1500, sunDistPc), this.view.quat);
+    HITCH.lap('galaxies');
     this.deepSky.update(this.rig.upos, this.camPc, pixelAngle, xStar / xDark);
+    HITCH.lap('deepSky');
     this.cometTails.gain.value = xStar / xDark;
+    PERF.lap('sky');
     this.lastMLim = mLim;
     const psf = this.starFields[0].psf;
     psf.uExposure.value = xStar;
@@ -1794,24 +1831,46 @@ export class App {
     if (psf.uMinSigma) psf.uMinSigma.value = this.vr.active ? 0.8 : 0.6;
     this.bodies.surfaceExposure.value = xSurf;
     for (const c of this.catalogs) c.update(this.camPc, mLim, this.fieldMinDistPc);
+    HITCH.lap('catalogs');
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);
+    HITCH.lap('starFields');
     this.procStars.update(this.camPc, mLim, NEAR_STAR_RADIUS, this.vr.active ? 2 : 4);
+    HITCH.lap('procStars');
     this.near.update(this.rig.upos, pixelAngle, now / 1000, this.view.quat);
+    HITCH.lap('nearStars');
+    PERF.lap('stars');
     this.orbits.focus = this.rig.anchor instanceof Body ? this.rig.anchor : null;
     this.orbits.update(this.rig.upos, pixelAngle, jd);
+    HITCH.lap('orbits');
     this.small.update(this.rig.upos, jd);
+    HITCH.lap('smallBodies');
     this.cometTails.update(this.rig.upos, this.system.sun.upos, this.small.cometObjects, this.selection, jd);
+    HITCH.lap('cometTails');
 
+    PERF.lap('orbits');
     this.game.update(dt);
+    HITCH.lap('game');
+    PERF.lap('game');
     this.god.update(dt);
+    HITCH.lap('god');
+    this.awe?.update(dt);
+    HITCH.lap('awe');
+    PERF.lap('god'); // god mode + awe cues
 
     // 4. draw
     if (this.warmupPending) {
       this.warmupPending = false;
       this.warmUp();
     }
+    HITCH.lap('warmUp');
+    PERF.gpuBegin();
     this.holes.capture(this.renderer.gl, this.renderer.scene, [this.renderer.rig, this.orbits.group, ...this.vr.sceneOverlays], psf);
+    HITCH.lap('holeCapture');
+    PERF.lap('capture');
     this.renderer.render();
+    PERF.gpuEnd();
+    HITCH.lap('render');
+    PERF.lap('render');
 
     // 5. overlays
     if (this.vr.active) {
@@ -1820,11 +1879,17 @@ export class App {
     } else {
       this.labels.update(this.labelCandidates(), this.view.width, this.view.height);
     }
+    HITCH.lap('labels');
     this.hudTimer -= dt;
     if (this.hudTimer <= 0) {
       this.hudTimer = 0.1;
       this.updateHud();
     }
+    HITCH.lap('hud');
+    const info = this.renderer.gl.info;
+    HITCH.end(info.programs ?? 0, info.memory.textures);
+    PERF.lap('overlay');
+    PERF.frameEnd();
   }
 
   private updateHud(): void {
@@ -1833,6 +1898,7 @@ export class App {
     if (this.selection) {
       const d = this.selection.upos.sub(this.rig.upos, new Vector3()).length();
       const rows = this.selection.info();
+      rows.push(...this.awe.rows(this.selection, d));
       if (this.selection instanceof CatalogStar && !this.isCompanion(this.selection)) {
         const sys = this.systems.of(this.selection);
         if (sys) rows.push(['Planets', sys.real ? `${sys.planets.length} confirmed (NASA Exoplanet Archive)` : `${sys.planets.length} generated (not observed)`]);
