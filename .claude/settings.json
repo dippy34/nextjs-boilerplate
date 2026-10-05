@@ -16,7 +16,10 @@
       "Bash(SKIP_BUILD=1 bash scripts/_deploy.sh)",
       "Bash(SKIP_BUILD=1 SRC_OVERRIDE=* bash scripts/_deploy.sh)",
       "Bash(bash scripts/deploy-cloudflare.sh)",
-      "Bash(SKIP_BUILD=1 bash scripts/deploy-cloudflare.sh)"
+      "Bash(SKIP_BUILD=1 bash scripts/deploy-cloudflare.sh)",
+      "Bash(bash scripts/deploy-ghpages.sh)",
+      "Bash(SKIP_BUILD=1 bash scripts/deploy-ghpages.sh)",
+      "Bash(SKIP_BUILD=1 SRC_OVERRIDE=* bash scripts/deploy-ghpages.sh)"
     ]
   }
 }
