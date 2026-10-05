@@ -1,6 +1,7 @@
 import { Matrix4, Vector3 } from 'three';
 import { COLORS, Panel } from '../vr/Panel';
 import type { App } from './App';
+import { PERF_TOOLS } from '../perf/tools';
 import '../ui/start.css';
 
 /**
@@ -15,7 +16,7 @@ import '../ui/start.css';
 /** URL parameters that place the explorer somewhere: the title screen would only be in the way. */
 const DEEP_LINK = ['target', 'time', 'campc', 'look', 'ship', 'paused', 'rate', 'dist', 'fov', 'lm'];
 
-type Item = { id: 'sim' | 'story' | 'vr' | 'credits'; label: string; sub: string; disabled?: boolean; badge?: string };
+type Item = { id: 'sim' | 'story' | 'vr' | 'bench' | 'credits'; label: string; sub: string; disabled?: boolean; badge?: string };
 
 export class StartMenu {
   /** whether the title screen should be shown for this URL */
@@ -95,6 +96,7 @@ export class StartMenu {
       { id: 'sim', label: 'Simulator', sub: 'Fly anywhere: planets, stars, galaxies, black holes. Land and walk.' },
       { id: 'story', label: 'Story mode', sub: 'A journey across the galaxy', disabled: true, badge: 'Coming soon' },
       ...(vr ? [{ id: 'vr' as const, label: 'Enter VR', sub: 'Put the headset on and choose there' }] : []),
+      { id: 'bench', label: 'Run benchmark', sub: 'About 2 minutes over 10 scenes; gives a code to send back' },
       { id: 'credits', label: 'Credits', sub: 'Where the data comes from' },
     ];
   }
@@ -105,7 +107,7 @@ export class StartMenu {
     for (const it of this.items()) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = `sm-item${it.id === 'credits' ? ' sm-small' : ''}`;
+      b.className = `sm-item${it.id === 'credits' || it.id === 'bench' ? ' sm-small' : ''}`;
       b.dataset.id = it.id;
       b.disabled = !!it.disabled;
       if (it.disabled) b.setAttribute('aria-disabled', 'true');
@@ -161,6 +163,7 @@ export class StartMenu {
   private choose(id: Item['id']): void {
     if (id === 'sim') { if (this.app) this.start(); }
     else if (id === 'vr') { void this.app?.vr.enter(); }
+    else if (id === 'bench') { if (this.app) { this.start(); PERF_TOOLS.runBench(); } }
     else if (id === 'credits') this.showCredits(true);
   }
 
@@ -289,6 +292,7 @@ export class StartMenu {
       { size: 48, sub: 'Fly anywhere · land and walk' });
     p.button('sm:story', 120, 420, p.width - 240, 150, 'Story mode', () => undefined,
       { size: 48, sub: 'Coming soon', disabled: true });
-    p.button('sm:exit', p.width / 2 - 150, 610, 300, 90, 'Exit VR', () => { void this.app?.vr.session?.end(); }, { size: 30, color: COLORS.warn });
+    p.button('sm:bench', p.width / 2 - 320, 610, 300, 90, 'Run benchmark', () => { this.start(); PERF_TOOLS.runBench(); }, { size: 30 });
+    p.button('sm:exit', p.width / 2 + 20, 610, 300, 90, 'Exit VR', () => { void this.app?.vr.session?.end(); }, { size: 30, color: COLORS.warn });
   }
 }

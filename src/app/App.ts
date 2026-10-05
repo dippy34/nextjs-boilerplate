@@ -51,6 +51,7 @@ import { Systems } from './Systems';
 import { VRSupport } from './VR';
 import { Walk } from './Walk';
 import { God } from '../god/God';
+import { PERF } from '../perf/Perf';
 
 /** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
 const STAR_KEY = 0.9;
@@ -1669,6 +1670,7 @@ export class App {
 
   frame(): void {
     const now = performance.now();
+    PERF.frameStart(now);
     const rawDt = Math.max(0, (now - this.lastTime) / 1000);
     // Camera/controls use a clamped step for stability; the simulation clock follows real time.
     const dt = Math.min(0.1, rawDt);
@@ -1698,6 +1700,7 @@ export class App {
     // planets and spacecraft move before the camera follows its anchor (which may be one of them)
     for (const sys of this.activeSystems) sys.update(jd);
     for (const c of this.craft.craft) c.update(jd);
+    PERF.lap('sim');
 
     if (this.selection instanceof CatalogStar && !this.selection.exact && this.selection.ref) {
       const r = this.selection.ref;
@@ -1731,6 +1734,7 @@ export class App {
     // The dolly carries the explorer's orientation; a headset pose is applied on top of it.
     this.renderer.rig.quaternion.copy(this.rig.quat);
     this.renderer.rig.updateMatrixWorld(true);
+    PERF.lap('cam');
     const cam = this.renderer.camera;
     cam.fov = this.rig.fov;
     cam.updateProjectionMatrix();
@@ -1752,12 +1756,15 @@ export class App {
     this.bodies.allowHi = !this.vr.active;
     this.bodies.update(this.rig.upos, pixelAngle, dt, this.view.quat);
     this.bodies.updateDetail(this.renderer.gl, this.tiles, pixelAngle, new Vector3(0, 0, -1).applyQuaternion(this.view.quat));
+    PERF.lap('bodies');
     this.atmospheres.steps = this.vr.active ? 10 : 16;
     this.atmospheres.update(this.rig.upos, this.bodies.views);
+    PERF.lap('atmo');
     this.updateActiveSystems();
     this.exo.showOrbits = this.orbits.enabled;
     this.exo.update(this.rig.upos, pixelAngle, this.activeSystems, jd, now / 1000);
     this.atmospheres.updateExo(this.exo.atmospheres());
+    PERF.lap('exo');
     // landing terrain on the nearest solid world (Solar System body or generated planet)
     {
       const cands = [this.bodies.terrainCandidate(), this.exo.terrainCandidate()].filter((c) => c !== null);
@@ -1769,10 +1776,13 @@ export class App {
       this.terrain.update(c);
       this.rocks.update(this.rig.upos, this.renderer.gl);
     }
+    PERF.lap('terrain');
     this.craft.update(this.rig.upos, pixelAngle, jd, this.system.sun, this.system.byId.get(399)!);
+    PERF.lap('craft');
     this.holes.vr = this.vr.active;
     this.holes.update(this.rig.upos, pixelAngle, now / 1000);
     this.jets.update(this.rig.upos, pixelAngle, now / 1000);
+    PERF.lap('holes');
     const { xStar, xSurf, mLim, xDark } = this.updateExposure(dt);
     const sunDistPc = this.camPc.length();
     GALAXY.toGal(this.camPc, this.camGal);
@@ -1784,6 +1794,7 @@ export class App {
     this.galaxies.update(this.rig.upos, pixelAngle, xStar / xDark, smoothstep(300, 1500, sunDistPc), this.view.quat);
     this.deepSky.update(this.rig.upos, this.camPc, pixelAngle, xStar / xDark);
     this.cometTails.gain.value = xStar / xDark;
+    PERF.lap('sky');
     this.lastMLim = mLim;
     const psf = this.starFields[0].psf;
     psf.uExposure.value = xStar;
@@ -1797,21 +1808,29 @@ export class App {
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);
     this.procStars.update(this.camPc, mLim, NEAR_STAR_RADIUS, this.vr.active ? 2 : 4);
     this.near.update(this.rig.upos, pixelAngle, now / 1000, this.view.quat);
+    PERF.lap('stars');
     this.orbits.focus = this.rig.anchor instanceof Body ? this.rig.anchor : null;
     this.orbits.update(this.rig.upos, pixelAngle, jd);
     this.small.update(this.rig.upos, jd);
     this.cometTails.update(this.rig.upos, this.system.sun.upos, this.small.cometObjects, this.selection, jd);
 
+    PERF.lap('orbits');
     this.game.update(dt);
+    PERF.lap('game');
     this.god.update(dt);
+    PERF.lap('god');
 
     // 4. draw
     if (this.warmupPending) {
       this.warmupPending = false;
       this.warmUp();
     }
+    PERF.gpuBegin();
     this.holes.capture(this.renderer.gl, this.renderer.scene, [this.renderer.rig, this.orbits.group, ...this.vr.sceneOverlays], psf);
+    PERF.lap('capture');
     this.renderer.render();
+    PERF.gpuEnd();
+    PERF.lap('render');
 
     // 5. overlays
     if (this.vr.active) {
@@ -1825,6 +1844,8 @@ export class App {
       this.hudTimer = 0.1;
       this.updateHud();
     }
+    PERF.lap('overlay');
+    PERF.frameEnd();
   }
 
   private updateHud(): void {

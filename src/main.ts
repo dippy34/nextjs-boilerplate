@@ -1,5 +1,6 @@
 import { App } from './app/App';
 import { StartMenu } from './app/StartMenu';
+import { installPerfTools } from './perf/tools';
 
 declare global {
   interface Window { app?: App; appError?: string; startMenu?: StartMenu }
@@ -19,6 +20,7 @@ async function main(): Promise<void> {
     window.app = app;
     app.start();
     menu?.attach(app);
+    installPerfTools(app, () => menu?.start());
     boot?.classList.add('done');
     setTimeout(() => boot?.remove(), 1000);
   } catch (err) {
