@@ -151,7 +151,7 @@ const SHOTS = {
         core.syncRel(); a.rig.upos.copy(ship.upos);
       }
       // attitude: nose pitched down along the glide, flaring up for the landing
-      const pitch = (-30 + 25 * u * u) * Math.PI / 180;
+      const pitch = (-32 + 20 * u * u) * Math.PI / 180;
       const fwd = hd.clone().multiplyScalar(Math.cos(pitch)).addScaledVector(dir, Math.sin(pitch)).normalize();
       const right = new Vec().crossVectors(fwd, dir).normalize();
       const upS = new Vec().crossVectors(right, fwd).normalize();
