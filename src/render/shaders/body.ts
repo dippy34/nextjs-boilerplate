@@ -60,6 +60,12 @@ uniform float uHasRelief;
 uniform float uWater;         // 1 if the relief map's B channel is a water mask
 uniform vec3 uColor;          // base colour (linear) for map-less bodies
 uniform float uAlbedoScale;   // multiplies texture (linear) to obtain reflectance
+uniform vec3 uGrade;          // colour balance of the map (linear, unit luminance): photographs' hues
+uniform float uSat;           // saturation of the map around its luminance (1 = as is)
+uniform vec3 uHaze;           // limb haze colour (giants: the high haze over the cloud deck; 0 = none)
+uniform float uMinnaert;      // Minnaert limb-darkening exponent (1 = Lambert)
+uniform float uAurora;        // aurora strength on the night side (0 = none)
+uniform float uTime;
 uniform float uAirless;       // 1 = Lommel-Seeliger, 0 = Lambert
 uniform float uBands;         // 1 = procedural gas-giant banding
 uniform float uSeed;
@@ -401,7 +407,9 @@ void main() {
       }
     }
     if (uMapGray > 0.5) t = vec3(t.r);
-    albedo = srgbToLinear(t) * uAlbedoScale;
+    vec3 lin = srgbToLinear(t);
+    float lumT = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+    albedo = max(mix(vec3(lumT), lin, uSat) * uGrade, 0.0) * uAlbedoScale;
   } else {
     albedo = uColor * uAlbedoScale;
     if (uProc > 0.5) {
@@ -501,9 +509,9 @@ void main() {
     float thick;
     cloud = cloudField(nc, vec2(vUv.x + uCloudShift, vUv.y), pixAng, uLite, thick) * uCloudVis;
     // cloud tops: billowed relief lit by the Sun (heights ~1-2 km over the cover)
-    if (cloud > 0.01) nCloud = bumpNormal(vPosView, nW, (cloud * 200.0 + thick * 650.0) * limbFade);
+    if (cloud > 0.01) nCloud = bumpNormal(vPosView, nW, (cloud * 450.0 + thick * 1500.0) * limbFade);
     // thin cloud lets the ground show through; thick decks are bright
-    albedo = mix(albedo, vec3(0.72 + 0.2 * thick), cloud);
+    albedo = mix(albedo, vec3(0.8 + 0.16 * thick), cloud);
     // the clouds' shadows on the ground: the cloud (tops ~2-8 km up) between this point and the Sun
     vec3 sB = uSunDir * uBodyToWorld;
     float m0 = dot(nB, sB);
@@ -530,6 +538,8 @@ void main() {
     float muC = mix(mu0g, (dot(nCloud, uSunDir) + 0.3 * mu0g) / 1.3, 0.8);
     light = max(mix(mu0, muC, cloud), 0.0);
   }
+  // giants: Minnaert limb darkening of the cloud deck (Lambert is exponent 1)
+  if (uMinnaert != 1.0) light *= pow(clamp(mu0g, 1e-3, 1.0) * max(mu, 1e-3), uMinnaert - 1.0);
   light *= dayside * cloudShadow * grainShadow;
   // shadows of the relief: sharp where the mesh is fine, softened where the shadow's edge would
   // otherwise step from one coarse triangle to the next (far hills)
@@ -586,26 +596,62 @@ void main() {
     radiance += albedo * uSunColor * (uSunIrr / 3.14159265) * sky * (0.55 + 0.45 * dot(nP, nW)) * (1.0 - 0.6 * rockAO);
   }
   radiance *= 1.0 - 0.4 * rockAO;
+  // high haze over a giant's clouds: a coloured rim on the day side, widening towards the
+  // terminator (forward scattering), at every size (the shell is drawn only on larger disks)
+  if (uHaze.x + uHaze.y + uHaze.z > 0.0) {
+    float rimH = pow(1.0 - max(dot(nW, V), 0.0), 2.5);
+    float fw = 1.0 + 1.5 * pow(max(dot(-V, uSunDir), 0.0), 4.0);
+    radiance += uHaze * sunL * rimH * fw * smoothstep(-0.18, 0.25, mu0g) * ecl;
+  }
   // in a planet's shadow, sunlight refracted through its atmosphere (the Moon turns copper in an eclipse)
   if (eclRed > 0.0) radiance += albedo * sunL * eclRed * 0.004 * vec3(1.0, 0.32, 0.1) * max(mu0g, 0.0);
 
-  // Sun glint on open water (GGX, roughness of a wind-roughened sea seen from orbit)
+  // Sun glint on open water (GGX): a bright core from the calm patches and a wide glitter halo
+  // from the wind-roughened sea (Cox-Munk slopes), sparkling where single waves are resolved
   if (water > 0.0 && mu0g > 0.0) {
     vec3 Hh = normalize(uSunDir + V);
     float nh = max(dot(nW, Hh), 0.0);
-    float a2 = 0.04;
+    float a2 = 0.012;
     float dd = nh * nh * (a2 - 1.0) + 1.0;
     float D = a2 / (3.14159265 * dd * dd);
+    float b2 = 0.09;
+    float db = nh * nh * (b2 - 1.0) + 1.0;
+    float Db = b2 / (3.14159265 * db * db);
+    // glitter: wave facets catching the Sun, while the cells span a few pixels
+    float gl = 1.0;
+    if (uLite < 0.5) {
+      float cellPx = 1.0 / max(pixAng * 9000.0, 1e-6);
+      gl = mix(1.0, 0.25 + 2.2 * pow(bn3(nB * 9000.0 + uSeed), 4.0), smoothstep(1.5, 5.0, cellPx));
+    }
     float vh = max(dot(V, Hh), 0.0);
     float F = 0.02 + 0.98 * pow(1.0 - vh, 5.0);
-    float spec = D * F / max(4.0 * vh * vh, 0.05);
-    radiance += sunL * 3.14159265 * spec * max(mu0g, 0.0) * water * (1.0 - cloud) * 0.6;
+    float spec = (0.55 * D + 0.45 * Db * gl) * F / max(4.0 * vh * vh, 0.05);
+    radiance += sunL * 3.14159265 * spec * max(mu0g, 0.0) * water * (1.0 - cloud) * cloudShadow * ecl;
   }
 
   if (uHasNight > 0.5) {
-    float night = smoothstep(0.05, -0.15, mu0g);
-    vec3 lights = srgbToLinear(texture2D(uNight, vUv).rgb);
-    radiance += lights * lights * vec3(1.0, 0.8, 0.55) * 0.02 * night * (1.0 - cloud);
+    // city lights switch on through dusk; sodium-orange cores, whiter LED-lit centres; clouds
+    // over a city glow dimly from below instead of hiding it
+    float night = smoothstep(0.04, -0.12, mu0g);
+    float l = srgbToLinear(texture2D(uNight, vUv).rgb).r;
+    float city = pow(l, 1.25);
+    vec3 tint = mix(vec3(1.0, 0.62, 0.28), vec3(1.0, 0.86, 0.68), smoothstep(0.15, 0.6, l));
+    radiance += tint * city * 0.14 * night * (1.0 - 0.75 * cloud) * (uSunIrr / 3.14159265);
+  }
+  // aurorae: ovals around the magnetic poles (~67 degrees geomagnetic latitude), green curtains
+  // with red tops, rippling; on the night side only
+  if (uAurora > 0.0 && mu0g < 0.05) {
+    // geomagnetic dipole axis (north pole ~80.7 N, 72.7 W), body-fixed
+    vec3 mAx = vec3(0.0477, -0.1534, 0.9870);
+    float mlat = asin(clamp(dot(nB, mAx), -1.0, 1.0));
+    vec3 e1 = normalize(cross(mAx, vec3(0.0, 0.0, 1.0) + vec3(1e-4, 0.0, 0.0)));
+    float mlon = atan(dot(nB, cross(mAx, e1)), dot(nB, e1));
+    float dl = abs(abs(mlat) - 1.17 - 0.035 * sin(mlon * 3.0 + uTime * 0.05 + uSeed));
+    float band = exp(-dl * dl / 0.0012);
+    float curt = 0.45 + 0.55 * bn3(vec3(mlon * 24.0, uTime * 0.08, mlat > 0.0 ? 1.0 : 9.0));
+    curt *= 0.6 + 0.4 * bn3(vec3(mlon * 90.0, uTime * 0.2, 3.0));
+    vec3 ac = mix(vec3(0.15, 1.0, 0.35), vec3(0.9, 0.25, 0.45), smoothstep(0.02, 0.06, abs(mlat) - 1.17));
+    radiance += ac * band * curt * uAurora * 0.05 * smoothstep(0.05, -0.1, mu0g) * (uSunIrr / 3.14159265);
   }
   gl_FragColor = vec4(min(radiance * uExposure, vec3(6.0e4)), 1.0);
 ${OUTPUT_FRAGMENT}

@@ -739,8 +739,11 @@ void main() {
   }
   // atmosphere: bright limb on the day side
   float mu = max(dot(nW, V), 0.0);
-  float rim = pow(1.0 - mu, 3.0);
-  radiance += uAtmoColor * sunL * uAtmo * rim * smoothstep(-0.25, 0.3, mu0) * 0.9 * (1.0 - uTerrain);   // (the sphere's limb only)
+  // (a thin bright edge plus a broader glow; forward scattering lights a backlit crescent's limb
+  // well past the terminator)
+  float rim = 0.7 * pow(1.0 - mu, 3.0) + 0.5 * pow(1.0 - mu, 8.0);
+  float fwd = 1.0 + 2.0 * pow(max(dot(-V, uSunDir), 0.0), 4.0);
+  radiance += uAtmoColor * sunL * uAtmo * rim * fwd * smoothstep(-0.3, 0.25, mu0) * 0.9 * (1.0 - uTerrain);   // (the sphere's limb only)
   // thermal glow (night side mostly)
   // (scaled to the starlight so it shows at the exposure the lit planet sets)
   radiance += emitColor * emit * luminance(sunL) * (0.012 + 0.2 * smoothstep(0.2, -0.2, mu0));

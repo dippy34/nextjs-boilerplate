@@ -47,7 +47,7 @@ float cloudField(vec3 nc, vec2 uv, float pix, float lite, out float thick) {
     }
   }
   thick = clamp(c + n * 0.8, 0.0, 1.0);
-  return smoothstep(0.26, 0.56, cov);
+  return smoothstep(0.2, 0.62, cov);
 }
 `;
 

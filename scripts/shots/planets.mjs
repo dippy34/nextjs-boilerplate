@@ -12,7 +12,7 @@ const names = (process.env.PL ?? 'Earth,Mars,Jupiter,Saturn,Neptune').split(',')
 const views = (process.env.KS ?? 'far,mid,near,limb').split(',');
 const lite = process.env.LITE === '1';
 // [distance (radii), azimuth from the Sun (deg), elevation (deg)]
-const VIEW = { far: [9, 70, 15], mid: [2.6, 40, 18], near: [1.35, 25, 10], limb: [1.04, 80, 5] };
+const VIEW = { far: [9, 70, 15], mid: [2.6, 40, 18], near: [1.35, 25, 10], limb: [1.12, 80, 5] };
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: Number(process.env.W ?? 1280), height: Number(process.env.H ?? 720) } });
 const errors = [];
@@ -21,6 +21,8 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 180000 }); };
 await page.goto(`${base}?time=${time}&paused=1&target=Earth&dist=5`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 180000 });
+// HIDEUI=1: only the 3D view
+if (process.env.HIDEUI === '1') await page.addStyleTag({ content: '* { visibility: hidden !important } canvas { visibility: visible !important }' });
 await page.evaluate(() => { const a = window.app; if (a.orbits) a.orbits.enabled = false; if (a.labels) a.labels.enabled = false; });
 if (lite) await page.evaluate(() => { const u = window.app.bodies?.meshes; for (const m of u?.values() ?? []) if (m.material.uniforms.uLite) m.material.uniforms.uLite.value = 1; });
 for (const name of names) {
@@ -37,8 +39,8 @@ for (const name of names) {
       const azr = az * Math.PI / 180, elr = el * Math.PI / 180;
       const dir = s.clone().multiplyScalar(Math.cos(azr)).addScaledVector(side, Math.sin(azr)).multiplyScalar(Math.cos(elr)).addScaledVector(pole, Math.sin(elr)).normalize();
       a.rig.upos.copy(b.upos).addVec(dir, dist * b.radius);
-      // limb: look along the surface towards the horizon on the day side
-      if (limb) a.rig.lookAt(s.clone().multiplyScalar(-0.2).addScaledVector(side, -1).addScaledVector(dir, -0.25).normalize(), dir);
+      // limb: look at the horizon (20 degrees down; it dips 27 degrees at 1.12 radii) along the day side
+      if (limb) a.rig.lookAt(new V().crossVectors(dir, pole).normalize().multiplyScalar(Math.cos(0.35)).addScaledVector(dir, -Math.sin(0.35)).normalize(), dir);
       else a.rig.lookAt(dir.clone().negate(), pole);
     }, { name, dist, az, el, limb: v === 'limb' });
     await frames(12);

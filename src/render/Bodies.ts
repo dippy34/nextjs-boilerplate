@@ -1,3 +1,4 @@
+import { planetLook, type PlanetLook } from './PlanetLook';
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, CustomBlending, DoubleSide, DynamicDrawUsage, FrontSide, Group,
   ImageBitmapLoader, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, NoColorSpace, OneFactor,
@@ -383,6 +384,7 @@ export class BodiesLayer {
         uSunRel: { value: new Vector3() }, uSunR: { value: SUN_RADIUS },
         uHasRings: { value: 0 }, uRingTex: { value: null }, uRingRadii: { value: new Vector3() },
         uRadiance: { value: 1 }, uTime: { value: 0 },
+        ...lookUniforms(planetLook(b.name)),
         ...(isStar ? starLookUniforms(this.sunLook = starLook('sun', b.teff, 1, 4.83, true)) : {}),
         uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
@@ -918,4 +920,11 @@ function meanLinearLuminance(img: HTMLImageElement | ImageBitmap): number {
   } catch {
     return 0.3;
   }
+}
+
+function lookUniforms(l: PlanetLook): Record<string, { value: unknown }> {
+  return {
+    uGrade: { value: new Vector3(...l.grade) }, uSat: { value: l.sat }, uHaze: { value: new Vector3(...l.haze) },
+    uMinnaert: { value: l.minnaert }, uAurora: { value: l.aurora },
+  };
 }

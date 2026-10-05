@@ -24,6 +24,8 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 240000 }); };
 await page.goto(`${base}?time=2026-10-01T12:00:00Z&paused=1&target=Moon&dist=3`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.app && window.app.renderer && window.app.frameCount > 10, null, { timeout: 180000 });
+// HIDEUI=1: only the 3D view
+if (process.env.HIDEUI === '1') await page.addStyleTag({ content: '* { visibility: hidden !important } canvas { visibility: visible !important }' });
 const STARS = ['Rigil Kentaurus', 'Sirius', 'Procyon', 'Altair', 'Vega', 'Tau Ceti', 'Epsilon Eridani', 'Fomalhaut', 'Pollux',
   'Arcturus', 'Capella', 'Castor', 'Denebola', 'Alderamin', 'Mizar', 'Caph', 'Megrez', 'Alioth', 'Eltanin', 'Mirach', 'Hamal',
   'Achernar', 'Regulus', 'Spica', 'Aldebaran', 'Deneb', 'Polaris', 'Kochab', 'Schedar', 'Dubhe', 'Merak', 'Phecda', 'Alkaid',
