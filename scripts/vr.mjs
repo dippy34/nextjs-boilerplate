@@ -104,6 +104,10 @@ check('VR frames are drawn into the headset framebuffer', xrDraw.draws > 0 && xr
 await page.waitForFunction(() => window.app.vr.menu.isOpen, null, { timeout: 120000 });
 let st = await page.evaluate(() => { const v = window.app.view; return { xr: v.xr, fov: v.fovY, w: v.width, h: v.height }; });
 check('view comes from the headset eye', st.xr && st.fov > 60 && st.fov < 120, `fovY=${st.fov.toFixed(1)}° ${st.w}×${st.h}`);
+{
+  const g = await page.evaluate(() => window.__xrGpu ?? null);
+  check('headset GPU settings applied (framebuffer scale, foveation asked for)', !!g && g.options.foveation === 1 && g.options.fbScale > 0 && g.width > 0, JSON.stringify(g));
+}
 check('menu opens in front of the user after entering', true);
 await frames(2);
 const lum = await headsetBrightness();
