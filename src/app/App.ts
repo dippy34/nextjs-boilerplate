@@ -1838,11 +1838,9 @@ export class App {
     this.game.update(dt);
     HITCH.lap('game');
     this.god.update(dt);
-<<<<<<< HEAD
-    this.awe?.update(dt);
-=======
     HITCH.lap('god');
->>>>>>> d793c97aa0e28c5ab6ecbad8e5bf7ec2181c0c7f
+    this.awe?.update(dt);
+    HITCH.lap('awe');
 
     // 4. draw
     if (this.warmupPending) {
