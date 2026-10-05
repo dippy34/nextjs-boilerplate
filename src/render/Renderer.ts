@@ -4,6 +4,7 @@ import {
   Vector3, WebGLCoordinateSystem, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { installToneMapping, TONE_GLSL } from './shaders/tone';
+import { HITCH } from '../core/hitch';
 import { Governor, QUALITY, RENDER_SCALE, XR_VOLUME_FACTOR } from './Quality';
 import { OUTPUT_FRAGMENT } from './shaders/xr';
 
@@ -408,6 +409,7 @@ ${OUTPUT_FRAGMENT}
     const gl = this.gl;
     // adaptive quality: budget 60 Hz on a desktop, the session's rate in a headset
     const budget = this.presenting ? 1000 / ((gl.xr.getSession() as (XRSession & { frameRate?: number }) | null)?.frameRate || 72) : 1000 / 60;
+    HITCH.budgetMs = budget;
     if (this.governor.update(performance.now(), budget)) this.applyQuality();
     if (this.presenting) {
       // three binds the headset's framebuffer (an XR render target backed by the session's

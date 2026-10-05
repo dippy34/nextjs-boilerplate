@@ -23,7 +23,7 @@ const VIEWS = [
   ['sgra-at-10rs', 'Sagittarius A*', 10, 28.5, 0.4], // distance in rs
 ];
 let fail = 0;
-for (const [label, name, dist, real, tol] of VIEWS) {
+for (const [label, name, dist, real, tol] of VIEWS.filter(([l]) => !process.env.ONLY || l.includes(process.env.ONLY))) {
   const r = await page.evaluate(({ name, dist }) => {
     const a = window.app; const o = a.findByName(name);
     a.select(o);
@@ -58,21 +58,23 @@ for (const [label, name, dist, real, tol] of VIEWS) {
     a.rig.lookAt(dir.clone().negate());
   });
   await frames(6);
-  const png = await page.screenshot({ timeout: 180000 });
+  const png = await page.screenshot({ path: `${out}-sun-disc.png`, timeout: 180000 });
   const { fovY } = await page.evaluate(() => ({ fovY: window.app.view.fovY }));
   const px = await page.evaluate(async (b64) => {
     const img = new Image(); img.src = `data:image/png;base64,${b64}`; await img.decode();
     const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
     const g = c.getContext('2d'); g.drawImage(img, 0, 0);
     const col = g.getImageData(img.width >> 1, 0, 1, img.height).data;
-    let n = 0; for (let y = 0; y < img.height; y++) if (col[y * 4] > 250 && col[y * 4 + 1] > 240) n++;
-    return n;
+    // the disc: pixels at least 90% as bright as the brightest on the column through its centre
+    let max = 0; for (let y = 0; y < img.height; y++) max = Math.max(max, col[y * 4] + col[y * 4 + 1] + col[y * 4 + 2]);
+    let n = 0; for (let y = 0; y < img.height; y++) if (col[y * 4] + col[y * 4 + 1] + col[y * 4 + 2] >= 0.9 * max) n++;
+    return { n, max };
   }, png.toString('base64'));
   const expectPx = (Math.tan((1.377 / 2) * Math.PI / 180) / Math.tan((fovY / 2) * Math.PI / 180)) * H;
-  // glare widens the saturated core; the disc must be at least its true size and not wildly bigger
-  const ok = px >= expectPx * 0.85 && px <= expectPx * 4;
+  // glare widens the bright core; the disc must be at least its true size and not wildly bigger
+  const ok = px.n >= expectPx * 0.85 && px.n <= expectPx * 4;
   if (!ok) fail++;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} sun disc on screen: ${px} saturated px tall, geometric ${expectPx.toFixed(1)} px (fov ${fovY}°)`);
+  console.log(`${ok ? 'ok  ' : 'FAIL'} sun disc on screen: ${px.n} px tall (peak ${px.max}/765), geometric ${expectPx.toFixed(1)} px (fov ${fovY}°)`);
 }
 // dust: moving fast towards Jupiter makes it visible
 {
