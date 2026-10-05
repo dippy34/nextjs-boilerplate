@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ktx2Wanted } from '../src/render/Ktx2';
 import { viewportScaleFor, XR_FB_SCALE, XR_VIEWPORT_SCALE, xrGpuOptions } from '../src/render/XrGpu';
 
 describe('headset GPU settings', () => {
@@ -28,5 +29,28 @@ describe('headset GPU settings', () => {
     expect(viewportScaleFor(on, 7)).toBe(XR_VIEWPORT_SCALE[3]);
     expect(viewportScaleFor(off, 3)).toBe(1);
     expect(viewportScaleFor(null, 3)).toBe(1);
+  });
+});
+
+describe('KTX2 maps', () => {
+  it('on where a headset can be used, switchable from the URL', () => {
+    expect(ktx2Wanted('', true)).toBe(true);
+    expect(ktx2Wanted('', false)).toBe(false);
+    expect(ktx2Wanted('?ktx2=1', false)).toBe(true);
+    expect(ktx2Wanted('?ktx2=0', true)).toBe(false);
+  });
+
+  it('every colour map has a compressed copy with its mean luminance; data maps do not', async () => {
+    const { readFileSync, existsSync } = await import('node:fs');
+    const m = JSON.parse(readFileSync('public/data/textures/manifest.json', 'utf8')).maps as Record<string, { file: string; ktx2?: { file: string; meanLum: number } }>;
+    for (const [k, v] of Object.entries(m)) {
+      if (k.endsWith('_relief')) { expect(v.ktx2).toBeUndefined(); continue; }
+      expect(v.ktx2, k).toBeDefined();
+      expect(existsSync(`public/data/textures/${v.ktx2!.file}`), k).toBe(true);
+      expect(v.ktx2!.meanLum).toBeGreaterThan(0);
+      expect(v.ktx2!.meanLum).toBeLessThan(1);
+    }
+    expect(existsSync('public/data/sky/milkyway_4k.ktx2')).toBe(true);
+    expect(existsSync('public/basis/basis_transcoder.wasm')).toBe(true);
   });
 });

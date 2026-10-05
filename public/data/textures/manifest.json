@@ -6,7 +6,7 @@
    "height": 2048,
    "channels": "RGB",
    "lonLeft": -180,
-   "credit": "NASA Earth Observatory, Blue Marble: Next Generation (Oct 2004), R. St\u00f6ckli",
+   "credit": "NASA Earth Observatory, Blue Marble: Next Generation (Oct 2004), R. Stöckli",
    "source": "https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74167/world.200410.3x5400x2700.jpg",
    "license": "Public domain (U.S. Government work)",
    "hi": {
@@ -14,6 +14,10 @@
     "width": 8192,
     "height": 4096,
     "source": "https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74167/world.200410.3x21600x10800.jpg"
+   },
+   "ktx2": {
+    "file": "earth_day.ktx2",
+    "meanLum": 0.20801
    }
   },
   "earth_night": {
@@ -24,7 +28,11 @@
    "lonLeft": -180,
    "credit": "NASA Earth Observatory, Black Marble 2016 (Suomi NPP VIIRS)",
    "source": "https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km.jpg",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "earth_night.ktx2",
+    "meanLum": 0.01767
+   }
   },
   "earth_clouds": {
    "file": "earth_clouds.jpg",
@@ -34,7 +42,11 @@
    "lonLeft": -180,
    "credit": "NASA Earth Observatory / Blue Marble cloud composite (MODIS)",
    "source": "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/cloud_combined_2048.jpg",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "earth_clouds.ktx2",
+    "meanLum": 0.12186
+   }
   },
   "moon": {
    "file": "moon.jpg",
@@ -50,6 +62,10 @@
     "width": 8192,
     "height": 4096,
     "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_8k.tif"
+   },
+   "ktx2": {
+    "file": "moon.ktx2",
+    "meanLum": 0.29579
    }
   },
   "mercury": {
@@ -66,6 +82,10 @@
     "width": 8192,
     "height": 4096,
     "source": "https://planetarymaps.usgs.gov/mosaic/Mercury_MESSENGER_MDIS_Basemap_BDR_Mosaic_Global_166m.tif"
+   },
+   "ktx2": {
+    "file": "mercury.ktx2",
+    "meanLum": 0.06485
    }
   },
   "mars": {
@@ -82,6 +102,10 @@
     "width": 8192,
     "height": 4096,
     "source": "https://planetarymaps.usgs.gov/mosaic/Mars_Viking_MDIM21_ClrMosaic_global_232m.tif"
+   },
+   "ktx2": {
+    "file": "mars.ktx2",
+    "meanLum": 0.13422
    }
   },
   "jupiter": {
@@ -92,7 +116,11 @@
    "lonLeft": -180,
    "credit": "NASA/JPL/Space Science Institute, Cassini cylindrical map of Jupiter (PIA07782)",
    "source": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia07/pia07782/PIA07782.jpg",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "jupiter.ktx2",
+    "meanLum": 0.36302
+   }
   },
   "io": {
    "file": "io.jpg",
@@ -102,7 +130,11 @@
    "lonLeft": -180,
    "credit": "NASA/JPL/USGS, Io Galileo SSI / Voyager colour merged global mosaic (1 km)",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Io_GalileoSSI-Voyager_Global_Mosaic_ClrMerge_1km.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "io.ktx2",
+    "meanLum": 0.26032
+   }
   },
   "europa": {
    "file": "europa.jpg",
@@ -110,9 +142,13 @@
    "height": 2048,
    "channels": "L",
    "lonLeft": 0,
-   "credit": "NASA/JPL/USGS, Europa Voyager\u2013Galileo SSI global mosaic (500 m)",
+   "credit": "NASA/JPL/USGS, Europa Voyager–Galileo SSI global mosaic (500 m)",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Europa_Voyager_GalileoSSI_global_mosaic_500m.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "europa.ktx2",
+    "meanLum": 0.3105
+   }
   },
   "ganymede": {
    "file": "ganymede.jpg",
@@ -120,9 +156,13 @@
    "height": 2048,
    "channels": "RGB",
    "lonLeft": 0,
-   "credit": "NASA/JPL/USGS, Ganymede Voyager\u2013Galileo SSI colour global mosaic (1.4 km)",
+   "credit": "NASA/JPL/USGS, Ganymede Voyager–Galileo SSI colour global mosaic (1.4 km)",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Ganymede_Voyager_GalileoSSI_Global_ClrMosaic_1435m.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "ganymede.ktx2",
+    "meanLum": 0.17722
+   }
   },
   "callisto": {
    "file": "callisto.jpg",
@@ -130,9 +170,13 @@
    "height": 2048,
    "channels": "L",
    "lonLeft": 0,
-   "credit": "NASA/JPL/USGS, Callisto Voyager\u2013Galileo SSI global mosaic (1 km)",
+   "credit": "NASA/JPL/USGS, Callisto Voyager–Galileo SSI global mosaic (1 km)",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Callisto_Voyager_GalileoSSI_global_mosaic_1km.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "callisto.ktx2",
+    "meanLum": 0.04895
+   }
   },
   "titan": {
    "file": "titan.jpg",
@@ -142,7 +186,11 @@
    "lonLeft": 0,
    "credit": "NASA/JPL/Space Science Institute, Titan Cassini ISS global mosaic (4 km), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Titan_ISS_P19658_Mosaic_Global_4km.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "titan.ktx2",
+    "meanLum": 0.24011
+   }
   },
   "enceladus": {
    "file": "enceladus.jpg",
@@ -152,7 +200,11 @@
    "lonLeft": -180,
    "credit": "NASA/JPL/Space Science Institute, Enceladus Cassini global mosaic (110 m), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Enceladus_Cassini_mosaic_global_110m.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "enceladus.ktx2",
+    "meanLum": 0.15014
+   }
   },
   "tethys": {
    "file": "tethys.jpg",
@@ -162,7 +214,11 @@
    "lonLeft": -180,
    "credit": "NASA/JPL/Space Science Institute, Tethys Cassini global mosaic (293 m), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Tethys_Cassini_mosaic_global_293m.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "tethys.ktx2",
+    "meanLum": 0.20021
+   }
   },
   "dione": {
    "file": "dione.jpg",
@@ -170,9 +226,13 @@
    "height": 2048,
    "channels": "L",
    "lonLeft": -180,
-   "credit": "NASA/JPL/Space Science Institute, Dione Cassini\u2013Voyager global mosaic (154 m), via USGS",
+   "credit": "NASA/JPL/Space Science Institute, Dione Cassini–Voyager global mosaic (154 m), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Dione_Cassini_Voyager_mosaic_global_154m.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "dione.ktx2",
+    "meanLum": 0.23168
+   }
   },
   "rhea": {
    "file": "rhea.jpg",
@@ -180,9 +240,13 @@
    "height": 2048,
    "channels": "L",
    "lonLeft": -180,
-   "credit": "NASA/JPL/Space Science Institute, Rhea Cassini\u2013Voyager global mosaic (417 m), via USGS",
+   "credit": "NASA/JPL/Space Science Institute, Rhea Cassini–Voyager global mosaic (417 m), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Rhea_Cassini_Voyager_mosaic_global_417m.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "rhea.ktx2",
+    "meanLum": 0.15795
+   }
   },
   "iapetus": {
    "file": "iapetus.jpg",
@@ -190,9 +254,13 @@
    "height": 2048,
    "channels": "L",
    "lonLeft": -180,
-   "credit": "NASA/JPL/Space Science Institute, Iapetus Cassini\u2013Voyager global mosaic (783 m), via USGS",
+   "credit": "NASA/JPL/Space Science Institute, Iapetus Cassini–Voyager global mosaic (783 m), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Iapetus_Cassini_Voyager_mosaic_global_783m.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "iapetus.ktx2",
+    "meanLum": 0.18935
+   }
   },
   "triton": {
    "file": "triton.jpg",
@@ -202,7 +270,11 @@
    "lonLeft": -180,
    "credit": "NASA/JPL/USGS, Triton Voyager 2 global colour mosaic (600 m)",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Triton_Voyager2_ClrMosaic_GlobalFill_600m.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "triton.ktx2",
+    "meanLum": 0.33439
+   }
   },
   "pluto": {
    "file": "pluto.jpg",
@@ -210,10 +282,14 @@
    "height": 2048,
    "channels": "L",
    "lonLeft": 0,
-   "credit": "NASA/JHUAPL/SwRI, New Horizons LORRI\u2013MVIC Pluto global mosaic (300 m), via USGS",
+   "credit": "NASA/JHUAPL/SwRI, New Horizons LORRI–MVIC Pluto global mosaic (300 m), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Pluto_NewHorizons_Global_Mosaic_300m_Jul2017_8bit.tif",
    "license": "Public domain (U.S. Government work)",
-   "note": "unimaged areas filled with the mean colour of the imaged surface"
+   "note": "unimaged areas filled with the mean colour of the imaged surface",
+   "ktx2": {
+    "file": "pluto.ktx2",
+    "meanLum": 0.1681
+   }
   },
   "charon": {
    "file": "charon.jpg",
@@ -221,10 +297,14 @@
    "height": 2048,
    "channels": "L",
    "lonLeft": 0,
-   "credit": "NASA/JHUAPL/SwRI, New Horizons LORRI\u2013MVIC Charon global mosaic (300 m), via USGS",
+   "credit": "NASA/JHUAPL/SwRI, New Horizons LORRI–MVIC Charon global mosaic (300 m), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Charon_NewHorizons_Global_Mosaic_300m_Jul2017_8bit.tif",
    "license": "Public domain (U.S. Government work)",
-   "note": "unimaged areas filled with the mean colour of the imaged surface"
+   "note": "unimaged areas filled with the mean colour of the imaged surface",
+   "ktx2": {
+    "file": "charon.ktx2",
+    "meanLum": 0.24922
+   }
   },
   "ceres": {
    "file": "ceres.jpg",
@@ -234,7 +314,11 @@
    "lonLeft": -180,
    "credit": "NASA/JPL/DLR, Dawn FC Ceres global mosaic (20 px/deg), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Ceres_Dawn_FC_DLR_global_20ppd_Oct2015.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "ceres.ktx2",
+    "meanLum": 0.24002
+   }
   },
   "vesta": {
    "file": "vesta.jpg",
@@ -244,7 +328,11 @@
    "lonLeft": -180,
    "credit": "NASA/JPL/DLR, Dawn FC HAMO Vesta global mosaic (74 px/deg), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Vesta_Dawn_FC_HAMO_Mosaic_Global_74ppd.tif",
-   "license": "Public domain (U.S. Government work)"
+   "license": "Public domain (U.S. Government work)",
+   "ktx2": {
+    "file": "vesta.ktx2",
+    "meanLum": 0.09606
+   }
   },
   "saturn": {
    "file": "saturn.jpg",
@@ -255,7 +343,11 @@
    "latitude": "planetographic",
    "credit": "NASA/ESA Hubble OPAL program (PI A. Simon), saturn-2025a F631N/F502N/F395N maps (STScI MAST HLSP, DOI 10.17909/T9G593); colour from Karkoschka (1998) albedo spectra",
    "source": "https://archive.stsci.edu/missions/hlsp/opal/cycle32/saturn/",
-   "license": "CC BY 4.0"
+   "license": "CC BY 4.0",
+   "ktx2": {
+    "file": "saturn.ktx2",
+    "meanLum": 0.63939
+   }
   },
   "uranus": {
    "file": "uranus.jpg",
@@ -266,7 +358,11 @@
    "latitude": "planetographic",
    "credit": "NASA/ESA Hubble OPAL program (PI A. Simon), uranus-2025a F657N/F547M/F467M maps (STScI MAST HLSP, DOI 10.17909/T9G593); colour from Karkoschka (1998) albedo spectra",
    "source": "https://archive.stsci.edu/missions/hlsp/opal/cycle33/uranus/",
-   "license": "CC BY 4.0"
+   "license": "CC BY 4.0",
+   "ktx2": {
+    "file": "uranus.ktx2",
+    "meanLum": 0.80337
+   }
   },
   "neptune": {
    "file": "neptune.jpg",
@@ -277,7 +373,11 @@
    "latitude": "planetographic",
    "credit": "NASA/ESA Hubble OPAL program (PI A. Simon), neptune-2025b F657N/F547M/F467M maps (STScI MAST HLSP, DOI 10.17909/T9G593); colour from Karkoschka (1998) albedo spectra",
    "source": "https://archive.stsci.edu/missions/hlsp/opal/cycle32/neptune/",
-   "license": "CC BY 4.0"
+   "license": "CC BY 4.0",
+   "ktx2": {
+    "file": "neptune.ktx2",
+    "meanLum": 0.56915
+   }
   },
   "earth_relief": {
    "file": "earth_relief_4k.jpg",
@@ -285,7 +385,7 @@
    "height": 2048,
    "channels": "relief+water",
    "lonLeft": -180,
-   "exaggeration": 4.0,
+   "exaggeration": 4,
    "credit": "NOAA NCEI, ETOPO 2022 60 arc-second Global Relief Model (surface), DOI 10.25921/fd45-gt74",
    "source": "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif",
    "license": "Public domain (U.S. Government work)"
@@ -296,7 +396,7 @@
    "height": 2048,
    "channels": "relief",
    "lonLeft": -180,
-   "exaggeration": 2.0,
+   "exaggeration": 2,
    "credit": "NASA SVS CGI Moon Kit, LRO LOLA gridded elevation (LDEM 16 ppd)",
    "source": "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/ldem_16_uint.tif",
    "license": "Public domain (U.S. Government work)"
@@ -307,7 +407,7 @@
    "height": 2048,
    "channels": "relief",
    "lonLeft": -180,
-   "exaggeration": 2.0,
+   "exaggeration": 2,
    "credit": "NASA/JPL/GSFC MGS MOLA, global DEM 463 m, via USGS Astrogeology",
    "source": "https://planetarymaps.usgs.gov/mosaic/Mars_MGS_MOLA_DEM_mosaic_global_463m.tif",
    "license": "Public domain (U.S. Government work)"
@@ -318,7 +418,7 @@
    "height": 2048,
    "channels": "relief",
    "lonLeft": -180,
-   "exaggeration": 2.0,
+   "exaggeration": 2,
    "credit": "NASA/JHUAPL/CIW MESSENGER, USGS global DEM 665 m v2",
    "source": "https://planetarymaps.usgs.gov/mosaic/Mercury_Messenger_USGS_DEM_Global_665m_v2.tif",
    "license": "Public domain (U.S. Government work)"
@@ -331,13 +431,17 @@
    "lonLeft": 0,
    "credit": "ESA/DLR/FU Berlin, Mars Express HRSC SRC Phobos global mosaic (16 px/deg), via USGS",
    "source": "https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/Phobos_ME_SRC_Mosaic_Global_16ppd.tif",
-   "license": "ESA/DLR/FU Berlin, CC BY-SA 3.0 IGO"
+   "license": "ESA/DLR/FU Berlin, CC BY-SA 3.0 IGO",
+   "ktx2": {
+    "file": "phobos.ktx2",
+    "meanLum": 0.34211
+   }
   }
  },
  "diskColors": {
   "saturn": {
    "linearRGB": [
-    1.0,
+    1,
     0.7874,
     0.4205
    ],
@@ -348,7 +452,7 @@
    "linearRGB": [
     0.6344,
     0.9656,
-    1.0
+    1
    ],
    "credit": "NASA/JPL-Caltech, Voyager 2 (PIA18182)",
    "source": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia18/pia18182/PIA18182.jpg"
@@ -357,14 +461,14 @@
    "linearRGB": [
     0.066,
     0.1511,
-    1.0
+    1
    ],
    "credit": "NASA/JPL, Voyager 2 (PIA01492)",
    "source": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia01/pia01492/PIA01492.jpg"
   },
   "venus": {
    "linearRGB": [
-    1.0,
+    1,
     0.9607,
     0.9305
    ],
