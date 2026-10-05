@@ -5,6 +5,7 @@ import {
 import { buildStarColorLut } from '../astro/photometry';
 import type { StarCatalog, StarNode } from '../universe/StarCatalog';
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
+import { VIEW_CONE } from './Cull';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
 
 export const STAR_VERT = /* glsl */ `
@@ -147,6 +148,8 @@ export class StarFieldLayer {
     for (const p of this.objects.values()) p.visible = false;
     for (const n of this.catalog.needed) {
       if (n.drawCount === 0) continue;
+      // nodes outside the view: no draw call (the node's cube, as a sphere, relative to the eye)
+      if (!VIEW_CONE.sees(n.center[0] - camPc.x, n.center[1] - camPc.y, n.center[2] - camPc.z, n.half * 1.7320508)) continue;
       const pts = this.objects.get(n.id) ?? this.create(n);
       const { origin, scale } = this.catalog.nodeFrame(n);
       const u = (pts.material as ShaderMaterial).uniforms;

@@ -1,3 +1,4 @@
+import { VIEW_CONE } from './Cull';
 import {
   AdditiveBlending, BackSide, BufferAttribute, BufferGeometry, DataTexture, Group, Matrix3, Mesh, PlaneGeometry, Points, ShaderMaterial, SphereGeometry, Vector3, Vector4,
 } from 'three';
@@ -578,6 +579,8 @@ export class DeepSkyLayer {
       const dist = rel.length();
       const pr = Math.atan2(o.radius, dist) / pixelAngle;
       this.views.push({ obj: o, rel: rel.clone(), dist, pixelRadius: pr });
+      // outside the view: no draw calls (twice the radius covers the glows and cluster stars)
+      const seen = VIEW_CONE.sees(rel.x, rel.y, rel.z, o.radius * 2);
       const vol = this.volumes.get(o);
       if (vol) {
         // below a few pixels the volume hands over to a glow that keeps its light
@@ -587,13 +590,18 @@ export class DeepSkyLayer {
         if (far.visible) {
           const sPx = Math.max(pr, 1.5);
           const s = (sPx * pixelAngle) * dist;
+          far.visible = seen || VIEW_CONE.sees(rel.x, rel.y, rel.z, s * 4);
+        }
+        if (far.visible) {
+          const sPx = Math.max(pr, 1.5);
+          const s = (sPx * pixelAngle) * dist;
           far.matrix.makeScale(s, s, s).setPosition(rel);
           far.matrixWorldNeedsUpdate = true;
           const fu = (far.material as ShaderMaterial).uniforms;
           fu.uAmp.value = far.userData.amp * (pr / sPx) ** 2 * wFar;
           fu.uClipScale.value = 1 / Math.max(dist, 1);
         }
-        vol.visible = pr > 3 && wFar < 0.99;
+        vol.visible = seen && pr > 3 && wFar < 0.99;
         if (vol.visible) {
           const u = (vol.material as ShaderMaterial).uniforms;
           u.uFade.value = 1 - wFar;
@@ -607,7 +615,7 @@ export class DeepSkyLayer {
       if (glow) {
         // the glow gives way to the cluster's stars as they resolve
         const fade = Math.min(1, Math.max(0, (dist / o.radius - 1.5) / 6));
-        glow.visible = pr > 0.8 && fade > 0.01;
+        glow.visible = seen && pr > 0.8 && fade > 0.01;
         if (glow.visible) {
           const s = o.radius * 0.8;
           glow.matrix.makeScale(s, s, s).setPosition(rel);
@@ -620,7 +628,7 @@ export class DeepSkyLayer {
       const pts = this.stars.get(o);
       if (pts) {
         (pts.material as ShaderMaterial).uniforms.uOffset.value.copy(o.posPc).sub(camPc);
-        pts.visible = dist < o.radius * 400;
+        pts.visible = seen && dist < o.radius * 400;
       }
     }
   }
