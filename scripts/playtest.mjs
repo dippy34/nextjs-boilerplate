@@ -336,6 +336,17 @@ if (which !== 'vr') {
     let r = await ro(); metric('orbit', { alt: Math.round(r.alt / 1e3), v: Math.round(r.v) });
     if (!(r.v > 5000)) flag('orbit speed readout ~0 in low Earth orbit', JSON.stringify(r).slice(0, 200), null, 1);
     await look(p, 'd19-ship-orbit', { pop: false });
+    // cockpit -> chase must keep physics and the HUD running (bug: setMode called flight.disable)
+    await p.keyboard.press('KeyV'); await frames(p, 2);
+    const c0 = await p.evaluate(() => ({ mode: window.app.game.mode, on: window.app.game.flight.on, pos: window.app.game.flight.ship.upos.toVector3().toArray(), hud: document.querySelector('.fl-panel')?.textContent ?? '' }));
+    await frames(p, 8);
+    const c1 = await p.evaluate(() => ({ on: window.app.game.flight.on, pos: window.app.game.flight.ship.upos.toVector3().toArray(), hud: document.querySelector('.fl-panel')?.textContent ?? '' }));
+    const moved = Math.hypot(...c1.pos.map((x, i) => x - c0.pos[i]));
+    metric('chase', { mode: c0.mode, on: c1.on, movedM: Math.round(moved), hudChanged: c0.hud !== c1.hud });
+    if (c0.mode === 'chase' && (!c1.on || moved < 1)) flag('switching to the chase view freezes the ship (physics off)', `flight.on=${c1.on}, moved ${moved.toFixed(1)} m in 8 frames`, null, 1);
+    else if (c0.mode === 'chase' && c0.hud && c0.hud === c1.hud) flag('switching to the chase view freezes the flight HUD', 'HUD text unchanged over 8 frames', null, 2);
+    await look(p, 'd19b-ship-chase', { pop: false, label: false });
+    while (await p.evaluate(() => window.app.game.mode) !== 'cockpit') { await p.keyboard.press('KeyV'); await frames(p, 2); }
     // warp to the Moon
     await p.evaluate(() => { const a = window.app; const e = a.findByName('Earth'); a.placeNear(e, e.radius * 12, 60, 10); a.select(a.findByName('Moon')); });
     await frames(p, 4);
@@ -355,11 +366,20 @@ if (which !== 'vr') {
     if (hasStation) {
       await p.evaluate(() => { const a = window.app; const s = a.game.traffic.stations[0]; a.select(s); a.goTo(s); });
       await p.waitForFunction(() => !window.app.rig.autopilot, null, { timeout: 300000 });
+      // record the station's on-screen presence every frame while the docking computer flies
+      await p.evaluate(() => { const a = window.app, s = a.game.traffic.stations[0]; window.__stn = []; const V = s.group.position.constructor;
+        const tick = () => { if (a.game.docked) return; if (a.game.isDocking ?? a.game.docking) { s.group.updateMatrixWorld(true); const w = s.group.getWorldPosition(new V()); const c = a.renderer.camera.getWorldPosition(new V()); window.__stn.push({ vis: s.group.visible && (s.group.parent !== null), d: w.distanceTo(c) }); } if (window.__stn.length < 400) requestAnimationFrame(tick); };
+        requestAnimationFrame(tick); });
       await p.keyboard.down('KeyW');
       await p.waitForFunction(() => window.app.game.docked !== null || window.app.game.docking !== null, null, { timeout: 120000 }).catch(() => undefined);
       await p.keyboard.up('KeyW');
       const docked = await p.waitForFunction(() => window.app.game.docked !== null, null, { timeout: 120000 }).then(() => true).catch(() => false);
       if (!docked) flag('docking computer did not dock', '', null, 2);
+      const stn = await p.evaluate(() => window.__stn);
+      const ds = stn.map((x) => x.d).sort((x, y) => x - y); const med = ds[ds.length >> 1] ?? 0;
+      const gone = stn.filter((x) => !x.vis || x.d > med * 20 + 5e3).length;
+      metric('stationDuringDocking', { frames: stn.length, gone, medianM: Math.round(med) });
+      if (gone) flag('docking station disappears while the docking computer flies', `${gone}/${stn.length} frames hidden or misplaced (median distance ${Math.round(med)} m)`, null, 1);
       await frames(p, 6);
       await look(p, 'd22-ship-docked', { pop: false });
       await p.keyboard.down('KeyS'); await frames(p, 6); await p.keyboard.up('KeyS');
