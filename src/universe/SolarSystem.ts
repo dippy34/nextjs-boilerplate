@@ -1,6 +1,6 @@
 import { Matrix3, Matrix4, Vector3 } from 'three';
 import { type ApproxElements, Ephemeris } from '../astro/ephemeris';
-import { elementsFromMeanAnomaly, keplerState, type OrbitalElements } from '../astro/kepler';
+import { elementsFromMeanAnomaly, keplerState, type OrbitalElements, periodDays } from '../astro/kepler';
 import { evaluateRotation, type NutPrecAngles, orientationMatrix, type Orientation, type RotationModel } from '../astro/rotation';
 import { eclToEqu, OBLIQUITY_J2000, poleFrame } from '../core/frames';
 import { setLeapSeconds } from '../core/time';
@@ -64,6 +64,12 @@ export class SolarSystem {
   private tmp = new Vector3();
   private tmp2 = new Vector3();
   private orient: Orientation = { ra: 0, dec: 0, w: 0 };
+  /** per moon / minor body: last computed state relative to its parent (or the Sun), when, and how stale it may get */
+  private rel = new Map<Body, { pos: Vector3; vel: Vector3; jd: number; limit: number }>();
+  private frameNo = 0;
+  private tmp3 = new Vector3();
+  private tmp4 = new Vector3();
+  private tmp5 = new Vector3();
 
   constructor(readonly data: SystemJson, readonly ephemeris: Ephemeris) {
     this.angles = data.nutPrecAngles;
@@ -185,8 +191,17 @@ export class SolarSystem {
     return this.ephemOf.get(b)?.kind ?? 'none';
   }
 
-  /** Update every body's position, velocity and orientation for TDB Julian date `jd`. */
-  update(jd: number, timeDirection = 0): void {
+  /**
+   * Update every body's position, velocity and orientation for TDB Julian date `jd`.
+   *
+   * With `focus` (the main loop: the bodies the camera is at, looking at or sees resolved), the
+   * cost follows what is on screen: moons and minor bodies outside it keep their last orbital state
+   * until it is more than 1° of orbit (or a day) old, and their orientation is refreshed a sixteenth
+   * at a time. The focus bodies, their parents' and their own moons are exact every frame. Without
+   * `focus` everything is computed (time jumps, God mode, tests).
+   */
+  update(jd: number, timeDirection = 0, focus?: ReadonlySet<Body>): void {
+    const frame = this.frameNo++;
     this.jd = jd;
     const eph = this.ephemeris;
     eph.request(jd, timeDirection);
@@ -223,34 +238,33 @@ export class SolarSystem {
     }
 
     // 2) Moons relative to their planet (mean elements); fall back for the Moon outside DE.
-    const moonRel = new Map<Body, Vector3>();
-    // (velocities relative to the planet, kept for the planet's own velocity below)
-    const moonRelVel = new Map<Body, Vector3>();
+    const hot = (b: Body) => !focus || focus.has(b) || (b.parent !== null && focus.has(b.parent));
     for (const b of this.bodies) {
       const e = this.ephemOf.get(b);
       if (!e) continue;
       if (e.kind !== 'satellite') continue;
+      let r = this.rel.get(b);
+      if (!r) {
+        r = { pos: new Vector3(), vel: new Vector3(), jd: NaN, limit: 0 };
+        this.rel.set(b, r);
+      }
       if (b.id === 301 && de) {
         // DE442S: Moon relative to Earth = (EMB->Moon) - (EMB->Earth)
-        const rel = new Vector3(), rv = new Vector3();
-        eph.evaluate(3, 301, jd, rel, rv);
+        eph.evaluate(3, 301, jd, r.pos, r.vel);
         eph.evaluate(3, 399, jd, v, v2);
-        rel.sub(v).multiplyScalar(1e3);
-        b.vel.copy(rv.sub(v2).multiplyScalar(1e3 / DAY));
-        moonRel.set(b, rel);
-        moonRelVel.set(b, b.vel.clone());
-        continue;
+        r.pos.sub(v).multiplyScalar(1e3);
+        r.vel.sub(v2).multiplyScalar(1e3 / DAY);
+        r.jd = jd;
+      } else if (hot(b) || !(Math.abs(jd - r.jd) <= r.limit)) {
+        const sat = this.satelliteElements(b, jd);
+        if (!sat) { this.rel.delete(b); continue; }
+        keplerState(sat.el, jd, r.pos, r.vel);
+        r.pos.applyMatrix3(sat.frame);
+        r.vel.applyMatrix3(sat.frame);
+        r.jd = jd;
+        r.limit = Math.min(1, periodDays(sat.el) / 360);
       }
-      const s = this.satelliteElements(b, jd);
-      if (!s) continue;
-      const rel = new Vector3();
-      const vel = new Vector3();
-      keplerState(s.el, jd, rel, vel);
-      rel.applyMatrix3(s.frame);
-      vel.applyMatrix3(s.frame);
-      moonRel.set(b, rel);
-      moonRelVel.set(b, vel);
-      b.vel.copy(vel);
+      b.vel.copy(r.vel);
     }
 
     // 3) Planet body = barycentre - sum(m_i/M) r_i ; then moons absolute
@@ -259,44 +273,58 @@ export class SolarSystem {
       if (!e) continue;
       if (e.kind !== 'spk' || !e.barycenter || !p.systemGm) continue;
       for (const m of p.children) {
-        const r = moonRel.get(m);
-        if (r && m.gm > 0) p.pos.addScaledVector(r, -m.gm / p.systemGm);
-        // the planet's velocity likewise (the moons' momentum about the barycentre): God mode's
-        // N-body sandbox starts from these states, and a planet moving with its barycentre's
-        // velocity would leave its moons behind
-        const rv = moonRelVel.get(m);
-        if (rv && m.gm > 0) p.vel.addScaledVector(rv, -m.gm / p.systemGm);
+        const r = this.rel.get(m);
+        if (!r || !(m.gm > 0)) continue;
+        // (the velocity likewise, the moons' momentum about the barycentre: God mode's N-body
+        // sandbox starts from these states, and a planet moving with its barycentre's velocity
+        // would leave its moons behind)
+        p.pos.addScaledVector(r.pos, -m.gm / p.systemGm);
+        p.vel.addScaledVector(r.vel, -m.gm / p.systemGm);
       }
     }
     if (!de) {
       // Earth from EMB using the mean-element Moon
       const earth = this.byId.get(399)!;
       const moon = this.byId.get(301)!;
-      const r = moonRel.get(moon);
-      if (r) earth.pos.addScaledVector(r, -moon.gm / (earth.gm + moon.gm));
-      const rv = moonRelVel.get(moon);
-      if (rv) earth.vel.addScaledVector(rv, -moon.gm / (earth.gm + moon.gm));
+      const r = this.rel.get(moon);
+      if (r) {
+        earth.pos.addScaledVector(r.pos, -moon.gm / (earth.gm + moon.gm));
+        earth.vel.addScaledVector(r.vel, -moon.gm / (earth.gm + moon.gm));
+      }
     }
-    for (const [m, r] of moonRel) {
-      const p = m.parent!;
-      m.pos.copy(p.pos).add(r);
-      m.vel.add(p.vel);
-      m.valid = p.valid;
+    for (const b of this.bodies) {
+      const e = this.ephemOf.get(b);
+      if (!e || e.kind !== 'satellite') continue;
+      const r = this.rel.get(b);
+      if (!r) continue;
+      const p = b.parent!;
+      b.pos.copy(p.pos).add(r.pos);
+      b.vel.copy(r.vel).add(p.vel);
+      b.valid = p.valid;
     }
 
     // 4) Minor bodies on heliocentric Kepler orbits
     for (const [b, el] of this.keplerEl) {
-      keplerState(el, jd, v, v2);
-      eclToEqu(v);
-      eclToEqu(v2);
-      b.pos.copy(this.sun.pos).add(v);
-      b.vel.copy(this.sun.vel).add(v2);
+      let r = this.rel.get(b);
+      if (!r) {
+        r = { pos: new Vector3(), vel: new Vector3(), jd: NaN, limit: Math.min(1, periodDays(el) / 360) };
+        this.rel.set(b, r);
+      }
+      if (hot(b) || !(Math.abs(jd - r.jd) <= r.limit)) {
+        keplerState(el, jd, r.pos, r.vel);
+        eclToEqu(r.pos);
+        eclToEqu(r.vel);
+        r.jd = jd;
+      }
+      b.pos.copy(this.sun.pos).add(r.pos);
+      b.vel.copy(this.sun.vel).add(r.vel);
     }
 
-    // 5) Absolute positions and orientation
-    for (const b of this.bodies) {
+    // 5) Absolute positions and orientation (outside the focus a sixteenth a frame: dots on screen)
+    for (let i = 0; i < this.bodies.length; i++) {
+      const b = this.bodies[i];
       b.upos.set(b.pos.x, b.pos.y, b.pos.z);
-      this.updateOrientation(b, jd);
+      if (!focus || b.kind === 'star' || b.kind === 'planet' || focus.has(b) || (i & 15) === (frame & 15)) this.updateOrientation(b, jd);
     }
   }
 
@@ -312,10 +340,10 @@ export class SolarSystem {
       // Synchronous rotation (tidal locking): prime meridian faces the planet, pole along the orbit normal.
       const r = this.tmp.copy(p.pos).sub(b.pos).normalize();
       const relVel = this.tmp2.copy(b.vel).sub(p.vel);
-      const n = new Vector3().crossVectors(r, relVel).normalize().negate();
+      const n = this.tmp3.crossVectors(r, relVel).normalize().negate();
       if (n.lengthSq() < 0.5) n.set(0, 0, 1);
-      const y = new Vector3().crossVectors(n, r).normalize();
-      const x = new Vector3().crossVectors(y, n);
+      const y = this.tmp4.crossVectors(n, r).normalize();
+      const x = this.tmp5.crossVectors(y, n);
       b.orientation.makeBasis(x, y, n);
       return;
     }
