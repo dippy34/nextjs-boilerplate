@@ -134,7 +134,8 @@ const stateNaN = (page) => page.evaluate(() => {
   const a = window.app; const bad = [];
   const v = a.rig.upos.toVector3(); if (![v.x, v.y, v.z].every(Number.isFinite)) bad.push('rig position');
   if (!a.rig.quat.toArray().every(Number.isFinite)) bad.push('rig orientation');
-  const ro = a.game?.flight?.on ? a.game.flight.readout : null; if (ro) for (const [k, x] of Object.entries(ro)) if (typeof x === 'number' && Number.isNaN(x)) bad.push(`flight.readout.${k}`);
+  // (NaN in tImpact/tAp/tPe/ap/pe means "none": no impact ahead, no apsis; displays check isFinite)
+  const ro = a.game?.flight?.on ? a.game.flight.readout : null; if (ro) for (const [k, x] of Object.entries(ro)) if (typeof x === 'number' && Number.isNaN(x) && !/^(tImpact|tAp|tPe|ap|pe)$/.test(k)) bad.push(`flight.readout.${k}`);
   return bad;
 });
 
