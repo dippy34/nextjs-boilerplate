@@ -1,4 +1,4 @@
-import { AdditiveBlending, BufferAttribute, BufferGeometry, type DataTexture, Group, Points, ShaderMaterial, Vector3 } from 'three';
+import { AdditiveBlending, type DataTexture, Group, Points, ShaderMaterial, Vector3 } from 'three';
 import { teffToLut } from '../astro/photometry';
 import { LY, PC, SUN_ABS_MAG } from '../core/units';
 import { formatRaDec } from '../core/frames';
@@ -7,18 +7,24 @@ import { BANDS, cellSize, generateCell, reach, spectralLabel, type StarCell } fr
 import { CatalogStar } from '../universe/Stars';
 import { BAND_LIGHT, dustBetween, F_LOG0, F_N, F_STEP, generateGalaxyCell, INTERIOR, interiorFrame } from './GalaxyInterior';
 import { smooth } from './GalaxiesLayer';
-import { STAR_FRAG, STAR_VERT } from './StarField';
+import { STAR_FRAG } from './StarField';
+import { POOL_VERT, type PoolHandle, StarPool } from './StarPool';
 
 const ABS_MIN = -12;
 const ABS_STEP = 0.125;
 /** generated cells kept in memory */
 const MAX_CELLS = 2500;
+/** stars resident on the GPU (one draw call): a headset's budget, and a desktop's */
+export const STAR_BUDGET = { vr: 150_000, desktop: 450_000 };
 
 interface Entry {
   cell: StarCell;
   /** galaxy index for cells inside other galaxies (-1: the Milky Way) */
   gi: number;
-  points: Points | null;
+  /** where its stars sit in the pool (null: no stars, or waiting for room) */
+  handle: PoolHandle | null;
+  /** packed magnitude and colour per star (kept to re-add after an eviction from the pool) */
+  mt: Uint16Array | null;
   /** visual extinction (mag) from the eye to the cell, and where the eye was when it was computed */
   ext: number;
   extAt: Vector3 | null;
@@ -61,7 +67,13 @@ export class ProceduralStarLayer {
   /** cells drawn this frame */
   readonly visible: Entry[] = [];
   private entries = new Map<string, Entry>();
-  private template: ShaderMaterial;
+  readonly pool: StarPool;
+  private points: Points;
+  /**
+   * The magnitude the stars are generated to: the limiting magnitude, or brighter while the
+   * point budget is short (faint bands then thin out first, their light left to the volume).
+   */
+  mGen = 10;
   private frame = 0;
   private stars = new Map<string, ProceduralStar>();
   pending = 0;
@@ -72,7 +84,7 @@ export class ProceduralStarLayer {
   /** workers generating cells inside other galaxies (started when first needed) */
   private gworkers: Worker[] = [];
 
-  constructor(private psf: Record<string, { value: number }>, private colorLut: DataTexture) {
+  constructor(psf: Record<string, { value: number }>, colorLut: DataTexture, vr = false) {
     this.group.name = 'procedural-stars';
     const n = Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 1));
     for (let i = 0; i < n; i++) {
@@ -80,62 +92,81 @@ export class ProceduralStarLayer {
       w.onmessage = (ev) => this.receive(ev.data);
       this.workers.push(w);
     }
-    this.template = new ShaderMaterial({
-      name: 'procedural-stars', vertexShader: STAR_VERT, fragmentShader: STAR_FRAG,
+    this.pool = new StarPool(vr ? STAR_BUDGET.vr : STAR_BUDGET.desktop);
+    const mat = new ShaderMaterial({
+      name: 'procedural-stars', vertexShader: POOL_VERT, fragmentShader: STAR_FRAG,
       uniforms: {
         ...psf, uOffset: { value: new Vector3() }, uScale: { value: 1 }, uAbsMin: { value: ABS_MIN }, uAbsStep: { value: ABS_STEP },
-        uHideRadius: { value: 0 }, uExtinction: { value: 0 }, uColorLut: { value: colorLut },
+        uHideRadius: { value: 0 }, uExtinction: { value: 0 }, uColorLut: { value: colorLut }, uSlots: { value: this.pool.slots },
       },
       transparent: true, depthWrite: false, depthTest: true, blending: AdditiveBlending,
     });
+    this.points = new Points(this.pool.geometry, mat);
+    this.points.frustumCulled = false;
+    this.points.matrixAutoUpdate = false;
+    this.points.name = 'procedural-stars';
+    this.group.add(this.points);
   }
 
-  private makePoints(e: Entry): Points | null {
-    const c = e.cell;
-    if (!c.count) return null;
-    const pos = c.pos.subarray(0, c.count * 3);
+  /** the stars' packed magnitude and colour */
+  private pack(c: StarCell): Uint16Array {
     const mt = new Uint16Array(c.count);
     for (let i = 0; i < c.count; i++) {
       const a = Math.max(0, Math.min(255, Math.round((c.absMag[i] - ABS_MIN) / ABS_STEP)));
       const t = Math.round(teffToLut(c.teff[i]) * 255);
       mt[i] = a | (t << 8);
     }
-    const geo = new BufferGeometry();
-    const attr = new BufferAttribute(pos, 3);
-    geo.setAttribute('aPos', attr);
-    geo.setAttribute('position', attr);
-    geo.setAttribute('aMT', new BufferAttribute(mt, 1, false));
-    const mat = this.template.clone();
-    Object.assign(mat.uniforms, this.psf, { uColorLut: { value: this.colorLut } });
-    const pts = new Points(geo, mat);
-    pts.frustumCulled = false;
-    pts.matrixAutoUpdate = false;
-    pts.name = `procedural-${c.key}`;
-    this.group.add(pts);
-    return pts;
+    return mt;
+  }
+
+  /** Put an entry's stars in the pool, evicting cells unused this frame if needed. */
+  private place(e: Entry): boolean {
+    if (e.handle || !e.mt) return true;
+    if (this.pool.freeStars < e.cell.count) {
+      // (once nothing more can be freed this frame, the rest wait)
+      if (this.noRoom === this.frame) return false;
+      this.free(e.cell.count);
+      if (this.pool.freeStars < e.cell.count) { this.noRoom = this.frame; return false; }
+    }
+    e.handle = this.pool.add(e.cell.pos, e.mt, e.cell.count);
+    return !!e.handle;
+  }
+
+  private noRoom = -1;
+  /** free room for `n` stars: cells not drawn this frame, least recently used first */
+  private free(n: number): void {
+    const old = [...this.entries.values()].filter((x) => x.handle && x.lastUsed < this.frame).sort((a, b) => a.lastUsed - b.lastUsed);
+    for (const x of old) {
+      if (this.pool.freeStars >= n) break;
+      this.pool.remove(x.handle!);
+      x.handle = null;
+    }
   }
 
   private receive(d: { gi?: number; key: string; band: number; ix: number; iy: number; iz: number; size: number; count: number; centre: number[];
     pos: Float32Array; absMag: Float32Array; teff: Float32Array; cls: Uint8Array }): void {
     this.inflight.delete(d.key);
     const cell: StarCell = { ...d, centre: new Vector3(d.centre[0], d.centre[1], d.centre[2]) };
-    const e: Entry = { cell, gi: d.gi ?? -1, points: null, ext: 0, extAt: null, lastUsed: this.frame };
-    e.points = this.makePoints(e);
-    if (e.points) e.points.visible = false;
+    const e: Entry = { cell, gi: d.gi ?? -1, handle: null, mt: cell.count ? this.pack(cell) : null, ext: 0, extAt: null, lastUsed: this.frame };
     this.entries.set(d.key, e);
   }
 
   /** `camPc` ICRF heliocentric pc; `mLim` current limiting magnitude; `hidePc` near-star radius. */
   update(camPc: Vector3, mLim: number, hidePc: number, maxRequests = 6): void {
     this.frame++;
-    for (const e of this.visible) if (e.points) e.points.visible = false;
+    for (const e of this.visible) if (e.handle) this.pool.hide(e.handle.slot);
     this.visible.length = 0;
-    if (!this.enabled) return;
+    this.points.visible = this.enabled;
+    if (!this.enabled) { INTERIOR.active = null; return; }
+    // the point budget: generate to a brighter magnitude while the pool is (nearly) full
+    const mTop = mLim + 0.3;
+    this.mGen = Math.min(this.mGen, mTop);
+    const mGen = this.mGen;
     const camGal = GALAXY.toGal(camPc);
     const want: { k: number; ix: number; iy: number; iz: number; d: number; gi: number }[] = [];
     // (far outside the Milky Way its model holds no stars)
     if (camGal.length() < 60000) for (let k = 0; k < BANDS.length; k++) {
-      const R = reach(BANDS[k].M, mLim + 0.3);
+      const R = reach(BANDS[k].M, mGen);
       const S = cellSize(k);
       const lo = [camGal.x - R, camGal.y - R, camGal.z - R].map((v) => Math.floor(v / S));
       const hi = [camGal.x + R, camGal.y + R, camGal.z + R].map((v) => Math.floor(v / S));
@@ -148,15 +179,19 @@ export class ProceduralStarLayer {
         if (d <= R) want.push({ k, ix, iy, iz, d, gi: -1 });
       }
     }
-    const inside = this.galaxyCells(camPc, mLim, want);
+    const inside = this.galaxyCells(camPc, mGen, want);
     want.sort((a, b) => a.k - b.k || a.d - b.d);
     const wanted = new Float32Array(BANDS.length), ready = new Float32Array(BANDS.length);
-    let extBudget = 40;
+    const reachK = BANDS.map((b) => reach(b.M, mGen));
+    let extBudget = 40, starved = 0;
     this.pending = 0;
     const g = new Vector3();
     const dA = new Vector3(), dB = new Vector3();
+    const keyOf = (w: { k: number; ix: number; iy: number; iz: number; gi: number }) => (w.gi >= 0 ? `g${w.gi}:${w.k}:${w.ix}:${w.iy}:${w.iz}` : `${w.k}:${w.ix}:${w.iy}:${w.iz}`);
+    // (cells still wanted are never evicted to make room for others: the budget shrinks instead)
+    for (const w of want) { const e = this.entries.get(keyOf(w)); if (e) e.lastUsed = this.frame; }
     for (const w of want) {
-      const key = w.gi >= 0 ? `g${w.gi}:${w.k}:${w.ix}:${w.iy}:${w.iz}` : `${w.k}:${w.ix}:${w.iy}:${w.iz}`;
+      const key = keyOf(w);
       if (w.gi >= 0) wanted[w.k]++;
       const e = this.entries.get(key);
       if (!e) {
@@ -169,9 +204,10 @@ export class ProceduralStarLayer {
         }
         continue;
       }
-      if (w.gi >= 0) ready[w.k]++;
       e.lastUsed = this.frame;
-      if (!e.points) continue;
+      if (e.mt && !e.handle && !this.place(e)) { starved++; continue; }
+      if (w.gi >= 0) ready[w.k]++;
+      if (!e.handle) continue;
       // dust towards the cell, refreshed when the eye has moved a few percent of the distance
       const toCell = e.cell.centre.distanceTo(camPc);
       if ((!e.extAt || e.extAt.distanceTo(camPc) > 0.03 * toCell + 1) && extBudget-- > 0) {
@@ -181,24 +217,28 @@ export class ProceduralStarLayer {
         } else e.ext = extinction(camGal, GALAXY.toGal(e.cell.centre, g), 16);
         e.extAt = camPc.clone();
       }
-      const u = (e.points.material as ShaderMaterial).uniforms;
-      (u.uOffset.value as Vector3).copy(e.cell.centre).sub(camPc);
-      u.uHideRadius.value = hidePc;
       // stars of another galaxy fade in as the explorer enters it
-      u.uExtinction.value = e.ext + (e.gi >= 0 && inside ? -2.5 * Math.log10(Math.max(inside.w, 1e-4)) : 0);
-      e.points.visible = true;
+      const fadeIn = e.gi >= 0 && inside ? -2.5 * Math.log10(Math.max(inside.w, 1e-4)) : 0;
+      const c = e.cell.centre;
+      this.pool.show(e.handle.slot, c.x - camPc.x, c.y - camPc.y, c.z - camPc.z, e.ext + fadeIn, reachK[w.k]);
       this.visible.push(e);
     }
+    (this.points.material as ShaderMaterial).uniforms.uHideRadius.value = hidePc;
+    this.pool.commit();
     if (this.entries.size > MAX_CELLS) this.evict();
+    // over budget (cells waiting for room, or the pool nearly full): bring the faint end in;
+    // with room to spare, let it back out towards the limiting magnitude
+    const fill = this.pool.used / this.pool.capacity;
+    if (starved > 0 || fill > 0.92 || want.length > MAX_CELLS * 0.8) this.mGen = Math.max(mTop - 6, this.mGen - 0.05);
+    else if (fill < 0.75 && this.pending < 8) this.mGen = Math.min(mTop, this.mGen + 0.02);
     // the share of the galaxy's light carried by the stars drawn, by distance from the eye: bands
     // drawn out to their reach, counted as far as their cells are ready
     if (inside) {
       const F = new Float32Array(F_N);
-      const reachK = BANDS.map((b) => reach(b.M, mLim + 0.3));
       for (let j = 0; j < F_N; j++) {
         const d = 10 ** (F_LOG0 + j * F_STEP);
         let f = 0;
-        for (let k = 0; k < BANDS.length; k++) if (wanted[k] > 0) f += BAND_LIGHT[k] * (ready[k] / wanted[k]) * (1 - smooth(0.8 * reachK[k], 1.25 * reachK[k], d));
+        for (let k = 0; k < BANDS.length; k++) if (wanted[k] > 0) f += BAND_LIGHT[k] * (ready[k] / wanted[k]) * (1 - smooth(0.8 * reachK[k], reachK[k], d));
         F[j] = Math.min(1, f) * inside.w;
       }
       INTERIOR.active = { gi: inside.gi, w: inside.w, F };
@@ -231,7 +271,7 @@ export class ProceduralStarLayer {
    * Inside (or close to) another galaxy: its cells within each band's reach, in its disc frame and
    * within its box. Returns the galaxy and how far its stars have faded in (from 1.6 to 1.1 radii).
    */
-  private galaxyCells(camPc: Vector3, mLim: number, want: { k: number; ix: number; iy: number; iz: number; d: number; gi: number }[]): { gi: number; w: number } | null {
+  private galaxyCells(camPc: Vector3, mGen: number, want: { k: number; ix: number; iy: number; iz: number; d: number; gi: number }[]): { gi: number; w: number } | null {
     let gi = -1, best = Infinity;
     const rel = new Vector3();
     INTERIOR.galaxies.forEach((g, i) => {
@@ -247,7 +287,7 @@ export class ProceduralStarLayer {
     const half = Math.max(e.x, e.y, e.z) * fr.rpc;
     const halfZ = (fr.model.look.disc ? Math.max(e.x, e.y, e.z) : e.z) * fr.rpc;
     for (let k = 0; k < BANDS.length; k++) {
-      const R = reach(BANDS[k].M, mLim + 0.3);
+      const R = reach(BANDS[k].M, mGen);
       const S = cellSize(k);
       const lo = [Math.max(cam.x - R, -half), Math.max(cam.y - R, -half), Math.max(cam.z - R, -halfZ)].map((v) => Math.floor(v / S));
       const hi = [Math.min(cam.x + R, half), Math.min(cam.y + R, half), Math.min(cam.z + R, halfZ)].map((v) => Math.floor(v / S));
@@ -265,17 +305,13 @@ export class ProceduralStarLayer {
   private evict(): void {
     const old = [...this.entries.values()].filter((e) => e.lastUsed < this.frame).sort((a, b) => a.lastUsed - b.lastUsed);
     for (const e of old.slice(0, this.entries.size - MAX_CELLS * 0.8)) {
-      if (e.points) {
-        this.group.remove(e.points);
-        e.points.geometry.dispose();
-        (e.points.material as ShaderMaterial).dispose();
-      }
+      if (e.handle) this.pool.remove(e.handle);
       this.entries.delete(e.cell.key);
     }
   }
 
   get drawnStars(): number {
-    return this.visible.reduce((s, e) => s + e.cell.count, 0);
+    return this.visible.reduce((s, e) => s + (e.handle ? e.cell.count : 0), 0);
   }
 
   /**
@@ -286,10 +322,13 @@ export class ProceduralStarLayer {
     const rel = new Vector3();
     for (const e of this.visible) {
       const c = e.cell;
+      const R = reach(BANDS[c.band].M, this.mGen);
       for (let i = 0; i < c.count; i++) {
         rel.set(c.centre.x + c.pos[i * 3] - camPc.x, c.centre.y + c.pos[i * 3 + 1] - camPc.y, c.centre.z + c.pos[i * 3 + 2] - camPc.z);
         const d = rel.length();
-        const m = c.absMag[i] + 5 * Math.log10(Math.max(d, 1e-9)) - 5 + e.ext;
+        if (d >= R) continue;
+        // (as drawn: fading out towards the band's reach)
+        const m = c.absMag[i] + 5 * Math.log10(Math.max(d, 1e-9)) - 5 + e.ext - 2.5 * Math.log10(Math.max(1 - smooth(0.8 * R, R, d), 1e-4));
         if (m > mLim) continue;
         fn(rel, m, () => this.star(c, i));
       }
