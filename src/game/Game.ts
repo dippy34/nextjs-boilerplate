@@ -101,12 +101,12 @@ export class Game {
     this.hud.group.visible = m === 'cockpit';
     this.ship.group.visible = m === 'chase';
     this.app.rig.inertia = m === 'off' ? 0 : 1.2;
-    if (m !== 'off' && !this.flight.on) {
-      // a flight starts in real time
+    if (m === 'off') this.flight.disable();
+    else if (!this.flight.on) {
+      // a flight starts in real time (switching cockpit <-> chase keeps the flight going)
       this.app.flightClock();
       this.flight.enable();
     }
-    else this.flight.disable();
     this.flightHud.setVisible(m !== 'off' && !this.app.vr.active);
     if (m === 'off') {
       this.docked = null;
@@ -163,7 +163,10 @@ export class Game {
     const world = a instanceof Station || a instanceof TrafficShip ? a.body : a instanceof Body && a.kind !== 'star' ? a : null;
     this.traffic.setBody(world);
     this.traffic.update(rig.upos, app.clock.jdTdb, dt);
+    const snapped = !!(this.docked || this.docking);
     this.updateDocking(dt);
+    // the docking computer moved the camera after the stations were placed: place them again
+    if (snapped || this.docking || this.docked) this.traffic.place(rig.upos);
     if (!this.flight.on) this.updateLanding(dt);
     this.updateFlightFx(dt);
     // engines, warp streaks, sound

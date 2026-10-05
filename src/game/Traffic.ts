@@ -115,10 +115,16 @@ export class Traffic {
 
   update(cam: UPos, jd: number, dt = 0): void {
     this.time += dt;
-    for (const st of this.stations) { st.update(jd, this.time); st.place(cam); }
+    for (const st of this.stations) st.update(jd, this.time);
+    for (const s of this.ships) s.update(jd);
+    this.place(cam);
+  }
+
+  /** Meshes relative to the camera; call again if the camera moves after update (docking snaps it). */
+  place(cam: UPos): void {
+    for (const st of this.stations) st.place(cam);
     const rel = new Vector3();
     for (const s of this.ships) {
-      s.update(jd);
       s.upos.sub(cam, rel);
       const g = s.model.group;
       g.visible = rel.length() < 3e6;
