@@ -70,6 +70,11 @@ class DynLine {
   readonly line: Line;
   readonly pos: Float32Array;
   readonly alpha: Float32Array;
+  /** cached conic samples relative to the primary (orbit lines), and the elements they were made from */
+  rel = new Float64Array(0);
+  nRel = 0;
+  key = [0, 0, 0, 0, 0];
+  keyFor = -1;
   constructor(readonly max: number, color: [number, number, number], alpha: number) {
     this.pos = new Float32Array(max * 3);
     this.alpha = new Float32Array(max).fill(1);
@@ -80,6 +85,7 @@ class DynLine {
     this.line.frustumCulled = false;
     this.line.matrixAutoUpdate = false;
     this.line.renderOrder = 6;
+    this.rel = new Float64Array(max * 3);
   }
   commit(n: number): void {
     this.line.geometry.setDrawRange(0, n);
@@ -155,7 +161,6 @@ export class GodLayer {
   private swarm: PointCloud;
   private bursts: Burst[] = [];
   private rings: Ring[] = [];
-  private tmp = new Float64Array(ORBIT_POINTS * 3);
   /** where the arrow's tip was drawn (camera-relative, m), for dragging */
   readonly tip = new Vector3();
   tipVisible = false;
@@ -350,10 +355,20 @@ export class GodLayer {
     const mu = p.gm + e.gm;
     if (r.lengthSq() === 0 || mu <= 0) { L.line.visible = false; return false; }
     const el = stateToElements(r, v, mu, 0);
-    const n = sampleOrbit(el, ORBIT_POINTS, this.tmp, r.length() * 6);
+    // the conic's shape is re-sampled only when it changed (a few parts in 1e5): N-body orbits
+    // drift slowly and Kepler ones not at all; otherwise only the offset to the primary moves
+    const K = L.key;
+    const same = L.nRel > 0 && L.keyFor === e.id && Math.abs(el.q - K[0]) < 1e-5 * K[0] && Math.abs(el.e - K[1]) < 1e-5
+      && Math.abs(el.i - K[2]) < 1e-3 && Math.abs(el.node - K[3]) < 1e-3 && Math.abs(el.peri - K[4]) < 1e-3 && el.e < 1;
+    if (!same) {
+      L.nRel = sampleOrbit(el, ORBIT_POINTS, L.rel, r.length() * 6);
+      K[0] = el.q; K[1] = el.e; K[2] = el.i; K[3] = el.node; K[4] = el.peri;
+      L.keyFor = e.id;
+    }
+    const n = L.nRel, rel = L.rel;
     const ox = p.pos.x - camV.x, oy = p.pos.y - camV.y, oz = p.pos.z - camV.z;
     for (let i = 0; i < n; i++) {
-      L.pos[i * 3] = ox + this.tmp[i * 3]; L.pos[i * 3 + 1] = oy + this.tmp[i * 3 + 1]; L.pos[i * 3 + 2] = oz + this.tmp[i * 3 + 2];
+      L.pos[i * 3] = ox + rel[i * 3]; L.pos[i * 3 + 1] = oy + rel[i * 3 + 1]; L.pos[i * 3 + 2] = oz + rel[i * 3 + 2];
       L.alpha[i] = 1;
     }
     let k = n;

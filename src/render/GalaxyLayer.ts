@@ -50,7 +50,15 @@ export class GalaxyGlow {
 
   /** Compile the ray-marching shader ahead of its first use. */
   compile(gl: WebGLRenderer): void {
+    // with the cube target bound, as in update(): the program depends on the output target
+    // (colour space, tone mapping), and compiling for the canvas left a compile mid-flight
+    const prevTarget = gl.getRenderTarget();
+    const xrWas = gl.xr.enabled;
+    gl.xr.enabled = false;
+    gl.setRenderTarget(this.target, 0);
     void gl.compileAsync(this.scene, this.cubeCam.children[0] as PerspectiveCamera).catch(() => undefined);
+    gl.xr.enabled = xrWas;
+    gl.setRenderTarget(prevTarget);
   }
 
   /** distance (pc) beyond which moving the eye visibly changes the glow */

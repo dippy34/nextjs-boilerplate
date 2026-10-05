@@ -4,6 +4,8 @@ import {
   Vector3, WebGLCoordinateSystem, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 import { installToneMapping, TONE_GLSL } from './shaders/tone';
+import { HITCH } from '../core/hitch';
+import { PERF } from '../perf/Perf';
 import { Governor, QUALITY, RENDER_SCALE, XR_VOLUME_FACTOR } from './Quality';
 import { OUTPUT_FRAGMENT } from './shaders/xr';
 
@@ -408,7 +410,8 @@ ${OUTPUT_FRAGMENT}
     const gl = this.gl;
     // adaptive quality: budget 60 Hz on a desktop, the session's rate in a headset
     const budget = this.presenting ? 1000 / ((gl.xr.getSession() as (XRSession & { frameRate?: number }) | null)?.frameRate || 72) : 1000 / 60;
-    if (this.governor.update(performance.now(), budget)) this.applyQuality();
+    HITCH.budgetMs = budget;
+    if (this.governor.update(performance.now(), budget, PERF.cpuMs[PERF.head], PERF.gpuMs[PERF.head])) this.applyQuality();
     if (this.presenting) {
       // three binds the headset's framebuffer (an XR render target backed by the session's
       // projection layer) before every XR frame: draw into that, never into the page canvas.
@@ -417,12 +420,14 @@ ${OUTPUT_FRAGMENT}
         if (!this.warnedXrTarget) console.warn('XR frame without the XR render target bound', target);
         this.warnedXrTarget = true;
       }
-      gl.setClearColor(0x000000, 1);
-      gl.clear(true, true, true);
       if (this.depthMode === 'reversed-z') this.reverseXrProjections();
       const xrTarget = gl.getRenderTarget();
+      // the volume pass first: on a tiled GPU (a standalone headset) leaving the eye buffers after
+      // clearing them would write the cleared tiles out and read them back in for the scene
       this.volQuad.visible = xrTarget ? this.volumePass(xrTarget.width, xrTarget.height, VOLUMES.scaleXr * XR_VOLUME_FACTOR[QUALITY.level]) : false;
       gl.setRenderTarget(xrTarget);
+      gl.setClearColor(0x000000, 1);
+      gl.clear(true, true, true);
       gl.render(this.scene, this.camera);
       return;
     }

@@ -82,8 +82,9 @@ check('the Moon mission completes and the discovery is logged', st.done.includes
 // 6. V again: chase view shows the ship
 await page.keyboard.press('KeyV');
 await frames(6);
-st = await page.evaluate(() => ({ mode: window.app.game.mode, ship: window.app.game.ship.group.visible, cockpit: window.app.game.cockpit.group.visible }));
+st = await page.evaluate(() => ({ mode: window.app.game.mode, ship: window.app.game.ship.group.visible, cockpit: window.app.game.cockpit.group.visible, flight: window.app.game.flight.on }));
 check('V switches to the chase view', st.mode === 'chase' && st.ship && !st.cockpit, JSON.stringify(st));
+check('switching cockpit -> chase keeps physics flight running', st.flight === true, JSON.stringify(st));
 await page.screenshot({ path: path.join(outDir, 'g3-chase.png'), timeout: 180000 });
 
 // 7. docking: fly to the station around the Moon, then in along its axis
@@ -103,6 +104,13 @@ await page.waitForFunction(() => window.app.game.docked !== null, null, { timeou
 st = await page.evaluate(() => { const g = window.app.game; return { docked: g.docked?.name ?? null, missions: g.missions.list.filter((m) => m.done).map((m) => m.id) }; });
 check('the docking computer docks the ship', !!st.docked, JSON.stringify(st));
 await frames(12);
+// the station mesh sits where the station is this frame (placed after the docking computer moves the camera)
+st = await page.evaluate(() => {
+  const a = window.app, s = a.game.traffic.stations[0], e = s.group.matrix.elements;
+  const rel = s.upos.sub(a.rig.upos);
+  return { visible: s.group.visible, err: Math.hypot(e[12] - rel.x, e[13] - rel.y, e[14] - rel.z) };
+});
+check('the docked station mesh is drawn at the station', st.visible !== false && st.err < 1, JSON.stringify(st));
 await page.screenshot({ path: path.join(outDir, 'g4-docked.png'), timeout: 180000 });
 await page.keyboard.down('KeyS');
 await frames(6);
