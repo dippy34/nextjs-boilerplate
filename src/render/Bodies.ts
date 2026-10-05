@@ -1,7 +1,7 @@
 import {
   AdditiveBlending, BufferAttribute, BufferGeometry, CustomBlending, DoubleSide, DynamicDrawUsage, FrontSide, Group,
-  ImageBitmapLoader, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, NoColorSpace, OneFactor,
-  OneMinusSrcAlphaFactor, PlaneGeometry, Points, Quaternion, RepeatWrapping, ShaderMaterial, SRGBColorSpace, Texture, Vector4, type WebGLRenderer,
+  LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, NoColorSpace, OneFactor,
+  OneMinusSrcAlphaFactor, PlaneGeometry, Points, Quaternion, RepeatWrapping, ShaderMaterial, Texture, Vector4, type WebGLRenderer,
   TextureLoader, Vector3, ClampToEdgeWrapping,
 } from 'three';
 import { blackbodyRGB, lambertPhase, luminance, sunIrradianceAt } from '../astro/photometry';
@@ -25,6 +25,7 @@ import { hashString, starLook, starLookUniforms, type StarLook } from './StarLoo
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
 import { MAT, MATERIALS } from './Materials';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
+import { loadMap } from './Uploads';
 
 interface MapInfo {
   file: string; channels: string; lonLeft: number; credit: string; width: number; height: number;
@@ -151,7 +152,6 @@ export class BodiesLayer {
   private textures = new Map<string, Promise<{ tex: Texture; meanLum: number }>>();
   private loadedTex = new Map<string, { tex: Texture; meanLum: number }>();
   private loader = new TextureLoader();
-  private bitmapLoader = new ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none' });
   private hiTex = new Map<string, { tex: Texture | null; lastWanted: number }>();
   private glare: Mesh | null = null;
   /** the Sun's corona and surface look */
@@ -226,8 +226,8 @@ export class BodiesLayer {
     if (!p) {
       const info = this.manifest.maps[key];
       const url = `${this.texBase}/${info ? info.file : key}`;
-      p = this.loader.loadAsync(url).then((tex) => {
-        tex.colorSpace = SRGBColorSpace;
+      // decoded off the main thread and uploaded in budgeted strips (Uploads.ts)
+      p = loadMap(url, { lum: true, setup: (tex) => {
         tex.wrapS = RepeatWrapping;
         tex.wrapT = ClampToEdgeWrapping;
         tex.minFilter = LinearMipmapLinearFilter;
@@ -235,8 +235,7 @@ export class BodiesLayer {
         tex.anisotropy = 8;
         // We decode sRGB ourselves in the shader to keep full control over albedo scaling.
         tex.colorSpace = '';
-        const meanLum = meanLinearLuminance(tex.image as HTMLImageElement);
-        const v = { tex, meanLum };
+      } }).then((v) => {
         this.loadedTex.set(key, v);
         return v;
       });
@@ -259,15 +258,14 @@ export class BodiesLayer {
 
   private loadData(key: string): Promise<Texture> {
     const info = this.manifest.maps[key];
-    return this.loader.loadAsync(`${this.texBase}/${info.file}`).then((tex) => {
+    return loadMap(`${this.texBase}/${info.file}`, { setup: (tex) => {
       tex.colorSpace = NoColorSpace;
       tex.wrapS = RepeatWrapping;
       tex.wrapT = ClampToEdgeWrapping;
       tex.minFilter = LinearMipmapLinearFilter;
       tex.magFilter = LinearFilter;
       tex.anisotropy = 4;
-      return tex;
-    });
+    } }).then((v) => v.tex);
   }
 
   /** The high-resolution tier of `key` if loaded; starts loading it (decoded off the main thread). */
@@ -279,17 +277,15 @@ export class BodiesLayer {
       e = { tex: null, lastWanted: now };
       this.hiTex.set(key, e);
       const entry = e;
-      this.bitmapLoader.loadAsync(`${this.texBase}/${info.hi.file}`).then((bmp) => {
-        if (this.hiTex.get(key) !== entry) { (bmp as ImageBitmap).close?.(); return; }
-        const tex = new Texture(bmp as ImageBitmap);
-        tex.flipY = false;
+      loadMap(`${this.texBase}/${info.hi.file}`, { setup: (tex) => {
         tex.colorSpace = '';
         tex.wrapS = RepeatWrapping;
         tex.wrapT = ClampToEdgeWrapping;
         tex.minFilter = LinearMipmapLinearFilter;
         tex.magFilter = LinearFilter;
         tex.anisotropy = 8;
-        tex.needsUpdate = true;
+      } }).then(({ tex }) => {
+        if (this.hiTex.get(key) !== entry) { tex.dispose(); return; }
         entry.tex = tex;
       }).catch((err) => console.warn('high-resolution map failed', key, err));
     }
@@ -323,7 +319,8 @@ export class BodiesLayer {
     if (b.name === 'Earth') tasks.push(this.texture('earth_night'), this.texture('earth_clouds'));
     const rk = this.reliefKey(b);
     if (rk) this.requestRelief(rk, (mesh.material as ShaderMaterial).uniforms);
-    for (const t of tasks) t.then((v) => this.uploader((v as { tex: Texture }).tex)).catch(() => undefined);
+    // (each map is complete on the GPU when its promise resolves)
+    for (const t of tasks) t.catch(() => undefined);
   }
 
   /** Create one of every kind of body material (planet, rings, star, glare) for shader warm-up. */
@@ -841,7 +838,6 @@ export class BodiesLayer {
     this.reliefRequested.add(rk);
     const water = this.manifest.maps[rk].channels === 'relief+water';
     this.loadData(rk).then((tex) => {
-      this.uploader(tex);
       u.uRelief.value = tex;
       u.uHasRelief.value = 1;
       u.uWater.value = water ? 1 : 0;
@@ -894,28 +890,3 @@ function smoothstep(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** Mean linear luminance of an image (downsampled), used to normalise textures to catalogue albedos. */
-function meanLinearLuminance(img: HTMLImageElement | ImageBitmap): number {
-  try {
-    const c = document.createElement('canvas');
-    c.width = 64; c.height = 32;
-    const ctx = c.getContext('2d', { willReadFrequently: true })!;
-    ctx.drawImage(img as CanvasImageSource, 0, 0, 64, 32);
-    const d = ctx.getImageData(0, 0, 64, 32).data;
-    let sum = 0, wsum = 0;
-    for (let y = 0; y < 32; y++) {
-      const w = Math.cos(((y + 0.5) / 32 - 0.5) * Math.PI); // area weight
-      for (let x = 0; x < 64; x++) {
-        const i = (y * 64 + x) * 4;
-        const lin = (v: number) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
-        const l = 0.2126 * lin(d[i]) + 0.7152 * lin(d[i + 1]) + 0.0722 * lin(d[i + 2]);
-        if (l < 0.002) continue; // unimaged (no-data) areas, e.g. Pluto's southern hemisphere
-        sum += w * l;
-        wsum += w;
-      }
-    }
-    return wsum > 0 ? sum / wsum : 0.3;
-  } catch {
-    return 0.3;
-  }
-}

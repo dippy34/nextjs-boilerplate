@@ -52,6 +52,7 @@ for (const sc of SCENARIOS) {
   for (const w of r.worst) console.log(`  worst JS ${w.jsMs} ms:`, w.top.map(([n, ms]) => `${n} ${ms}`).join(', '));
   if (r.compiles.length) console.log('  frames with compiles/uploads:', r.compiles.slice(0, 6).map((c) => `${c.frameMs}ms p${c.programs}${c.compiled?.length ? ' ' + c.compiled.join('+') : ''} t${c.textures} [${c.top.map(([n, ms]) => `${n} ${ms}`).join(', ')}]`).join(' | '));
   if (r.lateCompiles.length) console.log('  compiled after warm-up:', r.lateCompiles.map((c) => `${c.name}@${c.frame}`).join(', '));
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/hitch-${sc.name}.png`, timeout: 180000 });
   await page.close();
 }
 fs.writeFileSync(outFile, JSON.stringify(report, null, 1));
