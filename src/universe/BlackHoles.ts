@@ -79,7 +79,7 @@ export class BlackHole implements SpaceObject {
     const persistent = d.name === 'Cygnus X-1' || d.name === 'GRS 1915+105';
     const h = (k: string) => hash(d.name + k);
     this.diskState = this.diskOuter === 0 ? 'none' : this.supermassive ? 'illustrative' : persistent ? 'persistent' : 'quiescent';
-    this.diskTmax = this.supermassive ? (d.name.startsWith('M87') ? 5200 : 6200)
+    this.diskTmax = this.supermassive ? (d.name.startsWith('M87') ? 6800 : 9500)
       : persistent ? (d.name === 'GRS 1915+105' ? 1.6e7 : 1.0e7)
       : 9000 * (8 / d.massSun) ** 0.25 * (0.7 + 0.6 * h('T'));
     this.jet = d.name.startsWith('M87') ? 'optical' : persistent ? 'radio' : null;
@@ -167,4 +167,34 @@ function hash(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
   return ((h >>> 0) % 100000) / 100000;
+}
+
+/**
+ * Angular radius (rad) of a Schwarzschild hole's shadow seen by a static observer at `rRs`
+ * Schwarzschild radii: sin α = (3√3/2) √(1 − 1/r) / r, the edge being the rays that skim the
+ * photon sphere (r = 1.5). Inside the photon sphere the shadow covers more than half the sky.
+ */
+export function shadowAngle(rRs: number): number {
+  const r = Math.max(rRs, 1);
+  const s = Math.min(1, ((3 * Math.sqrt(3)) / 2) * Math.sqrt(1 - 1 / r) / r);
+  const a = Math.asin(s);
+  return r < 1.5 ? Math.PI - a : a;
+}
+
+/** Rate of a clock held static at `rRs` relative to one far away: √(1 − rs/r) (0 at the horizon). */
+export function clockRate(rRs: number): number {
+  return Math.sqrt(Math.max(0, 1 - 1 / Math.max(rRs, 1)));
+}
+
+/** Radial tidal stretch (m/s²) across `length` metres at `r` metres from a hole of `massSun` Suns: 2GM L / r³. */
+export function tidalStretch(massSun: number, r: number, length: number): number {
+  return (2 * G * massSun * MSUN * length) / (r * r * r);
+}
+
+/**
+ * How overwhelming the hole is from `rRs` (0 far, 1 at the horizon), for the sub-bass and the
+ * HUD: grows as the shadow fills the sky (≈0.1 at 30 rs, ≈0.5 at 3 rs).
+ */
+export function dread(rRs: number): number {
+  return Math.min(1, Math.max(0, shadowAngle(rRs) / Math.PI) ** 0.6 * 1.25);
 }

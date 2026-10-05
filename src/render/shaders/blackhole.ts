@@ -101,29 +101,40 @@ float diskTexture(float r, float ang) {
   float n1 = streaks(lr, ang - w * p1 * P, 0.0);
   float n2 = streaks(lr, ang - w * p2 * P, 37.0);
   float n = n1 * (1.0 - abs(2.0 * p1 - 1.0)) + n2 * (1.0 - abs(2.0 * p2 - 1.0));
-  float t = smoothstep(0.15, 0.95, n);
+  float t = smoothstep(0.22, 0.9, n);
   // logarithmic spiral arms (pitch ~15 degrees), turning slowly
   float sp = 0.5 + 0.5 * cos(uArms * (ang - lr / 0.27 - uTime * 0.05 + uDiskSeed));
   return t * mix(1.0, 0.35 + 1.3 * sp * sp, uSpiral);
 }
 
 // Light from the disk where the traced ray crosses it at P (rs) moving along k (eye -> scene).
+// Inside the ISCO the gas no longer orbits but plunges: thinner, still hot, and dimmed by the
+// redshift towards the horizon; rays skimming the photon sphere cross it again and again, which
+// draws the photon ring and its sub-rings (each fainter, e^-π thinner) at the shadow's edge.
 vec4 diskHit(vec3 P, vec3 k, float r) {
-  if (r < uRin * 0.8 || r > uRout) return vec4(0.0);
+  if (r < 1.02 || r > uRout) return vec4(0.0);
   float x = r / uRin;
+  float plunge = 1.0 - smoothstep(uRin * 0.9, uRin * 1.05, r);
   float prof = x > 1.0 ? pow(x, -0.75) * pow(1.0 - inversesqrt(x), 0.25) / 0.48795 : 0.0;
+  // (plunging gas: about as hot as the disk just outside the ISCO, the profile's peak)
+  prof = mix(prof, 0.75 * pow(x, 0.35), plunge);
   float T = uTmax * prof;
   vec3 vdir = normalize(cross(uN, P));
-  float beta = min(sqrt(0.5 / max(r - 1.0, 0.5)), 0.995);
+  float beta = min(sqrt(0.5 / max(r - 1.0, 0.25)), 0.93);
   float gam = inversesqrt(1.0 - beta * beta);
   float g = sqrt(max(1.0 - 1.0 / r, 1e-4)) / (gam * (1.0 - beta * dot(vdir, -k)));
   float ang = atan(dot(P, uE2), dot(P, uE1));
   float tex = diskTexture(r, ang);
-  float edge = smoothstep(uRin * 0.95, uRin * 1.25, r) * (1.0 - smoothstep(uRout * 0.45, uRout, r));
-  // dense near the hole, thinning outwards so the lensed sky shows through the outer disk
-  float tau = 7.0 * pow(x, -0.85) * (0.2 + 1.3 * tex);
+  float edge = (1.0 - smoothstep(uRout * 0.45, uRout, r)) * smoothstep(1.02, 1.3, r);
+  // dense near the hole, thinning outwards so the lensed sky shows through the outer disk;
+  // the plunging gas is a thin veil of streamers
+  float tau = mix(7.0 * pow(max(x, 1.0), -0.85) * (0.15 + 1.4 * tex), 0.9 * (0.3 + tex), plunge);
   float a = (1.0 - exp(-tau)) * edge;
-  vec3 L = planck(T * g) * (0.6 + 0.8 * tex);
+  vec3 L = planck(T * g) * (0.45 + 1.1 * tex);
+  // A disk of millions of kelvin is in the Rayleigh-Jeans tail in visible light, where beaming
+  // brightens only by g; it is shown with its all-wavelength (bolometric) beaming g^4 instead,
+  // the one X-ray telescopes see: the approaching side blazing, the receding side dim.
+  L *= pow(g, 3.0 * smoothstep(2.0e4, 1.0e6, T));
   L = max(mix(vec3(dot(L, vec3(0.2126, 0.7152, 0.0722))), L, 1.3), 0.0);  // a little more saturated, like the stars
   return vec4(L * (uSunDisk * uExposure), a);
 }
@@ -188,7 +199,7 @@ void main() {
     for (int i = 0; i < 400; i++) {
       if (i >= uMaxSteps || tr < 0.01) break;
       // far out the orbit is nearly a sinusoid in phi, which RK4 follows closely in long steps
-      float h = uStepK * mix(0.3, 0.035, smoothstep(0.02, 0.45, u));
+      float h = uStepK * mix(0.3, 0.06, smoothstep(0.02, 0.45, u));
       // RK4 on (u, du/dphi)
       float k1u = du,                   k1v = -u + 1.5 * u * u;
       float uu = u + 0.5 * h * k1u;
