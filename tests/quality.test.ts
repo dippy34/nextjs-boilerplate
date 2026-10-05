@@ -49,4 +49,33 @@ describe('quality governor', () => {
     run(h, t, 100, 16.7);
     expect(QUALITY.level).toBe(0);
   });
+
+  it('does not lower quality for CPU-bound frames, and recovers while they last', () => {
+    const budget = 1000 / 75;
+    const runCpu = (g: Governor, t: number, n: number, dt: number, cpu: number, gpu = -1): number => {
+      for (let i = 0; i < n; i++) { t += dt; g.update(t, budget, cpu, gpu); }
+      return t;
+    };
+    QUALITY.level = 0;
+    let g = new Governor(true);
+    // the Quest benchmark: 20 ms frames, 15 ms of them main thread, no GPU timer
+    let t = runCpu(g, 0, 300, 20, 15);
+    expect(QUALITY.level).toBe(0);
+    expect(QUALITY.cpuBound).toBe(true);
+    // stuck at a low level from an earlier GPU load: CPU-bound frames don't hold it down
+    QUALITY.level = 3;
+    g = new Governor(true);
+    t = runCpu(g, t, 60 * 25, 20, 15);
+    expect(QUALITY.level).toBe(0);
+    // the GPU timer says the GPU is the slower: a real miss, step down
+    t = runCpu(g, t, 120, 20, 15, 18);
+    expect(QUALITY.level).toBeGreaterThan(0);
+    expect(QUALITY.cpuBound).toBe(false);
+    // light main thread, late frames: GPU-bound as before
+    QUALITY.level = 0;
+    g = new Governor(true);
+    runCpu(g, t, 120, 20, 4);
+    expect(QUALITY.level).toBeGreaterThan(0);
+    QUALITY.level = 0;
+  });
 });
