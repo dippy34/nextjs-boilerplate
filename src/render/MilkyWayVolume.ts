@@ -102,10 +102,15 @@ void main() {
     t += ds;
   }
   // display mapping as for the sky (SkyLayer: the glow cube)
-  float Y = max(dot(L, vec3(0.2126, 0.7152, 0.0722)), 1e-9);
-  float x = Y / uModelRef;
-  float fx = x < 1.0 ? pow(x, uModelExp) : 1.0 + uModelExp * log(x);
-  gl_FragColor = vec4(uModelK * fx * (L / Y) * uWeight, 1.0);
+  // (safe at half precision: a 1e-9 floor is 0 there, and 0/0 where a ray grazes the box edge
+  // gave a NaN that the bloom spread into a white frame as the volume took over from the sky)
+  float Y = dot(L, vec3(0.2126, 0.7152, 0.0722));
+  if (!(Y > 1e-6)) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); }
+  else {
+    float x = Y / uModelRef;
+    float fx = x < 1.0 ? pow(x, uModelExp) : 1.0 + uModelExp * log(x);
+    gl_FragColor = vec4(min(uModelK * fx * uWeight, 64.0) * (L / Y), 1.0);
+  }
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
