@@ -217,7 +217,7 @@ const SHOTS = {
       await frame(page, ([i]) => {
         const w = window.app.walk;
         // the view lifts a little toward Earth over the clip
-        w.pitch = 0.46 + 0.10 * Math.sin((i / 119) * Math.PI);
+        w.pitch = 0.27 + 0.10 * Math.sin((i / 119) * Math.PI);
       }, [i]);
       const ff = path.join(dir, `f${String(i).padStart(4, '0')}.jpg`);
       if (i % STRIDE === 0 && !fs.existsSync(ff)) { await raf(page); await grab(cdp, ff); }
