@@ -238,8 +238,10 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   check('Create ● Black hole: one click, next to the selection, with a caption', st.holes === 1 && st.mode === 'nbody' && /black hole .* from Mars/.test(st.cap ?? '') && /Black hole/.test(st.sel ?? ''), JSON.stringify(st));
   await page.click('button[data-a="undo"]');
   await frames(2);
-  st = await page.evaluate(() => !!document.querySelector('.god-panel .gs-try'));
-  if (st) await page.click('.god-panel .gs-try [data-a="hintskip"]');
+  st = await page.evaluate(() => { const g = window.app.god; const finished = !g.actions.hints.visible; g.actions.hints.restart(); g.panel.refresh(); return finished; });
+  check('the guide hides itself once its four steps are done', st, `${st}`);
+  await frames(2);
+  await page.click('.god-panel .gs-try [data-a="hintskip"]');
   await frames(2);
   st = await page.evaluate(() => ({ shown: !!document.querySelector('.god-panel .gs-try'), saved: localStorage.getItem('space-explorer-god-hints') }));
   check('the guide can be skipped (and stays skipped)', !st.shown && /"skipped":true/.test(st.saved ?? ''), JSON.stringify(st));
