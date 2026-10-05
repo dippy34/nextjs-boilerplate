@@ -139,6 +139,7 @@ function meanAngularRate(system: SolarSystem, b: Body, jd: number): number {
 }
 
 const _p = new Vector3(), _v = new Vector3();
+let _rel = new Float64Array(0);
 /**
  * Positions and velocities of the bodies at `jd` from the particles (by id) and the riders: a
  * planet with riders is its particle (the barycentre) minus the riders' mass-weighted offsets.
@@ -147,16 +148,18 @@ const _p = new Vector3(), _v = new Vector3();
 export function bodiesFromParticles(particles: Map<number, { gm: number; x: number; y: number; z: number; vx: number; vy: number; vz: number }>,
   riders: Rider[], jd: number, out: Map<number, { x: number; y: number; z: number; vx: number; vy: number; vz: number }>): void {
   for (const [id, s] of particles) {
-    const o = out.get(id) ?? { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
+    let o = out.get(id);
+    if (!o) { o = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }; out.set(id, o); }
     o.x = s.x; o.y = s.y; o.z = s.z; o.vx = s.vx; o.vy = s.vy; o.vz = s.vz;
-    out.set(id, o);
   }
-  const rel = new Map<Rider, number[]>();
-  for (const r of riders) {
+  // riders' offsets from their planets (reused scratch: this runs every frame for ~450 moons)
+  if (_rel.length < riders.length * 6) _rel = new Float64Array(riders.length * 6 * 2);
+  for (let k = 0; k < riders.length; k++) {
+    const r = riders[k];
     const p = particles.get(r.parent);
-    if (!p) continue;
+    if (!p) { _rel[k * 6] = NaN; continue; }
     keplerState(r.el, jd, _p, _v);
-    rel.set(r, [_p.x, _p.y, _p.z, _v.x, _v.y, _v.z]);
+    _rel[k * 6] = _p.x; _rel[k * 6 + 1] = _p.y; _rel[k * 6 + 2] = _p.z; _rel[k * 6 + 3] = _v.x; _rel[k * 6 + 4] = _v.y; _rel[k * 6 + 5] = _v.z;
     // the planet's particle holds the rider's mass: shift the planet back
     if (p.gm > 0) {
       const o = out.get(r.parent)!;
@@ -164,10 +167,13 @@ export function bodiesFromParticles(particles: Map<number, { gm: number; x: numb
       o.x -= f * _p.x; o.y -= f * _p.y; o.z -= f * _p.z; o.vx -= f * _v.x; o.vy -= f * _v.y; o.vz -= f * _v.z;
     }
   }
-  for (const [r, q] of rel) {
+  for (let k = 0; k < riders.length; k++) {
+    if (Number.isNaN(_rel[k * 6])) continue;
+    const r = riders[k];
     const pb = out.get(r.parent)!;
-    const o = out.get(r.id) ?? { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
-    o.x = pb.x + q[0]; o.y = pb.y + q[1]; o.z = pb.z + q[2]; o.vx = pb.vx + q[3]; o.vy = pb.vy + q[4]; o.vz = pb.vz + q[5];
-    out.set(r.id, o);
+    let o = out.get(r.id);
+    if (!o) { o = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 }; out.set(r.id, o); }
+    o.x = pb.x + _rel[k * 6]; o.y = pb.y + _rel[k * 6 + 1]; o.z = pb.z + _rel[k * 6 + 2];
+    o.vx = pb.vx + _rel[k * 6 + 3]; o.vy = pb.vy + _rel[k * 6 + 4]; o.vz = pb.vz + _rel[k * 6 + 5];
   }
 }
