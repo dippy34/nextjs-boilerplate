@@ -29,7 +29,7 @@ export function depthlessInit(init: Record<string, unknown> | undefined): Record
 /** Patch `XRWebGLBinding.createProjectionLayer` (once, before the session's layer is made). */
 export function keepDepthFromCompositor(): boolean {
   if (installed) return true;
-  if (new URLSearchParams(location.search).get('xrlayerdepth') === '1') return false;
+  if (new URLSearchParams(globalThis.location?.search ?? '').get('xrlayerdepth') === '1') return false;
   const B = (globalThis as { XRWebGLBinding?: { prototype: Binding } }).XRWebGLBinding;
   if (!B || typeof B.prototype.createProjectionLayer !== 'function') return false;
   const create = B.prototype.createProjectionLayer;
