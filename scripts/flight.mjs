@@ -98,9 +98,10 @@ st = await state();
 check('after the crash: respawn in a safe orbit', respawned && st.frame === 'Moon' && st.pe > 50e3, `pe ${(st.pe / 1e3).toFixed(0)} km`);
 
 // 7. landing: let go 12 m over the Moon (lands at ~6 m/s)
-await page.evaluate(() => { const a = window.app; a.flightClock(); const m = a.findByName('Moon'); a.placeNear(m, m.radius + 5000, 200, 30); });
+await page.evaluate(() => { const a = window.app; a.flightClock(); const m = a.findByName('Moon'); a.placeNear(m, m.radius + 5000, 200, 30); a.clock.paused = true; });
 await waitFor(() => window.app.terrain.owner === window.app.findByName('Moon') && !!window.app.terrain.below(window.app.rig.upos));
-await page.evaluate(() => window.app.game.flight.hoverOverGround(12));
+// (time held while the terrain streams in: at a few frames a second the ship would otherwise fall the 5 km)
+await page.evaluate(() => { window.app.game.flight.hoverOverGround(12); window.app.clock.paused = false; });
 const landed = await waitFor(() => !!window.app.game.flight.readout.landed || window.app.game.flight.ending !== null, null, 240000);
 st = await state();
 check('a gentle drop is a landing', landed && st.landed === 'Moon' && !st.ending, JSON.stringify({ landed: st.landed, ending: st.ending }));
