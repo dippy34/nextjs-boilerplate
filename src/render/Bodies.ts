@@ -4,7 +4,7 @@ import {
   OneMinusSrcAlphaFactor, PlaneGeometry, Points, Quaternion, RepeatWrapping, ShaderMaterial, SRGBColorSpace, Texture, Vector4, type WebGLRenderer,
   TextureLoader, Vector3, ClampToEdgeWrapping,
 } from 'three';
-import { blackbodyRGB, lambertPhase, luminance, sunIrradianceAt } from '../astro/photometry';
+import { blackbodyRGB, lambertPhase, luminance, SUN_LIGHT, sunIrradianceAt } from '../astro/photometry';
 import { AU, SUN_RADIUS } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { Body } from '../universe/Body';
@@ -569,11 +569,31 @@ export class BodiesLayer {
    * Update all body transforms for the camera at `cam`.
    * `pixelAngle`: radians per pixel; `exposure`: current pre-exposure.
    */
+  private sunTeff = 0;
+  /**
+   * The Sun's colour and surface brightness follow its temperature and luminosity (God mode
+   * changes them with its mass): the disk, and the colour of the light on every body.
+   */
+  private followSun(sun: Body): void {
+    const sm = this.meshes.get(sun);
+    if (sm) (sm.material as ShaderMaterial).uniforms.uRadiance.value = (AU / SUN_RADIUS) ** 2 * SUN_LIGHT.lum * (SUN_RADIUS / Math.max(sun.radius, 1)) ** 2;
+    if (sun.teff === this.sunTeff) return;
+    this.sunTeff = sun.teff;
+    const c = blackbodyRGB(sun.teff), L = luminance(c);
+    this.sunColor[0] = c[0] / L; this.sunColor[1] = c[1] / L; this.sunColor[2] = c[2] / L;
+    for (const [b, m] of this.meshes) {
+      const u = (m.material as ShaderMaterial).uniforms;
+      if (b === sun) u.uColor?.value.set(...this.sunColor);
+      else u.uSunColor?.value.set(...this.sunColor);
+    }
+  }
+
   update(cam: UPos, pixelAngle: number, dt: number, viewQuat?: Quaternion): void {
     this.time += dt;
     if (this.clouds) this.clouds.mesh.visible = false;   // shown again below while Earth is near
     const now = performance.now() / 1000;
     const sun = this.system.sun;
+    this.followSun(sun);
     const sunRel = sun.upos.sub(cam, new Vector3());
     let n = 0;
     const m4 = new Matrix4();

@@ -10,6 +10,8 @@ import path from 'node:path';
 const base = process.argv[2] ?? 'http://127.0.0.1:5173/';
 const outDir = process.argv[3] ?? 'screenshots';
 const skipVr = process.argv.includes('--no-vr');
+// --fx: only the effect shots (impact, tidal ring, swallow, formation)
+const fxOnly = process.argv.includes('--fx');
 fs.mkdirSync(outDir, { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
   ...(process.env.TRUSTED_SPKI ? [`--ignore-certificate-errors-spki-list=${process.env.TRUSTED_SPKI}`] : [])] });
@@ -17,8 +19,113 @@ const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${detail}`); };
 const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), timeout: 180000 });
 
-// ------------------------------------------------------------------ desktop
+// ------------------------------------------------------------------ effects (src/god/GodFx.ts)
 {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e)));
+  const frames = async (n) => { const f = await page.evaluate(() => window.app.frameCount); await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout: 240000 }); };
+  const fxCount = () => page.evaluate(() => { const f = window.app.god.layer.fx; return { all: f.count, eject: f.countOf(0), ring: f.countOf(1), spiral: f.countOf(2), form: f.countOf(3), glow: f.countOf(4), scar: f.countOf('scar') }; });
+  await page.goto(`${base}?time=2026-10-01T20:00:00Z&target=Mars&dist=60&az=60&el=25`, { waitUntil: 'load' });
+  await page.waitForFunction(() => window.app && window.app.frameCount > 10 && window.app.god, null, { timeout: 120000 });
+  await page.evaluate(() => { document.getElementById('boot')?.remove(); try { localStorage.removeItem('space-explorer-god-universe'); } catch { /* */ } window.app.god.ensureActive(); window.app.god.setSimulation(true); });
+  await frames(4);
+
+  // an edit morphs the orbit into its new shape
+  await page.evaluate(() => window.app.god.preset(499, 'push'));
+  await frames(1);
+  let st = await page.evaluate(() => window.app.god.layer.morphing);
+  check('fx: an edited orbit morphs into its new shape', st >= 1, `${st}`);
+  await page.keyboard.press('Control+KeyZ');
+
+  // the Sun at 3 solar masses: hotter and brighter, smoothly
+  await page.evaluate(() => window.app.god.setMass(10, 3 * 1.32712440041e20));
+  await frames(2);
+  const t1 = await page.evaluate(() => window.app.system.sun.teff);
+  await frames(30);
+  const t2 = await page.evaluate(() => window.app.system.sun.teff);
+  check('fx: a heavier Sun turns hotter (bluer) over a moment, not at once', t1 > 5772 && t2 > t1 + 50, `${t1.toFixed(0)} -> ${t2.toFixed(0)} K`);
+  await page.keyboard.press('Control+KeyZ');
+  await frames(30);
+
+  // formation: a new planet appears out of swirling dust
+  await page.evaluate(() => {
+    const a = window.app, mars = a.god.sandbox.entityOf(499);
+    const id = a.god.spawnOnOrbit('lava', 1, 4e7, 499);
+    a.placeNear(a.god.objectOf(a.god.sandbox.entityOf(id)), 4e7, 30, 15);
+    return mars.id;
+  });
+  await frames(5);
+  let fc = await fxCount();
+  check('fx: a created planet forms from dust (no pop-in)', fc.form >= 1 && fc.glow >= 1, JSON.stringify(fc));
+  await shot(page, 'godfx0-form.png');
+  await page.keyboard.press('Control+KeyZ');
+  await frames(20);
+
+  // impact: the Moon hits Mars: flash, ejecta, a molten scar
+  await page.evaluate(() => {
+    const a = window.app, sb = a.god.sandbox, m = sb.entityOf(301), mars = sb.entityOf(499);
+    const dir = new mars.pos.constructor(0.3, 0.8, 0.5).normalize();
+    a.god.setPosition(301, mars.pos.clone().addScaledVector(dir, 1.2e7), mars.vel.clone().addScaledVector(dir, -9000));
+    a.placeNear(a.system.byId.get(499), 2.6e7, 40, 25);
+    a.select(a.system.byId.get(499));
+    a.clock.rate = 120; a.clock.paused = false;
+  });
+  await page.waitForFunction(() => !window.app.god.sandbox.entityOf(301), null, { timeout: 240000 }).catch(() => undefined);
+  await page.evaluate(() => { window.app.clock.rate = 30; });
+  await frames(5);
+  fc = await fxCount();
+  check('fx: an impact makes a flash, ejecta and a molten scar', fc.eject >= 1 && fc.scar >= 1, JSON.stringify(fc));
+  await shot(page, 'godfx1-impact.png');
+  await frames(30);
+  await shot(page, 'godfx2-impact-cooling.png');
+  fc = await fxCount();
+  check('fx: a giant impact leaves a debris disk', fc.ring >= 1, JSON.stringify(fc));
+
+  // tidal disruption: a moon dropped inside Jupiter's Roche limit is stretched into a stream, then a ring
+  const jup = await page.evaluate(() => {
+    const a = window.app, sb = a.god.sandbox, j = sb.entityOf(599);
+    a.clock.paused = true;
+    const before = a.god.layer.fx.countOf(1);
+    const id = a.god.spawnOnOrbit('moon', 0.02, j.radius * 1.4, 599, 'Doomed moon');
+    a.placeNear(a.system.byId.get(599), j.radius * 5, 60, 35);
+    a.select(a.system.byId.get(599));
+    a.clock.rate = 60; a.clock.paused = false;
+    return { id, before };
+  });
+  await page.waitForFunction((id) => !window.app.god.sandbox.entityOf(id), jup.id, { timeout: 240000 }).catch(() => undefined);
+  await frames(6);
+  fc = await fxCount();
+  check('fx: a moon inside the Roche limit becomes a stream (a debris ring)', fc.ring > jup.before, JSON.stringify(fc));
+  await shot(page, 'godfx3-stream.png');
+  await frames(70);
+  await shot(page, 'godfx4-ring.png');
+
+  // swallow: a black hole eats a planet: a tidal stream spiralling in, a flare, the disk brightens
+  const sw = await page.evaluate(() => {
+    const a = window.app, sb = a.god.sandbox, e = sb.entityOf(399);
+    a.clock.paused = true;
+    const hp = e.pos.clone().add(e.vel.clone().normalize().multiplyScalar(4e8));
+    const hid = a.god.spawn('hole', 10, hp, e.vel.clone());
+    a.god.setPosition(399, e.pos, sb.entityOf(hid).vel.clone().add(e.vel.clone().normalize().multiplyScalar(4e4)));
+    const h = a.blackHoles.find((x) => x.key === `god:${hid}`);
+    a.select(h); a.placeNear(h, 6e8, 30, 15);
+    a.clock.rate = 120; a.clock.paused = false;
+    return { hid, t0: h.diskTmax };
+  });
+  await page.waitForFunction(() => !window.app.system.byId.get(399).valid, null, { timeout: 240000 }).catch(() => undefined);
+  await frames(6);
+  fc = await fxCount();
+  const flare = await page.evaluate((hid) => window.app.blackHoles.find((x) => x.key === `god:${hid}`)?.diskTmax ?? 0, sw.hid);
+  check('fx: a swallow makes a tidal stream and a flare; the disk brightens', fc.spiral >= 1 && flare > sw.t0 * 1.05, `${JSON.stringify(fc)} T ${sw.t0} -> ${flare}`);
+  await shot(page, 'godfx5-swallow.png');
+  check('fx: no errors', errors.length === 0, errors.slice(0, 3).join(' | '));
+  await page.close();
+}
+
+// ------------------------------------------------------------------ desktop
+if (!fxOnly) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -244,7 +351,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
 }
 
 // ------------------------------------------------------------------ headset
-if (!skipVr) {
+if (!skipVr && !fxOnly) {
   const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });

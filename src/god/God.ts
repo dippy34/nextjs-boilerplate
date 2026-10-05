@@ -4,7 +4,7 @@ import type { App } from '../app/App';
 import { Body, type SpaceObject } from '../universe/Body';
 import { BlackHole } from '../universe/BlackHoles';
 import { ALBEDO, ExoPlanet, type PlanetSpec, PlanetarySystem, type PlanetType, REARTH } from '../universe/Planets';
-import { CatalogStar } from '../universe/Stars';
+import { CatalogStar, estimateStarRadius } from '../universe/Stars';
 import { GodAudio } from './GodAudio';
 import { GodLayer } from './GodLayer';
 import { GodPanel } from './GodPanel';
@@ -39,6 +39,12 @@ export const SPAWN_TYPES: { type: SpawnType; label: string; unit: 'earth' | 'sun
   { type: 'hole', label: 'Black hole', unit: 'sun', mass: 10 },
   { type: 'swarm', label: 'Asteroid swarm', unit: 'earth', mass: 0 },
 ];
+
+/** colour of the dust a new thing forms from */
+const FORM_COLOR: Partial<Record<SpawnType, [number, number, number]>> = {
+  rocky: [0.85, 0.62, 0.45], terran: [0.6, 0.78, 1], ocean: [0.45, 0.7, 1], ice: [0.8, 0.92, 1], lava: [1, 0.45, 0.15],
+  giant: [0.95, 0.8, 0.6], moon: [0.75, 0.72, 0.7], star: [1, 0.85, 0.6], hole: [0.6, 0.5, 1],
+};
 
 /** Radius (m) of a planet of `massEarth` Earth masses and a type (rough mass-radius relations). */
 export function planetRadius(type: SpawnType, massEarth: number): number {
@@ -117,6 +123,7 @@ export class God {
       destroy: (e) => this.destroyProxy(e),
       changed: (e) => this.changedProxy(e),
     };
+    this.layer.holeOf = (e) => this.proxies.get(e.id)?.hole ?? null;
     this.panel = new GodPanel(this);
     this.vr = new GodVR(this);
     this.console = new GodConsole(this);
@@ -158,12 +165,14 @@ export class God {
       this.layer.focusPrimary = anchor ? (anchor.mode === 'massive' && anchor.kind === 'body' && anchor.body?.kind !== 'moon' ? anchor : sb.primaryOf(anchor)) : null;
       this.climateTimer -= dt;
       if (this.climateTimer <= 0) { this.climateTimer = 0.3; this.applyClimate(); }
+      this.easeStars(dt);
     } else {
       this.app.orbits.group.visible = true;
       if (this.climateOn) this.clearClimate();
     }
     const cam = this.app.rig.upos;
     const camV = cam.toVector3();
+    this.layer.pixelAngle = this.app.view.pixelAngle;
     this.layer.update(cam, (p) => p.distanceTo(camV));
     this.panel.update(dt);
   }
@@ -183,7 +192,9 @@ export class God {
     const sb = this.sandbox;
     this.climateOn = true;
     const sun = sb.entityOf(10);
-    SUN_LIGHT.lum = sun ? Math.max(1e-6, starLuminosity(sun.gm / G) / L_SUN) : 1e-6;
+    // the Sun's light and colour go where its (edited) mass puts them; easeStars() gets them there
+    this.sunTarget.lum = sun ? Math.max(1e-6, starLuminosity(sun.gm / G) / L_SUN) : 1e-6;
+    this.sunTarget.teff = sun ? SUN_TEFF * (mainSequence(sun.gm / GM_SUN).teff / mainSequence(1).teff) : this.sunTarget.teff;
     const stars = [...sb.entities.values()].filter((e) => e.flags & FLAG_STAR);
     const seen = new Set<Body>();
     for (const e of sb.entities.values()) {
@@ -220,8 +231,48 @@ export class God {
     for (const b of [...this.tweaked]) if (!seen.has(b)) { this.app.atmospheres.setTweak(b, null); this.tweaked.delete(b); }
   }
 
+  /** where the Sun's luminosity (Suns) and temperature are heading */
+  private sunTarget = { lum: 1, teff: SUN_TEFF };
+  /** spawned stars changing brightness and colour: from, to, progress */
+  private starTweens = new Map<number, { from: [number, number]; to: [number, number]; t: number }>();
+
+  /**
+   * Stars change brightness and colour smoothly (about a second) when their mass changes, and the
+   * planets' light follows (it is read from the same values).
+   */
+  private easeStars(dt: number): void {
+    const k = 1 - Math.exp(-dt / 0.35);
+    const sunE = this.sandbox.entityOf(10);
+    if (this.climateOn) {
+      SUN_LIGHT.lum = Math.exp(Math.log(SUN_LIGHT.lum) + (Math.log(this.sunTarget.lum) - Math.log(SUN_LIGHT.lum)) * k);
+      const b = sunE?.body ?? this.app.system.sun;
+      if (Math.abs(b.teff - this.sunTarget.teff) > 0.5) b.teff += (this.sunTarget.teff - b.teff) * k;
+      else b.teff = this.sunTarget.teff;
+    }
+    for (const [id, tw] of this.starTweens) {
+      const e = this.sandbox.entityOf(id), p = this.proxies.get(id);
+      if (!e || !p?.star) { this.starTweens.delete(id); continue; }
+      tw.t = Math.min(1, tw.t + dt / 0.9);
+      const w = tw.t * tw.t * (3 - 2 * tw.t);
+      const absMag = tw.from[0] + (tw.to[0] - tw.from[0]) * w, teff = tw.from[1] + (tw.to[1] - tw.from[1]) * w;
+      const st = p.star as unknown as { absMag: number; teff: number; radius: number };
+      st.absMag = absMag; st.teff = teff; st.radius = estimateStarRadius(absMag, teff);
+      if (e.body) { e.body.absMag = absMag; e.body.teff = teff; }
+      if (tw.t >= 1) {
+        // settled: rebuild the drawable for its new class
+        this.starTweens.delete(id);
+        const sel = this.app.selection === p.star;
+        this.destroyProxy(e); this.createProxy(e);
+        if (sel) { const o = this.objectOf(e); if (o) this.app.select(o); }
+      }
+    }
+  }
+
   private clearClimate(): void {
     SUN_LIGHT.lum = 1;
+    this.app.system.sun.teff = SUN_TEFF;
+    this.sunTarget = { lum: 1, teff: SUN_TEFF };
+    this.starTweens.clear();
     for (const b of this.tweaked) this.app.atmospheres.setTweak(b, null);
     this.tweaked.clear();
     this.climateOn = false;
@@ -341,7 +392,12 @@ export class God {
     const sel = this.app.selection;
     const wasSel = sel === p.star || sel === p.hole || sel === p.system?.planets[0];
     if (p.system && Math.abs(p.system.planets[0].radius - e.radius) > 1e-3 * e.radius) { this.destroyProxy(e); this.createProxy(e); }
-    else if (p.star && Math.abs(mainSequence(e.gm / GM_SUN).lum - 10 ** (-0.4 * (p.star.absMag - SUN_ABS_MAG))) > 1e-3) { this.destroyProxy(e); this.createProxy(e); }
+    else if (p.star && Math.abs(mainSequence(e.gm / GM_SUN).lum - 10 ** (-0.4 * (p.star.absMag - SUN_ABS_MAG))) > 1e-3) {
+      // brighten or dim (and change colour) over a second, then rebuild (easeStars)
+      const ms = mainSequence(e.gm / GM_SUN);
+      this.starTweens.set(e.id, { from: [p.star.absMag, p.star.teff], to: [SUN_ABS_MAG - 2.5 * Math.log10(ms.lum), ms.teff], t: 0 });
+      return;
+    }
     else if (p.hole && Math.abs(p.hole.massSun - e.gm / GM_SUN) > 1e-6 * p.hole.massSun) { this.destroyProxy(e); this.createProxy(e); }
     else return;
     if (wasSel) { const o = this.objectOf(e); if (o) this.app.select(o); }
@@ -594,6 +650,9 @@ export class God {
     const spec: SpawnSpec = { type, seed, rings: type === 'giant' && Math.random() < 0.5 };
     if (type === 'star') { const ms = mainSequence(massValue); spec.teff = ms.teff; spec.lum = ms.lum; }
     const id = sb.spawn(kind, name, spec, gm, radius, pos, v, flags, parentId);
+    // it forms: dust falls together where it appears, instead of popping in
+    const ent = sb.entityOf(id);
+    if (ent) this.layer.fx.form(ent, FORM_COLOR[type] ?? [0.8, 0.7, 0.6], sb.jd, type === 'hole' ? radius * 60 : undefined);
     this.audio.whoosh();
     return id;
   }
