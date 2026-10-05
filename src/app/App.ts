@@ -1,5 +1,6 @@
 import { Quaternion, type ShaderMaterial, Vector3 } from 'three';
 import { HITCH } from '../core/hitch';
+import { setUploadRenderer, uploadTexture, UPLOADS } from '../render/Uploads';
 import { blackbodyRGB, irradianceToMag, luminance, magToIrradiance, sunIrradianceAt } from '../astro/photometry';
 import { formatUtc, SimClock, utcToTdb, dateToJdUtc } from '../core/time';
 import { AU, DAY, formatDistance, formatSpeed, PC, SUN_RADIUS } from '../core/units';
@@ -223,7 +224,7 @@ export class App {
     app.exo.gl = renderer.gl;
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
     // scanned ground materials for close-up surfaces (loaded in the background)
-    void loadMaterials(DATA, xrCapable, (t) => renderer.gl.initTexture(t)).catch((e) => console.warn('materials', e));
+    void loadMaterials(DATA, xrCapable, (t) => { void uploadTexture(t); }).catch((e) => console.warn('materials', e));
     app.rocks = new Rocks(app.terrain, xrCapable);
     app.terrain.source = bodies.terrainSource;
     app.cometTails = new CometTails(bodies.surfaceExposure);
@@ -258,7 +259,8 @@ export class App {
     app.awe = new Awe(app);
     app.god = new God(app);
     renderer.scene.add(app.god.layer.group);
-    bodies.uploader = (t) => renderer.gl.initTexture(t);
+    setUploadRenderer(renderer.gl);
+    bodies.uploader = (t) => { void uploadTexture(t); };
     app.warmupPending = true;
     app.applyUrl();
     app.bindKeys();
@@ -1706,6 +1708,7 @@ export class App {
       this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
       this.god.frameTime(jd, rawDt);
     }
+    HITCH.lap('solarSystem');
     for (const h of this.blackHoles) h.update(jd);
     // planets and spacecraft move before the camera follows its anchor (which may be one of them)
     for (const sys of this.activeSystems) sys.update(jd);
@@ -1722,11 +1725,14 @@ export class App {
     this.chooseAnchor();
     this.awe?.beginFrame();
     this.camPc.set((this.rig.upos.xh + this.rig.upos.xl) / PC, (this.rig.upos.yh + this.rig.upos.yl) / PC, (this.rig.upos.zh + this.rig.upos.zl) / PC);
+    HITCH.lap('anchor');
     if (this.nearTimer-- <= 0) {
       this.updateNearStars();
       this.nearTimer = 10;
+      HITCH.lap('nearScan');
     }
     this.rig.altitude = this.computeAltitude();
+    HITCH.lap('altitude');
     if (this.vr.active) this.vr.updateInput(dt);
     this.rig.braking = this.input.keys.has('KeyX');
     // walking (src/app/Walk.ts) owns the camera while on foot; otherwise free flight
@@ -1863,6 +1869,9 @@ export class App {
       this.warmUp();
     }
     HITCH.lap('warmUp');
+    UPLOADS.budgetMs = this.vr.active ? 2 : 4;
+    UPLOADS.pump();
+    HITCH.lap('uploads');
     PERF.gpuBegin();
     this.holes.capture(this.renderer.gl, this.renderer.scene, [this.renderer.rig, this.orbits.group, ...this.vr.sceneOverlays], psf);
     HITCH.lap('holeCapture');
