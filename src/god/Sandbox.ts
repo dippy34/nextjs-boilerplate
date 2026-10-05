@@ -112,6 +112,7 @@ export interface SandboxHooks {
 
 interface Baseline { gm: number; systemGm: number; radii: [number, number, number]; radius: number; valid: boolean; albedo: number }
 
+const _or = new Vector3(), _orv = new Vector3(), _on = new Vector3(), _ox = new Vector3(), _oy = new Vector3();
 const ECLIPTIC_POLE = new Vector3(0, -Math.sin((23.4392911 * Math.PI) / 180), Math.cos((23.4392911 * Math.PI) / 180));
 const UNDO_DEPTH = 40;
 const SAVE_KEY = 'space-explorer-god-universe';
@@ -153,7 +154,7 @@ export class Sandbox {
   private undoStack: WorldState[] = [];
   private baseline = new Map<Body, Baseline>();
   private dir = 1;
-  private particles = new Map<number, { gm: number; x: number; y: number; z: number; vx: number; vy: number; vz: number }>();
+  private particles = new Map<number, { gm: number; x: number; y: number; z: number; vx: number; vy: number; vz: number; stamp: number }>();
   private states = new Map<number, { x: number; y: number; z: number; vx: number; vy: number; vz: number }>();
   private riders: Rider[] = [];
   private stepCount = 0;
@@ -373,7 +374,18 @@ export class Sandbox {
     if (q.length > 240) q.splice(0, q.length - 240);
   }
 
-  /** Hermite interpolation of the particles between the two snapshots around t. */
+  /** index of a snapshot's ids (by id), cached per snapshot */
+  private idIndex = new WeakMap<Int32Array, Map<number, number>>();
+  private indexOf(ids: Int32Array): Map<number, number> {
+    let m = this.idIndex.get(ids);
+    if (!m) { m = new Map(); for (let i = 0; i < ids.length; i++) m.set(ids[i], i); this.idIndex.set(ids, m); }
+    return m;
+  }
+
+  /**
+   * Hermite interpolation of the particles between the two snapshots around t (allocation-free
+   * per frame: the particle records are reused, the id indexes are cached per snapshot).
+   */
   private interpolate(t: number): void {
     const q = this.queue;
     let a = q[0], b = q[0];
@@ -387,37 +399,44 @@ export class Sandbox {
     const h00 = 2 * s3 - 3 * s2 + 1, h10 = s3 - 2 * s2 + s, h01 = -2 * s3 + 3 * s2, h11 = s3 - s2;
     // derivatives (per unit s)
     const d00 = 6 * s2 - 6 * s, d10 = 3 * s2 - 4 * s + 1, d01 = -6 * s2 + 6 * s, d11 = 3 * s2 - 2 * s;
-    const bIndex = new Map<number, number>();
-    b.ids.forEach((id, i) => bIndex.set(id, i));
-    this.particles.clear();
+    const P = this.particles;
+    const stamp = ++this.interpStamp;
     const put = (id: number, gm: number, A: Float64Array, ia: number, B: Float64Array | null, ib: number) => {
-      const o = { gm, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 };
+      let o = P.get(id);
+      if (!o) { o = { gm, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, stamp }; P.set(id, o); }
+      o.gm = gm; o.stamp = stamp;
       if (!B || h === 0) {
         // no partner: extrapolate along the velocity
-        const dt = t - (B === null ? a.t : a.t);
+        const dt = t - a.t;
         o.x = A[ia] + A[ia + 3] * dt; o.y = A[ia + 1] + A[ia + 4] * dt; o.z = A[ia + 2] + A[ia + 5] * dt;
         o.vx = A[ia + 3]; o.vy = A[ia + 4]; o.vz = A[ia + 5];
-      } else {
-        for (let c = 0; c < 3; c++) {
-          const p0 = A[ia + c], v0 = A[ia + 3 + c], p1 = B[ib + c], v1 = B[ib + 3 + c];
-          const p = h00 * p0 + h10 * h * v0 + h01 * p1 + h11 * h * v1;
-          const v = (d00 * p0 + d10 * h * v0 + d01 * p1 + d11 * h * v1) / h;
-          if (c === 0) { o.x = p; o.vx = v; } else if (c === 1) { o.y = p; o.vy = v; } else { o.z = p; o.vz = v; }
-        }
+        return;
       }
-      this.particles.set(id, o);
+      const hv = h;
+      o.x = h00 * A[ia] + h10 * hv * A[ia + 3] + h01 * B[ib] + h11 * hv * B[ib + 3];
+      o.y = h00 * A[ia + 1] + h10 * hv * A[ia + 4] + h01 * B[ib + 1] + h11 * hv * B[ib + 4];
+      o.z = h00 * A[ia + 2] + h10 * hv * A[ia + 5] + h01 * B[ib + 2] + h11 * hv * B[ib + 5];
+      o.vx = (d00 * A[ia] + d10 * hv * A[ia + 3] + d01 * B[ib] + d11 * hv * B[ib + 3]) / hv;
+      o.vy = (d00 * A[ia + 1] + d10 * hv * A[ia + 4] + d01 * B[ib + 1] + d11 * hv * B[ib + 4]) / hv;
+      o.vz = (d00 * A[ia + 2] + d10 * hv * A[ia + 5] + d01 * B[ib + 2] + d11 * hv * B[ib + 5]) / hv;
     };
-    a.ids.forEach((id, i) => {
-      const j = bIndex.get(id);
-      put(id, j !== undefined ? b.gm[j] : a.gm[i], a.xv, i * 6, j !== undefined ? b.xv : null, (j ?? 0) * 6);
-    });
-    const tb = new Map<number, number>();
-    b.tids.forEach((id, i) => tb.set(id, i));
-    a.tids.forEach((id, i) => {
-      const j = tb.get(id);
-      put(id, 0, a.txv, i * 6, j !== undefined ? b.txv : null, (j ?? 0) * 6);
-    });
+    // (the same bodies in the same order unless something merged: no lookup needed)
+    const sameIds = a.ids.length === b.ids.length && a.ids.every((id, i) => b.ids[i] === id);
+    const bIndex = sameIds ? null : this.indexOf(b.ids);
+    for (let i = 0; i < a.ids.length; i++) {
+      const j = bIndex ? bIndex.get(a.ids[i]) : i;
+      put(a.ids[i], j !== undefined ? b.gm[j] : a.gm[i], a.xv, i * 6, j !== undefined ? b.xv : null, (j ?? 0) * 6);
+    }
+    const sameT = a.tids.length === b.tids.length && a.tids.every((id, i) => b.tids[i] === id);
+    const tb = sameT ? null : this.indexOf(b.tids);
+    for (let i = 0; i < a.tids.length; i++) {
+      const j = tb ? tb.get(a.tids[i]) : i;
+      put(a.tids[i], 0, a.txv, i * 6, j !== undefined ? b.txv : null, (j ?? 0) * 6);
+    }
+    // particles that are gone (merged, swallowed)
+    if (P.size > a.ids.length + a.tids.length) for (const [id, o] of P) if (o.stamp !== stamp) P.delete(id);
   }
+  private interpStamp = 0;
 
   /** Write the interpolated state into the entities and their bodies. */
   private writeBodies(): void {
@@ -437,20 +456,21 @@ export class Sandbox {
   /** Orientation (body-fixed -> ICRF) of an entity now. */
   orient(e: Entity, out: Matrix4): Matrix4 {
     const sp = e.spin;
-    const p = this.primaryOf(e);
+    const p = sp.locked ? this.primaryOf(e) : null;
     if (sp.locked && p) {
       // synchronous rotation: prime meridian towards the primary, pole along the orbit normal
-      const r = new Vector3().subVectors(p.pos, e.pos).normalize();
-      const rv = new Vector3().subVectors(e.vel, p.vel);
-      const n = new Vector3().crossVectors(r, rv).normalize().negate();
+      const r = _or.subVectors(p.pos, e.pos).normalize();
+      const rv = _orv.subVectors(e.vel, p.vel);
+      const n = _on.crossVectors(r, rv).normalize().negate();
       if (n.lengthSq() < 0.5) n.copy(sp.axis);
-      const y = new Vector3().crossVectors(n, r).normalize();
-      const x = new Vector3().crossVectors(y, n);
+      const y = _oy.crossVectors(n, r).normalize();
+      const x = _ox.crossVectors(y, n);
       return out.makeBasis(x, y, n);
     }
     const ang = sp.rate * (this.jd - sp.jdBase) * DAY;
     return out.makeRotationAxis(sp.axis, ang % (2 * Math.PI)).multiply(sp.base);
   }
+
 
   private initialSpin(b: Body, jd: number): Entity['spin'] {
     const base = b.orientation.clone();
@@ -468,15 +488,20 @@ export class Sandbox {
 
   /** The body an entity orbits: the lightest heavier body whose sphere of influence holds it. */
   primaryOf(e: Entity): Entity | null {
-    if (!this.primaryCache) this.primaryCache = this.computePrimaries();
+    if (!this.primaryCache) { this.massiveCache = null; this.primaryCache = this.computePrimaries(); }
     if (this.primaryCache.has(e)) return this.primaryCache.get(e) ?? null;
-    const p = this.findPrimary(e, this.massiveList(), this.primaryCache);
+    // a moon riding a Kepler orbit goes round its planet (no search through every body)
+    const rp = e.mode === 'rider' && e.rider ? this.entities.get(e.rider.parent) : undefined;
+    const p = rp && rp.mode === 'massive' ? rp : this.findPrimary(e, this.massiveList(), this.primaryCache);
     this.primaryCache.set(e, p);
     return p;
   }
 
+  /** massive entities, heaviest first (cached with the primaries: rebuilt once a frame, not per lookup) */
+  private massiveCache: Entity[] | null = null;
   private massiveList(): Entity[] {
-    return [...this.entities.values()].filter((x) => x.mode === 'massive' && x.gm > 0).sort((a, b) => b.gm - a.gm);
+    if (!this.primaryCache || !this.massiveCache) this.massiveCache = [...this.entities.values()].filter((x) => x.mode === 'massive' && x.gm > 0).sort((a, b) => b.gm - a.gm);
+    return this.massiveCache;
   }
 
   private soi = new Map<Entity, number>();
@@ -963,7 +988,7 @@ export class Sandbox {
   /** The body whose sphere of influence holds a point (for placing new things). */
   primaryAt(pos: Vector3, gm = 0): Entity | null {
     const probe = { pos, gm } as Entity;
-    if (!this.primaryCache) this.primaryCache = this.computePrimaries();
+    if (!this.primaryCache) { this.massiveCache = null; this.primaryCache = this.computePrimaries(); }
     return this.findPrimary(probe, this.massiveList(), this.primaryCache);
   }
 
