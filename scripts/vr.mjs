@@ -5,6 +5,7 @@
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { asymmetricFrusta, measureDisparity } from './stereo.mjs';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:5173/';
 const outDir = process.argv[3] ?? 'screenshots';
@@ -18,7 +19,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'warning' && /XR render target/.test(m.text())) errors.push(m.text()); });
 // Mean brightness of what the headset shows (IWER composites the eye images into the page canvas).
 const headsetBrightness = () => page.evaluate(() => {
-  const src = document.querySelector('canvas');
+  const src = window.app.renderer.canvas; // (not the first canvas: the perf HUD has its own)
   const c = document.createElement('canvas'); c.width = 96; c.height = 54;
   const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0, c.width, c.height);
   const d = ctx.getImageData(0, 0, c.width, c.height).data; let sum = 0, lit = 0;
@@ -33,6 +34,8 @@ await page.addInitScript(() => {
   d.installRuntime({ forceInstall: true, polyfillLayers: true });
   window.__xrDevice = d;
 });
+// the real Quest 3's eye frusta are asymmetric (IWER's are not): stereo checks must hold with them
+await page.addInitScript(asymmetricFrusta);
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name} ${detail}`); };
 const frames = (n) => page.evaluate((k) => new Promise((res) => {
@@ -79,6 +82,20 @@ const waitTravel = async () => {
   await page.waitForFunction(() => window.app.vr.travelling, null, { timeout: 30000 }).catch(() => undefined);
   await page.waitForFunction(() => !window.app.vr.travelling && !window.app.rig.autopilot, null, { timeout: 400000 });
 };
+// Stereo: hide what is drawn near the head (menu, labels, lasers) so only the measured object counts
+const quietHead = () => page.evaluate(() => {
+  const v = window.app.vr;
+  if (v.menu.isOpen) v.menu.panel.setVisible(false);
+  v.labelsGroup.visible = false; v.hoverLabel.visible = false; v.hoverRing.visible = false; v.updateHover = () => {};
+  for (const h of v.hands) { h.ray.visible = false; h.cursor.visible = false; }
+});
+const stereoCheck = async (name, expr, want, opts) => {
+  const m = await measureDisparity(page, expr, opts);
+  const err = Math.abs(m.measured - m[want]);
+  // (0.6 px: a block match on a lit patch is good to a few tenths of a pixel)
+  check(name, m.contrast > 3 && m.score < 0.3 && err < 0.6, `disparity ${m.measured} px; true ${m.truth}, at infinity ${m.infinity}; ${(m.dist / 1e3).toFixed(m.dist < 1e3 ? 3 : 0)} km; match ${m.score}`);
+  return m;
+};
 const distR = (name) => page.evaluate((nm) => { const a = window.app; const b = a.system.bodies.find((x) => x.name === nm); return b.upos.sub(a.rig.upos).length() / b.radius; }, name);
 
 await page.goto(`${base}?time=2026-10-01T20:00:00Z&target=Earth&dist=4&az=40&el=10&paused=1`, { waitUntil: 'load' });
@@ -88,7 +105,7 @@ await page.waitForFunction(() => window.app && window.app.frameCount > 10, null,
 await page.waitForSelector('#vr-button', { state: 'visible', timeout: 10000 });
 check('Enter VR button shown when a headset is available', true);
 await page.click('#vr-button');
-await page.waitForFunction(() => window.app.vr.active && window.app.renderer.presenting, null, { timeout: 20000 });
+await page.waitForFunction(() => window.app.vr.active && window.app.renderer.presenting, null, { timeout: 90000 });
 const t0 = Date.now();
 await frames(8); // frame-counted waits: software rendering in CI can run at ~1 fps
 const xrDraw = await page.evaluate(async () => {
@@ -113,6 +130,45 @@ await frames(2);
 const lum = await headsetBrightness();
 check('the headset image is not black', lum.litFraction > 0.02, JSON.stringify(lum));
 await page.screenshot({ path: path.join(outDir, 'vr1-menu.png'), timeout: 180000 });
+
+// 1b. Scale: the layer's depth stays away from the compositor (log depth would read as centimetres
+//     there), Earth at 2 radii has no parallax, a rock 5 m away has true 6.3 cm stereo
+// (a projection layer, as in the Quest Browser, is made without depth; IWER falls back to an
+// XRWebGLLayer, whose runtime must then say it ignores depth: three keeps its own buffer either way)
+st = await page.evaluate(() => { const L = window.app.renderer.gl.xr.getBaseLayer(); return { kind: L?.madeWith ? 'projection' : 'webgl', init: L?.madeWith ?? null, ignore: L?.ignoreDepthValues }; });
+check('the compositor never reads the log depth', st.ignore === true && (st.kind === 'webgl' || st.init.depthFormat === 0), JSON.stringify(st));
+await page.evaluate(() => { const a = window.app; const e = a.system.bodies.find((b) => b.name === 'Earth'); a.placeNear(e, 2 * e.radius, 40, 10); a.rig.lookAt(e.upos.sub(a.rig.upos).normalize()); });
+await quietHead();
+await frames(4);
+await stereoCheck('Earth at 2 radii: no parallax (as far as it is)', `(() => { const b = a.system.bodies.find((x) => x.name === 'Earth'); return b.upos.sub(a.rig.upos); })()`, 'infinity', { half: 60, search: 30 });
+await page.evaluate(() => {
+  const a = window.app; const src = a.rocks.meshes[0];
+  const mat = src.material.clone();
+  for (const k of ['uPullIn', 'uDepthK', 'uLite']) mat.uniforms[k] = src.material.uniforms[k];
+  mat.uniforms.uExposure.value = 40; mat.uniforms.uRockColor.value.setRGB(0.5, 0.45, 0.4);
+  const g = src.geometry.clone(); const ar = g.getAttribute('aRock'); ar.setXYZW(0, 0.5, 0.5, 1, 1); ar.needsUpdate = true;
+  const m = new src.constructor(g, mat, 1); m.frustumCulled = false; m.name = 'stereo-rock';
+  m.setMatrixAt(0, new src.matrix.constructor().makeScale(1.2, 0.9, 1)); m.instanceMatrix.needsUpdate = true;
+  a.renderer.scene.add(m); window.__rock = m;
+  const e = a.system.bodies.find((x) => x.name === 'Earth').upos.sub(a.rig.upos).normalize();
+  a.rig.lookAt(e.clone().negate()); // against the dark sky
+});
+await frames(2);
+await page.evaluate(() => { const a = window.app; window.__rock.position.copy(a.renderer.camera.position.clone().set(0, 0.9, -4.92).applyQuaternion(a.renderer.rig.quaternion)); });
+await frames(3);
+await stereoCheck('rock 5 m away: true stereo', 'window.__rock.position.clone()', 'truth', { half: 50, search: 40 });
+await page.screenshot({ path: path.join(outDir, 'vr1b-rock.png'), timeout: 180000 });
+// back to where the tour starts (no reload: that would abort the page's fetches): Earth at 4 radii, menu open
+await page.evaluate(() => {
+  const a = window.app; const v = a.vr;
+  a.renderer.scene.remove(window.__rock);
+  v.labelsGroup.visible = true; delete v.updateHover; for (const h of v.hands) h.ray.visible = true;
+  const e = a.system.bodies.find((b) => b.name === 'Earth'); a.placeNear(e, 4 * e.radius, 40, 10);
+});
+await frames(2);
+await page.evaluate(() => window.app.vr.toggleMenu());
+await page.waitForFunction(() => window.app.vr.menu.isOpen, null, { timeout: 30000 });
+await frames(2);
 
 // 2. Laser + trigger on the Saturn tile: hover highlight, then travel there
 const saturnKey = await page.evaluate(() => window.app.system.bodies.find((b) => b.name === 'Saturn').key);
@@ -246,6 +302,13 @@ check('environment captured without breaking the headset framebuffer', bhDraw.en
 const bhLum = await headsetBrightness();
 check('the black hole view is not black', bhLum.litFraction > 0.02, JSON.stringify(bhLum));
 await page.screenshot({ path: path.join(outDir, 'vr8-black-hole.png'), timeout: 180000 });
+// 8a. 30 Schwarzschild radii from Gaia BH1: the hole and its lensed sky have no parallax
+await page.evaluate(() => { const a = window.app; const h = a.blackHoles.find((x) => x.name === 'Gaia BH1'); a.placeNear(h, 30 * h.radius, 30, 12); a.rig.lookAt(h.upos.sub(a.rig.upos).normalize()); });
+await quietHead();
+await frames(10);
+await stereoCheck('black hole at 30 rs: no parallax', `(() => { const h = a.blackHoles.find((x) => x.name === 'Gaia BH1'); return h.upos.sub(a.rig.upos); })()`, 'infinity', { half: 60, search: 30 });
+await page.screenshot({ path: path.join(outDir, 'vr8a-black-hole-30rs.png'), timeout: 180000 });
+await page.evaluate(() => { const v = window.app.vr; v.labelsGroup.visible = true; delete v.updateHover; for (const h of v.hands) h.ray.visible = true; });
 
 // 8b. Places tab: fly to the Apollo 11 landing site; the Moon's real terrain is drawn there
 await press('left', 'y-button');

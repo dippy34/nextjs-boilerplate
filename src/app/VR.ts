@@ -3,6 +3,7 @@ import {
   Matrix4, Mesh, MeshBasicMaterial, Object3D, Quaternion, Raycaster, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial,
   SRGBColorSpace, Vector2, Vector3,
 } from 'three';
+import { keepDepthFromCompositor } from '../vr/xrDepth';
 import { formatUtc } from '../core/time';
 import { formatDistance, formatSpeed } from '../core/units';
 import type { LabelCandidate } from '../render/Labels';
@@ -162,6 +163,7 @@ export class VRSupport {
     const xr = (navigator as Navigator & { xr?: XRSystem }).xr!;
     try {
       const session = await xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
+      keepDepthFromCompositor(); // log depth must not reach the compositor (src/vr/xrDepth.ts)
       const gl = this.app.renderer.gl;
       beforeSession(gl.xr);
       await gl.xr.setSession(session);
