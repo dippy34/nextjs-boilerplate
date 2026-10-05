@@ -1,3 +1,4 @@
+import { VIEW_CONE } from './Cull';
 import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, Points, Quaternion, ShaderMaterial, Vector2, Vector3, Vector4 } from 'three';
 import type { UPos } from '../core/upos';
 import { discFrame, type Galaxy } from '../universe/Galaxies';
@@ -949,9 +950,12 @@ export class GalaxiesLayer {
         if (!show) continue;
         vol = this.makeVolume(g);
       }
-      vol.visible = show;
-      if (!show) continue;
+      if (!show) { vol.visible = false; continue; }
       this.lastSeen.set(g, this.frameNo);
+      // outside the view: no draw call (kept as seen, so turning around does not rebuild it;
+      // three radii cover the halo)
+      vol.visible = VIEW_CONE.sees(rel.x, rel.y, rel.z, g.radius * 3);
+      if (!vol.visible) continue;
       const R = g.radius;
       const ext = this.modelOf(g).ext;
       m.makeBasis(g.major.clone().multiplyScalar(R * ext.x), g.minor.clone().multiplyScalar(R * ext.y), g.normal.clone().multiplyScalar(R * ext.z)).setPosition(rel);

@@ -1,5 +1,6 @@
 import { Quaternion, type ShaderMaterial, Vector3 } from 'three';
 import { HITCH } from '../core/hitch';
+import { VIEW_CONE } from '../render/Cull';
 import { setUploadRenderer, uploadTexture, UPLOADS } from '../render/Uploads';
 import { blackbodyRGB, irradianceToMag, luminance, magToIrradiance, sunIrradianceAt } from '../astro/photometry';
 import { formatUtc, SimClock, utcToTdb, dateToJdUtc } from '../core/time';
@@ -1759,6 +1760,9 @@ export class App {
     cam.updateMatrixWorld(true);
     this.view = this.renderer.viewInfo();
     this.invQuat.copy(this.view.quat).invert();
+    // culling cone for per-object layers: the frame's corners plus a margin (more in a headset:
+    // the second eye and head motion until the next frame)
+    VIEW_CONE.set(this.view.quat, this.view.fovY, this.view.aspect, this.view.xr ? 0.35 : 0.12);
     // Headset runtimes may clamp the far plane: pull distant geometry inside it, and fit log depth to it.
     // (not with reversed-Z in the headset: Renderer.reverseXrProjections drops the runtime's far plane)
     const finiteFar = this.view.xr && Number.isFinite(this.view.far) && this.renderer.depthMode !== 'reversed-z';
@@ -1807,6 +1811,8 @@ export class App {
     PERF.lap('craft');
     this.holes.vr = this.vr.active;
     this.holes.update(this.rig.upos, pixelAngle, now / 1000);
+    // a black hole's environment capture sees every direction: no view culling while one is active
+    if (this.holes.views.length) VIEW_CONE.enabled = false;
     this.jets.update(this.rig.upos, pixelAngle, now / 1000);
     HITCH.lap('holes');
     PERF.lap('holes');
