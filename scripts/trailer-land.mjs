@@ -96,11 +96,11 @@ const SHOTS = {
       a.game.flight.dropIntoOrbit(false);
     });
     await page.waitForFunction(() => window.app.terrain.owner?.name === 'Moon' && window.app.terrain.hScale > 0.99, null, { timeout: 300000 });
-    await page.evaluate(() => {
+    await page.evaluate((rate) => {
       const a = window.app; const f = a.game.flight;
       f.toggleBoost(); if (!f.ship.boosted) f.toggleBoost();
-      a.clock.paused = false; a.clock.rate = Number(process.env.R || 6);
-    });
+      a.clock.paused = false; a.clock.rate = rate;
+    }, Number(process.env.R || 6));
     const H0 = Number(process.env.H0 || 2600), TD = Number(process.env.TD || 120); // start altitude, frames of descent
     const n = Math.round(6 * FPS);
     const setup = { H0, TD, R: Number(process.env.R || 6) };
