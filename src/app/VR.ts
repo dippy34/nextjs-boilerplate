@@ -19,6 +19,7 @@ import { Body, type SpaceObject } from '../universe/Body';
 import { CatalogStar } from '../universe/Stars';
 import { VRMenu, type VRSettings } from '../vr/Menu';
 import { COLORS, Panel } from '../vr/Panel';
+import { afterSession, beforeSession, endSession } from '../render/XrGpu';
 import type { App } from './App';
 
 /**
@@ -161,7 +162,10 @@ export class VRSupport {
     const xr = (navigator as Navigator & { xr?: XRSystem }).xr!;
     try {
       const session = await xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
-      await this.app.renderer.gl.xr.setSession(session);
+      const gl = this.app.renderer.gl;
+      beforeSession(gl.xr);
+      await gl.xr.setSession(session);
+      await afterSession(gl, session);
       this.session = session;
       session.addEventListener('end', () => this.onEnd());
       session.addEventListener('selectstart', (e) => this.onSelect(e as XRInputSourceEvent));
@@ -193,6 +197,7 @@ export class VRSupport {
 
   private onEnd(): void {
     this.session = null;
+    endSession();
     const app = this.app;
     const r = app.renderer;
     r.setXrMode(false);
