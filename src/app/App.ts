@@ -90,6 +90,8 @@ export class App {
   private nearestStarDist = Infinity;
   /** compile every shader before it is first needed (set again when VR changes tone mapping) */
   warmupPending = false;
+  /** Cinematic mode (src/cine): settle frames skip the draw; the eye adapts at once; whole-cube galaxy updates. */
+  cine = { skipRender: false, snapExposure: false, on: false };
   private fieldMinDistPc = 0;
   /** one object per catalogue star so selection, labels and near-star rendering agree */
   private starCache = new Map<string, CatalogStar>();
@@ -1250,12 +1252,12 @@ export class App {
     const sky = this.skyRadiance();
     if (sky > 0) lightCap = Math.min(lightCap, 1.2 / sky);
     target = Math.min(target, Math.log(diskCap), Math.log(lightCap));
-    if (this.frameCount < 3) this.logExposure = target;
+    if (this.frameCount < 3 || this.cine.snapExposure) this.logExposure = target;
     this.logExposure += (target - this.logExposure) * (1 - Math.exp(-dt * 2.5));
     const xSurf = Math.exp(this.logExposure);
     // Stars keep a floor exposure (artistic, SpaceEngine-like) unless a star/the Sun is in view.
     this.logStarCap += (Math.log(Math.min(lightCap, 1e30)) - this.logStarCap) * (1 - Math.exp(-dt * 2.5));
-    if (this.frameCount < 3) this.logStarCap = Math.log(Math.min(lightCap, 1e30));
+    if (this.frameCount < 3 || this.cine.snapExposure) this.logStarCap = Math.log(Math.min(lightCap, 1e30));
     const xStar = Math.max(xSurf, Math.min(xDark * this.starFloor, Math.exp(this.logStarCap)));
     const minEnergy = this.starFields[0].psf.uMinEnergy.value;
     const mLim = irradianceToMag((minEnergy * pixSA) / xStar);
@@ -1810,7 +1812,7 @@ export class App {
     GALAXY.toGal(this.camPc, this.camGal);
     this.galaxy.vr = this.vr.active;
     // one face per frame while travelling; all at once if we find ourselves far out with no map yet
-    if (sunDistPc > 60) this.galaxy.update(this.renderer.gl, this.camGal, !this.galaxy.ready && sunDistPc > 150 ? 6 : 1);
+    if (sunDistPc > 60) this.galaxy.update(this.renderer.gl, this.camGal, (!this.galaxy.ready && sunDistPc > 150) || this.cine.on ? 6 : 1);
     HITCH.lap('galaxyCube');
     this.sky.updateWith(xStar / xDark, sunDistPc, this.galaxy.ready ? this.galaxy.target.texture : null, this.camGal);
     this.mwVolume.update(this.rig.upos, this.camGal, this.sky.modelK, SkyLayer.MODEL_REF, this.sky.modelExp);
@@ -1864,10 +1866,12 @@ export class App {
     }
     HITCH.lap('warmUp');
     PERF.gpuBegin();
+    if (!this.cine.skipRender) {
     this.holes.capture(this.renderer.gl, this.renderer.scene, [this.renderer.rig, this.orbits.group, ...this.vr.sceneOverlays], psf);
     HITCH.lap('holeCapture');
     PERF.lap('capture');
     this.renderer.render();
+    }
     PERF.gpuEnd();
     HITCH.lap('render');
     PERF.lap('render');
