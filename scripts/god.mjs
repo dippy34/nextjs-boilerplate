@@ -209,6 +209,32 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
       spawned: a.system.bodies.filter((b) => b.meta.spawned).length, holes: a.blackHoles.filter((h) => h.key.startsWith('god:')).length };
   });
   check('Reset restores the real universe', !st.active && /Real/.test(st.badge) && st.earth && st.moon && Math.abs(st.marsGm - 4.2828e13) < 1e10 && st.spawned === 0 && st.holes === 0, JSON.stringify(st));
+  // 10b. throw the Moon at the Earth from the real universe (Kepler orbits by default): gravity
+  // switches on by itself, the forecast says when it hits, M time-lapses to it, and they merge
+  await page.evaluate(() => {
+    const a = window.app, e = a.system.byId.get(399), m = a.system.byId.get(301);
+    a.clock.rate = 1; a.clock.paused = false;
+    a.god.setVelocity(301, e.vel.clone().addScaledVector(e.pos.clone().sub(m.pos).normalize(), 1000));
+    a.placeNear(e, 1.5e9, 30, 20);
+    a.select(e);
+  });
+  await page.waitForFunction(() => window.app.god.debugState().forecast?.kind, null, { timeout: 120000 }).catch(() => undefined);
+  st = await page.evaluate(() => { const d = window.app.god.debugState(); return { mode: d.mode, f: d.forecast, days: d.forecast ? d.forecast.jd - d.jd : -1 }; });
+  check('throwing the Moon at Earth switches to gravity and forecasts the impact', st.mode === 'nbody' && st.f?.kind === 'merge' && st.f.victim === 'Moon' && st.days > 0.2 && st.days < 4, JSON.stringify(st));
+  const realT0 = Date.now();
+  await page.keyboard.press('KeyM');
+  await frames(1);
+  st = await page.evaluate(() => ({ lapse: !!window.app.god.lapse, rate: window.app.clock.rate }));
+  check('M starts a time-lapse to the impact', st.lapse && st.rate > 1000, JSON.stringify(st));
+  await page.waitForFunction(() => !window.app.god.sandbox.entityOf(301), null, { timeout: 240000 }).catch(() => undefined);
+  await frames(3);
+  st = await page.evaluate(() => ({ moonGone: !window.app.god.sandbox.entityOf(301), lapse: !!window.app.god.lapse, rate: window.app.clock.rate, toast: document.querySelector('.toast, .hud-toast')?.textContent ?? '' }));
+  check('the time-lapse reaches the impact and gives the clock back', st.moonGone && !st.lapse && st.rate === 1, JSON.stringify({ ...st, realS: (Date.now() - realT0) / 1000 }));
+  await shot(page, 'god5-showme.png');
+  await page.evaluate(() => { window.app.clock.paused = true; });
+  await page.click('button[data-a="reset"]');
+  await frames(3);
+
   // 11. the universe console: a loop, a print with its formula, a creation, an error, undo
   await page.keyboard.press('Backquote');
   await frames(2);

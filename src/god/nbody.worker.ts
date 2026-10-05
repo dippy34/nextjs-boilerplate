@@ -10,7 +10,10 @@ function loop(): void {
   // a bounded slice of work, then yield so new goals and edits are read promptly
   const snaps = runner.pump(24);
   for (const s of snaps) (self as DedicatedWorkerGlobalScope).postMessage(s, [s.ids.buffer, s.gm.buffer, s.r.buffer, s.xv.buffer, s.tids.buffer, s.txv.buffer]);
-  if (!runner.done) schedule();
+  // the look-ahead for "what will happen" in the time left over
+  const f = runner.ahead.pump(runner.done ? 16 : 6);
+  if (f) (self as DedicatedWorkerGlobalScope).postMessage(f);
+  if (!runner.done || runner.ahead.active) schedule();
 }
 
 function schedule(): void {

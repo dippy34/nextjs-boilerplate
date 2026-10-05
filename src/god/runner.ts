@@ -21,6 +21,57 @@ export interface Snapshot {
   steps: number;
 }
 
+/** What will happen: the first collisions, swallows and tidal break-ups ahead of an edited state. */
+export interface Forecast {
+  type: 'forecast';
+  gen: number;
+  /** the state's time, and how far the look-ahead got (s) */
+  t0: number;
+  tEnd: number;
+  /** the first events (empty: nothing happens before tEnd) */
+  events: SimEvent[];
+}
+
+/** how far ahead the forecast looks (s of simulated time) and how much work it may cost (ms) */
+export const FORECAST_HORIZON = 3 * 365.25 * 86400;
+export const FORECAST_BUDGET_MS = 6000;
+
+/**
+ * Runs a copy of the massive bodies ahead of the display (in the worker's spare time) to find
+ * the first event after an edit, so God mode can say "the Moon hits the Earth in 4 h" and
+ * time-lapse to it.
+ */
+export class Forecaster {
+  readonly sim = new NBody();
+  gen = -1;
+  t0 = 0;
+  active = false;
+  private cpu = 0;
+
+  start(gen: number, t: number, massive: PState[]): void {
+    this.gen = gen;
+    this.t0 = t;
+    this.cpu = 0;
+    this.sim.setState(t, massive, []);
+    this.sim.events = [];
+    this.active = massive.length > 1;
+  }
+
+  /** Work for up to `ms`; returns the forecast once it is known. */
+  pump(ms: number): Forecast | null {
+    if (!this.active) return null;
+    const a = performance.now();
+    const reached = this.sim.advance(this.t0 + FORECAST_HORIZON, ms);
+    this.cpu += performance.now() - a;
+    const ev = this.sim.events;
+    if (!ev.length && !reached && this.cpu < FORECAST_BUDGET_MS) return null;
+    this.active = false;
+    // the first event and whatever follows it within a day (a cascade)
+    const first = ev.length ? ev[0].t : 0;
+    return { type: 'forecast', gen: this.gen, t0: this.t0, tEnd: this.sim.t, events: ev.filter((e) => e.t - first < 86400).slice(0, 6) };
+  }
+}
+
 /**
  * Drives an `NBody` towards the goal it is given, cutting the way into snapshots `every` seconds
  * of simulated time apart (one per displayed frame or so). Used by the worker and, where workers
@@ -28,6 +79,7 @@ export interface Snapshot {
  */
 export class SimRunner {
   readonly sim = new NBody();
+  readonly ahead = new Forecaster();
   gen = -1;
   goal = 0;
   every = 1;
@@ -39,6 +91,7 @@ export class SimRunner {
       this.sim.setState(m.t, m.massive, m.tests);
       this.sim.events = [];
       this.goal = m.t;
+      this.ahead.start(m.gen, m.t, m.massive);
     } else if (m.gen === this.gen) {
       this.goal = m.goal;
       this.every = Math.max(1e-3, Math.abs(m.every));

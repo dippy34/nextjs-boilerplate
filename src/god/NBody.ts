@@ -415,10 +415,14 @@ function predict(b: Float64Array[], e: Float64Array[], q: number, n3: number): v
   }
 }
 
-/** Capture radius of a black hole (m): a few Schwarzschild radii, at least 1,000 km so it can be hit. */
+/**
+ * Capture radius of a black hole (m): the innermost stable orbit (3 Schwarzschild radii; inside
+ * it everything plunges), at least 1,000 km so a small hole can be hit. (Bodies are torn apart
+ * by its tides well before, at their Roche limit.)
+ */
 export function captureRadius(gm: number): number {
   const rs = (2 * gm) / (299_792_458 ** 2);
-  return Math.max(50 * rs, 1e6);
+  return Math.max(3 * rs, 1e6);
 }
 
 /** Roche limit (m) of a fluid body of radius `r` and G·M `gm` around a primary of G·M `gmP`. */
@@ -449,6 +453,8 @@ export class NBody {
   private logN = 0;
   private logCursor = 0;
   private scratch = new Float64Array(0);
+  /** massive positions at the start of the last step (swept collision test) */
+  private xPrev = new Float64Array(0);
   private dir = 0;
 
   constructor(eps = 1e-6) {
@@ -644,6 +650,7 @@ export class NBody {
         const rem = target - this.t;
         const natural = this.mass.dt;
         const clamped = Math.abs(natural) >= Math.abs(rem);
+        if (this.collisions) { if (this.xPrev.length !== this.mass.x.length) this.xPrev = new Float64Array(this.mass.x.length); this.xPrev.set(this.mass.x); }
         const done = this.mass.step(this.t, clamped ? rem : natural);
         this.t = clamped && done === rem ? target : this.t + done;
         if (clamped && done === rem && Math.abs(this.mass.dt) >= Math.abs(rem) * 0.999) this.mass.dt = dir * Math.max(Math.abs(this.mass.dt), Math.abs(natural));
@@ -740,6 +747,24 @@ export class NBody {
         if (d2 < touch * touch) {
           this.merge(p, s, pBH ? 'swallow' : 'merge', Math.sqrt(d2));
           return true;
+        }
+        // swept: a fast plunge can cross the whole body within one step; take the closest approach
+        // along the step (relative motion as a straight line) and merge them there
+        const xp = this.xPrev;
+        if (xp.length === x.length) {
+          const ax = xp[j * 3] - xp[i * 3], ay = xp[j * 3 + 1] - xp[i * 3 + 1], az = xp[j * 3 + 2] - xp[i * 3 + 2];
+          const ddx = dx - ax, ddy = dy - ay, ddz = dz - az;
+          const dd = ddx * ddx + ddy * ddy + ddz * ddz;
+          if (dd > 0) {
+            const u = Math.min(1, Math.max(0, -(ax * ddx + ay * ddy + az * ddz) / dd));
+            const mx = ax + u * ddx, my = ay + u * ddy, mz = az + u * ddz;
+            const m2 = mx * mx + my * my + mz * mz;
+            if (u > 0 && u < 1 && m2 < touch * touch) {
+              for (const k of [i, j]) for (let c = 0; c < 3; c++) x[k * 3 + c] = xp[k * 3 + c] + u * (x[k * 3 + c] - xp[k * 3 + c]);
+              this.merge(p, s, pBH ? 'swallow' : 'merge', Math.sqrt(m2));
+              return true;
+            }
+          }
         }
         // tides: a body much lighter than its neighbour, inside its Roche limit, comes apart
         // (d^3 < roche^3 = 2.44^3 r^3 gmP / gm, without roots)

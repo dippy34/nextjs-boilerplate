@@ -5,8 +5,8 @@ import { DAY } from '../core/units';
 import { Body } from '../universe/Body';
 import type { SolarSystem } from '../universe/SolarSystem';
 import { bodiesFromParticles, OBLATENESS, type Rider, riderMuScale, scaleMeanMotion, type SimMode, simMode } from './initial';
-import { captureRadius, FLAG_BLACK_HOLE, FLAG_STAR, type PState, type SimEvent } from './NBody';
-import { SimRunner, type SimRequest, type Snapshot } from './runner';
+import { captureRadius, FLAG_BLACK_HOLE, FLAG_STAR, type PState, rocheLimit, type SimEvent } from './NBody';
+import { type Forecast, SimRunner, type SimRequest, type Snapshot } from './runner';
 
 /** What an entity is drawn as. */
 export type EntityKind = 'body' | 'planet' | 'star' | 'hole' | 'swarm';
@@ -97,6 +97,31 @@ export interface Entity {
   spin: { axis: Vector3; rate: number; locked: boolean; base: Matrix4; jdBase: number };
 }
 
+/** What the simulation says will happen next (the first event ahead of the last edit). */
+export interface SandboxForecast {
+  /** the event, its JD, and the bodies (by name for messages) */
+  event: SimEvent | null;
+  jd: number;
+  survivor: string;
+  victim: string;
+  /** JD the look-ahead reached (nothing happens before it when `event` is null) */
+  jdEnd: number;
+}
+
+/**
+ * Time rate (simulated s per real s) of a "show me" time-lapse with `remaining` seconds of
+ * simulated time to go out of `total`: fast at first, easing in as the moment nears (arrives in
+ * about 4 s, at most ~10 s), so the event itself plays slowly enough to see.
+ */
+export function lapseRate(remaining: number, total: number): number {
+  return Math.max(remaining / 1.2, total / 10, 1);
+}
+
+/** One line for a forecast event: "the Moon hits the Earth". */
+export function describeEvent(kind: SimEvent['kind'], survivor: string, victim: string): string {
+  return kind === 'swallow' ? `${survivor} swallows ${victim}` : kind === 'roche' ? `${survivor}'s tides tear ${victim} apart` : `${victim} hits ${survivor}`;
+}
+
 /** Effects for the renderer, from the simulation's events. */
 export interface SandboxEffect { event: SimEvent; jd: number; survivor: Entity | null; victim: Entity | null; victimRadius: number }
 
@@ -145,6 +170,10 @@ export class Sandbox {
   effects: SandboxEffect[] = [];
   /** massive steps per second of real time (statistics) */
   stepsPerSecond = 0;
+  /** the first event ahead of the last edit (N-body mode; null until the worker has looked) */
+  forecast: SandboxForecast | null = null;
+  /** why the last edit switched Kepler orbits to the N-body simulation (read and cleared by God mode) */
+  autoNbody: string | null = null;
   hooks: SandboxHooks = {};
   private nextId = SPAWN_ID0;
   private gen = 0;
@@ -166,7 +195,7 @@ export class Sandbox {
     if (useWorker) {
       try {
         this.worker = new Worker(new URL('./nbody.worker.ts', import.meta.url), { type: 'module', name: 'god-nbody' });
-        this.worker.onmessage = (e: MessageEvent<Snapshot>) => this.receive(e.data);
+        this.worker.onmessage = (e: MessageEvent<Snapshot | Forecast>) => (e.data.type === 'forecast' ? this.receiveForecast(e.data) : this.receive(e.data));
         this.worker.onerror = (e) => { console.warn('god worker failed, simulating on the main thread', e.message); this.worker = null; this.inline = new SimRunner(); this.reseed(); };
       } catch { this.worker = null; }
     }
@@ -236,7 +265,11 @@ export class Sandbox {
       this.keplerUpdate(jdWanted, paused ? 0 : rate < 0 ? -1 : 1);
       return jdWanted;
     }
-    if (this.inline) for (const s of this.inline.pump(paused ? 2 : 6)) this.receive(s);
+    if (this.inline) {
+      for (const s of this.inline.pump(paused ? 2 : 6)) this.receive(s);
+      const f = this.inline.ahead.pump(2);
+      if (f) this.receiveForecast(f);
+    }
     if (this.needReseed) { this.needReseed = false; this.reseed(); }
     const dir = rate < 0 ? -1 : 1;
     if (!paused && dir !== this.dir && this.queue.length) {
@@ -361,6 +394,13 @@ export class Sandbox {
   private post(m: SimRequest): void {
     if (this.worker) this.worker.postMessage(m);
     else this.inline?.handle(m);
+  }
+
+  private receiveForecast(f: Forecast): void {
+    if (f.gen !== this.gen || !this.active) return;
+    const ev = f.events[0] ?? null;
+    const name = (id: number | undefined) => (id !== undefined ? this.entities.get(id)?.name : undefined) ?? 'something';
+    this.forecast = { event: ev, jd: this.jd0 + (ev ? ev.t : f.tEnd) / DAY, survivor: name(ev?.survivor), victim: name(ev?.victim), jdEnd: this.jd0 + f.tEnd / DAY };
   }
 
   private receive(s: Snapshot): void {
@@ -619,7 +659,7 @@ export class Sandbox {
     this.order = null;
     this.primaryCache = null;
     if (this.mode === 'nbody') this.sendState();
-    else { this.gen++; this.queue = []; this.keplerUpdate(this.jd, 0); }
+    else { this.gen++; this.queue = []; this.forecast = null; this.keplerUpdate(this.jd, 0); }
   }
 
   /** Restart the simulation from the entities as they are (no undo step). */
@@ -654,6 +694,7 @@ export class Sandbox {
     }
     this.gen++;
     this.queue = [];
+    this.forecast = null;
     const msg: SimRequest = { type: 'state', gen: this.gen, t: 0, massive, tests };
     // shown at once (the worker's own copy replaces it)
     this.queue.push(localSnapshot(this.gen, massive, tests));
@@ -752,7 +793,131 @@ export class Sandbox {
     }
     const st = structuredClone(before);
     fn(st);
+    // Kepler orbits can't show what gravity would do with this (a black hole, a collision
+    // course, a body made heavy enough to pull its neighbours): simulate it
+    const why = this.mode === 'kepler' && (st.mode ?? 'kepler') === 'kepler' ? this.dynamicReason(before, st) : null;
+    if (why) {
+      this.settle(before, st);
+      st.mode = 'nbody';
+      for (const r of st.entities) r.orbit = undefined;
+      this.autoNbody = why;
+    }
     this.applyState(st);
+  }
+
+  /**
+   * Why an edit made in Kepler mode needs the N-body simulation (null: Kepler orbits show it
+   * right). Looks at what the edit added or changed: holes and stars, bodies made much heavier
+   * than before (relative to what they orbit), and orbits that hit, graze the Roche limit of or
+   * pass close to another body.
+   */
+  dynamicReason(before: WorldState, st: WorldState): string | null {
+    const old = new Map(before.entities.map((r) => [r.id, r]));
+    const recs = new Map(st.entities.map((r) => [r.id, r]));
+    for (const r of st.entities) {
+      const o = old.get(r.id);
+      if (r.mode !== 'massive' || r.gm <= 0) continue;
+      const moved = !o || o.x !== r.x || o.y !== r.y || o.z !== r.z || o.vx !== r.vx || o.vy !== r.vy || o.vz !== r.vz
+        || JSON.stringify(o.orbit?.el) !== JSON.stringify(r.orbit?.el);
+      if (!o && r.kind === 'hole') return `${r.name} pulls on everything`;
+      if (!o && r.kind === 'star') return `${r.name} pulls on everything`;
+      if (!moved && o && o.gm === r.gm) continue;
+      const pid = r.orbit?.parent ?? (this.entities.get(r.id) ? this.parentId(this.entities.get(r.id)!) : null);
+      const P = pid !== null && pid !== undefined ? recs.get(pid) : undefined;
+      if (P && P.gm > 0) {
+        // heavy: its pull changes its neighbours' orbits
+        const heavy = o ? r.gm > 3 * o.gm && r.gm > 1e-4 * P.gm : r.gm >= 1e-3 * P.gm;
+        if (heavy) return `${r.name} is heavy enough to pull its neighbours`;
+      }
+      if (!moved && !(o && r.gm > o.gm)) continue;
+      if (P && r.orbit) {
+        const el = r.orbit.el;
+        const Pr = P.flags & FLAG_BLACK_HOLE ? captureRadius(P.gm) : P.radius;
+        const rising = el.e >= 1 && this.risingAway(r, P);
+        if (!rising && el.q < Pr + r.radius) return `${r.name} will hit ${P.name}`;
+        if (!rising && P.gm > 10 * r.gm && !(r.flags & FLAG_BLACK_HOLE) && el.q < rocheLimit(r.radius, r.gm, P.gm)) return `${P.name}'s tides will tear ${r.name} apart`;
+        const near = this.closeApproach(r, P, st);
+        if (near) return `${r.name} passes close to ${near}`;
+      }
+    }
+    return null;
+  }
+
+  /** On an open orbit, already past periapsis (moving away from its primary)? */
+  private risingAway(r: EntityRecord, P: EntityRecord): boolean {
+    return (r.x - P.x) * (r.vx - P.vx) + (r.y - P.y) * (r.vy - P.vy) + (r.z - P.z) * (r.vz - P.vz) > 0;
+  }
+
+  /**
+   * Name of a body (sharing the primary) that `r`'s Kepler orbit passes within a few Hill radii
+   * of, over the next orbit (at most 3 years): sampled, both on their two-body orbits.
+   */
+  private closeApproach(r: EntityRecord, P: EntityRecord, st: WorldState): string | null {
+    if (!r.orbit) return null;
+    const el = r.orbit.el;
+    const a = el.e < 1 ? el.q / (1 - el.e) : 0;
+    const period = a > 0 ? 2 * Math.PI * Math.sqrt(a ** 3 / el.mu) : 0;
+    const span = Math.min(period || 3 * 365.25 * DAY, 3 * 365.25 * DAY) / DAY;
+    const sibs: { name: string; el: OrbitalElements; reach: number }[] = [];
+    for (const s of st.entities) {
+      if (s.id === r.id || s.id === P.id || s.mode !== 'massive' || s.gm <= 0) continue;
+      const e = this.entities.get(s.id);
+      const o = s.orbit ?? (e ? this.orbitOf(e) ?? undefined : undefined);
+      if (!o || o.parent !== P.id) continue;
+      const sa = o.el.e < 1 ? o.el.q / (1 - o.el.e) : o.el.q;
+      const hill = sa * Math.cbrt(s.gm / (3 * P.gm));
+      sibs.push({ name: s.name, el: o.el, reach: Math.max(2 * hill, 5 * (s.radius + r.radius)) });
+    }
+    if (!sibs.length) return null;
+    const p1 = this.kp, p2 = this.kv;
+    const N = 360;
+    for (let k = 1; k <= N; k++) {
+      const jd = st.jd + (span * k) / N;
+      keplerState(el, jd, p1);
+      for (const s of sibs) {
+        keplerState(s.el, jd, p2);
+        if (p1.distanceToSquared(p2) < s.reach * s.reach) return s.name;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Kepler-mode records to plain states for the simulation. A record's own state is kept (it is
+   * exact for whatever the edit touched) and moved along with its parent's change of place; only
+   * an orbit the edit changed under an unchanged state (moons of a body made heavier: Kepler III)
+   * is evaluated afresh.
+   */
+  private settle(before: WorldState, st: WorldState): void {
+    const recs = new Map(st.entities.map((r) => [r.id, r]));
+    const old = new Map(before.entities.map((r) => [r.id, r]));
+    const done = new Map<number, number[]>();
+    const p = new Vector3(), v = new Vector3();
+    const abs = (r: EntityRecord, guard = 0): number[] => {
+      const known = done.get(r.id);
+      if (known) return known;
+      let out = [r.x, r.y, r.z, r.vx, r.vy, r.vz];
+      const e = this.entities.get(r.id);
+      const pid = r.orbit?.parent ?? (r.mode === 'rider' ? r.parent : e?.body?.parent?.id);
+      const P = pid !== undefined ? recs.get(pid) : undefined;
+      const pe = pid !== undefined ? this.entities.get(pid) : undefined;
+      if (P && pe && guard < 20) {
+        const b = abs(P, guard + 1);
+        const o = old.get(r.id);
+        const sameState = o && o.x === r.x && o.y === r.y && o.z === r.z && o.vx === r.vx && o.vy === r.vy && o.vz === r.vz;
+        if (r.orbit && sameState && JSON.stringify(o.orbit?.el) !== JSON.stringify(r.orbit.el) && r.orbit.el.e < 0.99) {
+          keplerState(r.orbit.el, st.jd, p, v);
+          eclToEqu(p); eclToEqu(v);
+          out = [b[0] + p.x, b[1] + p.y, b[2] + p.z, b[3] + v.x, b[4] + v.y, b[5] + v.z];
+        } else {
+          out = [r.x + b[0] - pe.pos.x, r.y + b[1] - pe.pos.y, r.z + b[2] - pe.pos.z, r.vx + b[3] - pe.vel.x, r.vy + b[4] - pe.vel.y, r.vz + b[5] - pe.vel.z];
+        }
+      }
+      done.set(r.id, out);
+      return out;
+    };
+    for (const r of st.entities) abs(r);
+    for (const r of st.entities) { const o = done.get(r.id)!; r.x = o[0]; r.y = o[1]; r.z = o[2]; r.vx = o[3]; r.vy = o[4]; r.vz = o[5]; }
   }
 
   get canUndo(): boolean { return this.undoStack.length > 0; }

@@ -10,12 +10,12 @@ import { GodLayer } from './GodLayer';
 import { GodPanel } from './GodPanel';
 import { GodVR } from './GodVR';
 import { GodConsole } from './script/ConsoleUI';
-import { equilibriumTemp, L_SUN, mainSequence as physicsMainSequence } from './physics';
+import { equilibriumTemp, fmtDuration, L_SUN, mainSequence as physicsMainSequence } from './physics';
 import { CLIMATE, starLuminosity } from './BodyView';
 import { SUN_LIGHT } from '../astro/photometry';
 import { earthLikeAtmosphere } from '../render/Atmospheres';
 import { FLAG_BLACK_HOLE, FLAG_RIGID, FLAG_STAR } from './NBody';
-import { type Entity, Sandbox, type SpawnSpec } from './Sandbox';
+import { describeEvent, type Entity, lapseRate, Sandbox, type SandboxForecast, type SpawnSpec } from './Sandbox';
 
 export const G = 6.6743e-11;
 export const M_SUN = 1.98892e30;
@@ -23,6 +23,7 @@ export const M_EARTH = 5.9722e24;
 export const GM_EARTH = 3.986004418e14;
 export const GM_SUN = 1.32712440041e20;
 /** a throw is capped at this many times the local escape speed */
+const DAY_S = 86400;
 const MAX_THROW = 3;
 
 /** Spawnable things, with their default mass and look. */
@@ -130,10 +131,59 @@ export class God {
   /** Time step: returns the JD to show (the simulation's when the sandbox runs). */
   frameTime(jd: number, rawDt: number): number {
     const c = this.app.clock;
+    if (this.lapse) this.stepLapse();
     const shown = this.sandbox.update(jd, c.rate, c.paused, rawDt);
     // spawned drawables move with their bodies before the camera follows them
     if (this.sandbox.active) this.writeProxies();
     return shown;
+  }
+
+  // ---------------------------------------------------------------- "show me"
+
+  /** a time-lapse to a forecast event: its JD, the simulated time it spans, the rate to go back to */
+  lapse: { jd: number; total: number; restore: number; victim: number } | null = null;
+  private offered: SandboxForecast | null = null;
+
+  /** What the simulation says happens next, if anything (N-body mode). */
+  get forecast(): SandboxForecast | null {
+    const f = this.sandbox.forecast;
+    return f?.event && f.jd > this.sandbox.jd ? f : null;
+  }
+
+  /** Time-lapse to the next forecast event (collision, swallow, tidal break-up). False when nothing is coming. */
+  showMe(): boolean {
+    const f = this.forecast;
+    if (!f?.event) return false;
+    const c = this.app.clock;
+    this.lapse = { jd: f.jd, total: (f.jd - this.sandbox.jd) * DAY_S, restore: c.paused || c.rate <= 0 ? 1 : c.rate, victim: f.event.victim };
+    c.paused = false;
+    this.app.hud.toast(`Time-lapse: ${describeEvent(f.event.kind, f.survivor, f.victim)} in ${fmtDuration(this.lapse.total)}`, 3);
+    return true;
+  }
+
+  private stepLapse(): void {
+    const L = this.lapse!, c = this.app.clock, sb = this.sandbox;
+    const remaining = (L.jd - sb.jd) * DAY_S;
+    // over when the moment has passed or the body is already gone; time goes back to what it was
+    if (remaining <= 0 || !sb.entityOf(L.victim) || c.paused || c.rate < 0) {
+      if (!c.paused && c.rate >= 0) c.rate = L.restore;
+      this.lapse = null;
+      return;
+    }
+    c.rate = Math.max(lapseRate(remaining, L.total), L.restore);
+  }
+
+  /** Tell the user what is coming (once per forecast) when it is too far off to just watch. */
+  private offerForecast(): void {
+    const f = this.forecast, sb = this.sandbox;
+    if (sb.autoNbody) { this.app.hud.toast(`Simulating gravity (N-body): ${sb.autoNbody}`, 3); sb.autoNbody = null; }
+    if (!f?.event || f === this.offered || this.lapse) return;
+    this.offered = f;
+    const c = this.app.clock;
+    const wait = (f.jd - sb.jd) * DAY_S;
+    const realS = c.paused || c.rate <= 0 ? Infinity : wait / c.rate;
+    if (realS < 6) return;
+    this.app.hud.toast(`${describeEvent(f.event.kind, f.survivor, f.victim)} in ${fmtDuration(wait)}. Press M to see it (time-lapse)`, 5);
   }
 
   /** After the frame's objects moved: proxies, overlays, effects, panel. */
@@ -152,6 +202,7 @@ export class God {
         }
       }
       sb.effects = [];
+      this.offerForecast();
       const sel = this.entityOf(this.app.selection);
       this.layer.selected = sel;
       const anchor = this.entityOf(this.app.rig.anchor);
@@ -795,6 +846,7 @@ export class God {
     if (e.code === 'KeyY') { this.panel.toggle(); return true; }
     if (e.code === 'Backquote') { this.console.toggle(); e.preventDefault(); return true; }
     if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { this.undo(); e.preventDefault(); return true; }
+    if (e.code === 'KeyM' && !e.ctrlKey && !e.metaKey && this.active && this.forecast) { this.showMe(); return true; }
     if (!this.panel.open) return false;
     const id = this.selectedId();
     if ((e.code === 'Delete' || (e.code === 'Backspace' && e.shiftKey)) && id !== null) { this.remove(id); e.preventDefault(); return true; }
@@ -807,6 +859,8 @@ export class God {
     return {
       active: sb.active, jd: sb.jd, entities: sb.entities.size, lagging: sb.lagging, stepsPerSecond: Math.round(sb.stepsPerSecond),
       holes: this.app.blackHoles.filter((h) => h.key.startsWith('god:')).length, canUndo: sb.canUndo, mode: sb.mode, sunLight: SUN_LIGHT.lum,
+      forecast: sb.forecast ? { kind: sb.forecast.event?.kind ?? null, jd: sb.forecast.jd, survivor: sb.forecast.survivor, victim: sb.forecast.victim, jdEnd: sb.forecast.jdEnd } : null,
+      lapse: this.lapse ? { ...this.lapse } : null, rate: this.app.clock.rate,
     };
   }
 }
