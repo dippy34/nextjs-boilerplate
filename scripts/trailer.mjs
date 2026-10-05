@@ -127,12 +127,15 @@ async function settle(page, maxMs) {
 const story = mode === 'story';
 const [W, H] = (process.env.RES || (story ? '960x540' : '1920x1080')).split('x').map(Number);
 fs.mkdirSync(outDir, { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+// CAPTURE=page grabs the whole page (game UI included) through CDP; the software compositor makes that ~4x faster
+const PAGE_CAPTURE = process.env.CAPTURE === 'page';
+const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', ...(PAGE_CAPTURE ? ['--disable-gpu-compositing'] : [])] });
 for (const shot of SHOTS) {
   if (only.length && !only.includes(shot.id)) continue;
   const page = await browser.newPage({ viewport: { width: W, height: H } });
   const errors = []; page.on('pageerror', (e) => errors.push(String(e)));
   await page.addInitScript(INIT);
+  const cdp = await page.context().newCDPSession(page);
   await page.goto(`${BASE}?menu=0&governor=0&${shot.url}`, { waitUntil: 'load', timeout: 300000 });
   await page.waitForFunction(() => window.app && window.app.frameCount > 10, null, { timeout: 300000 });
   await page.addStyleTag({ content: HIDE_UI });
@@ -157,8 +160,14 @@ for (const shot of SHOTS) {
     last = f;
     await page.evaluate(([t, c]) => { window.__setNow(t); window.__cam(c); }, [ms, cam]);
     await settle(page, story ? 15000 : 2500);
-    const data = await page.evaluate((q) => window.__grab(q), 0.95);
-    fs.writeFileSync(file, Buffer.from(data.slice(data.indexOf(',') + 1), 'base64'));
+    if (PAGE_CAPTURE) {
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+      const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 92, optimizeForSpeed: true });
+      fs.writeFileSync(file, Buffer.from(data, 'base64'));
+    } else {
+      const data = await page.evaluate((q) => window.__grab(q), 0.95);
+      fs.writeFileSync(file, Buffer.from(data.slice(data.indexOf(',') + 1), 'base64'));
+    }
   }
   console.log(`${shot.id}: ${frames.length} frames in ${Math.round((Date.now() - t0) / 1000)} s, errors ${errors.length}${errors.length ? ' ' + errors[0].slice(0, 120) : ''}`);
   await page.close();
