@@ -18,6 +18,7 @@ import { OrbitsLayer } from '../render/Orbits';
 import { ProceduralStarLayer } from '../render/ProceduralStarLayer';
 import { Renderer, type ViewInfo } from '../render/Renderer';
 import { GLOBALS, LITE, depthK } from '../render/shaders/xr';
+import { initKtx2, ktx2Wanted } from '../render/Ktx2';
 import { SkyLayer } from '../render/Sky';
 import { Comet, SmallBodiesLayer } from '../render/SmallBodies';
 import { StarFieldLayer } from '../render/StarField';
@@ -166,6 +167,7 @@ export class App {
   static async create(canvas: HTMLCanvasElement, hudRoot: HTMLElement, labelRoot: HTMLElement): Promise<App> {
     const xrCapable = await VRSupport.detect();
     const renderer = new Renderer(canvas, xrCapable);
+    initKtx2(renderer.gl, ktx2Wanted(location.search, xrCapable), import.meta.env.BASE_URL);
     const useGaia = new URLSearchParams(location.search).get('gaia') !== '0';
     const systems = new Systems();
     const [system, catalog, gaia, named, manifest, rings, atmoData, blackHoles] = await Promise.all([

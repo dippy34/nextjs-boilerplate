@@ -62,6 +62,8 @@ export const PSF_FRAGMENT = /* glsl */ `
 vec3 psfShade(vec2 pointCoord, float radius, float energy, vec3 color) {
   vec2 p = (pointCoord - 0.5) * 2.0 * radius;   // CSS pixels from centre
   float r2 = dot(p, p);
+  // (outside the radius the edge term below is 0: the sprite's corners, a fifth of its pixels, end here)
+  if (r2 >= radius * radius) return vec3(0.0);
   float raw = pow(max(energy, 1e-6) / uPointGain, 1.0 / uPointGamma);
   float g = max(0.0, log2(raw / uMinEnergy));
   float sigma = uMinSigma + 0.16 * clamp(g - 2.0, 0.0, 12.0);

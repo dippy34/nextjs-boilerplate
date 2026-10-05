@@ -1,4 +1,5 @@
-import { BackSide, type CubeTexture, LinearFilter, LinearMipmapLinearFilter, Mesh, RepeatWrapping, ShaderMaterial, SphereGeometry, SRGBColorSpace, TextureLoader, type Vector3 } from 'three';
+import { BackSide, type CubeTexture, LinearFilter, LinearMipmapLinearFilter, Mesh, RepeatWrapping, ShaderMaterial, SphereGeometry, SRGBColorSpace, type Texture, TextureLoader, type Vector3 } from 'three';
+import { ktx2On, loadKtx2 } from './Ktx2';
 import { MilkyWayVolume } from './MilkyWayVolume';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
@@ -83,12 +84,21 @@ export class SkyLayer {
   static readonly MAP_AT_REF = 0.125;
 
   constructor(url: string) {
-    const tex = new TextureLoader().load(url);
-    tex.colorSpace = SRGBColorSpace;
-    tex.wrapS = RepeatWrapping;
-    tex.minFilter = LinearMipmapLinearFilter;
-    tex.magFilter = LinearFilter;
-    tex.anisotropy = 4;
+    const setup = (tex: Texture): Texture => {
+      tex.colorSpace = SRGBColorSpace;
+      tex.wrapS = RepeatWrapping;
+      tex.minFilter = LinearMipmapLinearFilter;
+      tex.magFilter = LinearFilter;
+      tex.anisotropy = 4;
+      return tex;
+    };
+    // the GPU-compressed copy where wanted (Ktx2.ts), the JPG otherwise or if it fails
+    const tex = ktx2On() ? null : setup(new TextureLoader().load(url));
+    if (!tex) {
+      void loadKtx2(url.replace(/\.jpg$/, '.ktx2')).then((k) => {
+        (this.mesh.material as ShaderMaterial).uniforms.uMap.value = setup(k ?? new TextureLoader().load(url));
+      });
+    }
     const mat = new ShaderMaterial({
       name: 'sky', vertexShader: VERT, fragmentShader: FRAG,
       uniforms: {

@@ -2,7 +2,7 @@ import {
   AdditiveBlending, BufferAttribute, BufferGeometry, CustomBlending, DoubleSide, DynamicDrawUsage, FrontSide, Group,
   ImageBitmapLoader, LinearFilter, LinearMipmapLinearFilter, Matrix3, Matrix4, Mesh, NoColorSpace, OneFactor,
   OneMinusSrcAlphaFactor, PlaneGeometry, Points, Quaternion, RepeatWrapping, ShaderMaterial, SRGBColorSpace, Texture, Vector4, type WebGLRenderer,
-  TextureLoader, Vector3, ClampToEdgeWrapping,
+  TextureLoader, Vector3, ClampToEdgeWrapping, type CompressedTexture,
 } from 'three';
 import { blackbodyRGB, lambertPhase, luminance, sunIrradianceAt } from '../astro/photometry';
 import { AU, SUN_RADIUS } from '../core/units';
@@ -25,11 +25,14 @@ import { hashString, starLook, starLookUniforms, type StarLook } from './StarLoo
 import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
 import { MAT, MATERIALS } from './Materials';
 import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
+import { ktx2On, loadKtx2 } from './Ktx2';
 
 interface MapInfo {
   file: string; channels: string; lonLeft: number; credit: string; width: number; height: number;
   /** optional high-resolution tier, loaded only while the body fills a large part of the view */
   hi?: { file: string; width: number; height: number };
+  /** GPU-compressed copy (pipeline/build_ktx2.mjs) and the map's mean linear luminance, which a compressed texture cannot be read back for */
+  ktx2?: { file: string; meanLum: number };
 }
 interface TextureManifest {
   maps: Record<string, MapInfo>;
@@ -226,7 +229,8 @@ export class BodiesLayer {
     if (!p) {
       const info = this.manifest.maps[key];
       const url = `${this.texBase}/${info ? info.file : key}`;
-      p = this.loader.loadAsync(url).then((tex) => {
+      const k = info?.ktx2 && ktx2On() ? loadKtx2(`${this.texBase}/${info.ktx2.file}`) : Promise.resolve(null);
+      p = k.then((kt) => kt ?? this.loader.loadAsync(url)).then((tex) => {
         tex.colorSpace = SRGBColorSpace;
         tex.wrapS = RepeatWrapping;
         tex.wrapT = ClampToEdgeWrapping;
@@ -235,7 +239,7 @@ export class BodiesLayer {
         tex.anisotropy = 8;
         // We decode sRGB ourselves in the shader to keep full control over albedo scaling.
         tex.colorSpace = '';
-        const meanLum = meanLinearLuminance(tex.image as HTMLImageElement);
+        const meanLum = (tex as CompressedTexture).isCompressedTexture && info?.ktx2 ? info.ktx2.meanLum : meanLinearLuminance(tex.image as HTMLImageElement);
         const v = { tex, meanLum };
         this.loadedTex.set(key, v);
         return v;
