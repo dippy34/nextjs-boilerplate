@@ -158,12 +158,17 @@ await page.evaluate(() => { const a = window.app; window.__rock.position.copy(a.
 await frames(3);
 await stereoCheck('rock 5 m away: true stereo', 'window.__rock.position.clone()', 'truth', { half: 50, search: 40 });
 await page.screenshot({ path: path.join(outDir, 'vr1b-rock.png'), timeout: 180000 });
-await page.evaluate(() => { window.app.renderer.scene.remove(window.__rock); window.app.vr.labelsGroup.visible = true; });
-await page.goto(`${base}?time=2026-10-01T20:00:00Z&target=Earth&dist=4&az=40&el=10&paused=1`, { waitUntil: 'load' });
-await page.waitForFunction(() => window.app && window.app.frameCount > 10, null, { timeout: 60000 });
-await page.click('#vr-button');
-await page.waitForFunction(() => window.app.vr.active && window.app.renderer.presenting, null, { timeout: 90000 });
-await page.waitForFunction(() => window.app.vr.menu.isOpen, null, { timeout: 120000 });
+// back to where the tour starts (no reload: that would abort the page's fetches): Earth at 4 radii, menu open
+await page.evaluate(() => {
+  const a = window.app; const v = a.vr;
+  a.renderer.scene.remove(window.__rock);
+  v.labelsGroup.visible = true; delete v.updateHover; for (const h of v.hands) h.ray.visible = true;
+  const e = a.system.bodies.find((b) => b.name === 'Earth'); a.placeNear(e, 4 * e.radius, 40, 10);
+});
+await frames(2);
+await page.evaluate(() => window.app.vr.toggleMenu());
+await page.waitForFunction(() => window.app.vr.menu.isOpen, null, { timeout: 30000 });
+await frames(2);
 
 // 2. Laser + trigger on the Saturn tile: hover highlight, then travel there
 const saturnKey = await page.evaluate(() => window.app.system.bodies.find((b) => b.name === 'Saturn').key);
