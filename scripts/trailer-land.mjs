@@ -102,7 +102,8 @@ const SHOTS = {
       a.clock.paused = false; a.clock.rate = rate;
     }, Number(process.env.R || 6));
     const H0 = Number(process.env.H0 || 2600), TD = Number(process.env.TD || 120); // start altitude, frames of descent
-    const n = Math.round(6 * FPS);
+    const FIRST = Number(process.env.FIRST || 0), COUNT = Number(process.env.COUNT || 144);
+    const n = FIRST + COUNT;
     const setup = { H0, TD, R: Number(process.env.R || 6) };
     // the descent controller (runs in the page before each rendered frame)
     const ctl = ([i, s]) => {
@@ -167,8 +168,8 @@ const SHOTS = {
     const dir = path.join(outDir, 'a'); fs.mkdirSync(dir, { recursive: true });
     for (let i = 0; i < n; i++) {
       await frame(page, ctl, [i, setup]);
-      const ff = path.join(dir, `f${String(i).padStart(4, '0')}.jpg`);
-      if (i % STRIDE === 0 && !fs.existsSync(ff)) { await raf(page); await grab(cdp, ff); }
+      const ff = path.join(dir, `f${String(i - FIRST).padStart(4, '0')}.jpg`);
+      if (i >= FIRST && i % STRIDE === 0 && !fs.existsSync(ff)) { await raf(page); await grab(cdp, ff); }
       if (i % 24 === 0) console.log('a', i, JSON.stringify(await page.evaluate(() => { const r = window.app.game.flight.readout; return { alt: Math.round(r.altitude), v: Math.round(r.vertSpeed), landed: r.landed, end: window.app.game.flight.ending?.title ?? null }; })));
     }
     await page.close();
@@ -205,9 +206,9 @@ const SHOTS = {
     await page.waitForTimeout(6000);
     clockMs = await page.evaluate(() => performance.now()); // continue from the real clock: a jump confuses terrain streaming
     for (let k = 0; k < 48; k++) await frame(page, null); // settle: terrain, rocks, exposure
-    const n = Math.round(5 * FPS);
+    const n = Number(process.env.NB || 120);
     const dir = path.join(outDir, 'b'); fs.mkdirSync(dir, { recursive: true });
-    const JUMP = Number(process.env.JUMP || 48);
+    const JUMP = Number(process.env.JUMP || 36);
     await page.keyboard.down('KeyW');
     for (let i = 0; i < n; i++) {
       if (i === JUMP) await page.keyboard.down('Space');
