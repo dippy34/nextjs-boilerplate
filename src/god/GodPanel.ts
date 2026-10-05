@@ -1,3 +1,4 @@
+import { QUICK_CREATE } from './Actions';
 import { type BodyView, bodyView } from './BodyView';
 import { type God, SPAWN_TYPES, type SpawnType } from './God';
 import {
@@ -5,6 +6,7 @@ import {
   fmtLength, habitableZone, hawkingTemp, hillRadius, isco, L_SUN, M_EARTH, M_JUPITER, M_SUN, mainSequence, num, orbitalPeriod,
   photonSphere, rocheLimit, scaleHeight, schwarzschildRadius, surfaceGravity, surfaceTemp, waterState,
 } from './physics';
+import { HINT_STEPS, type PushDir, type Verb } from './verbs';
 
 const CSS = `
 .god-badge { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 12px;
@@ -13,7 +15,7 @@ const CSS = `
 .god-badge.real { color: #9fd8ff; }
 .god-badge.sim { color: #ffd27a; border-color: rgba(255, 200, 100, 0.5); }
 .god-badge .lag { color: #ff8a7a; margin-left: 6px; }
-.god-panel { position: absolute; top: 70px; right: 10px; width: 384px; max-height: calc(100vh - 140px); overflow-y: auto;
+.god-panel { position: absolute; top: 70px; right: 10px; width: 400px; max-height: calc(100vh - 140px); overflow-y: auto;
   background: var(--panel); border: 1px solid rgba(255, 200, 100, 0.35); border-radius: 6px; padding: 8px 10px; pointer-events: auto;
   backdrop-filter: blur(4px); font-size: 12px; }
 .god-panel h3 { margin: 0 0 6px; font-size: 14px; color: #ffd27a; display: flex; justify-content: space-between; align-items: center; }
@@ -47,6 +49,37 @@ const CSS = `
 .god-panel details.m code { display: block; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; color: #cfe3ff;
   background: rgba(0, 0, 0, 0.35); border-radius: 4px; padding: 3px 5px; margin: 2px 0 4px; white-space: pre-wrap; word-break: break-word; }
 .god-panel label.chk { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.god-panel .gs-name { font-size: 22px; font-weight: 700; color: #fff; line-height: 1.1; }
+.god-panel .gs-sub { color: var(--dim); font-size: 12.5px; margin: 2px 0 6px; }
+.god-panel .gs-facts { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
+.god-panel .gs-facts span { background: rgba(127, 178, 255, 0.10); border-radius: 10px; padding: 2px 8px; font-size: 12px; color: #cfe3ff; font-variant-numeric: tabular-nums; }
+.god-panel .gs-verbs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.god-panel .gs-verbs button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 10px; font-size: 15px; font-weight: 600;
+  border-radius: 8px; min-height: 48px; text-align: left; }
+.god-panel .gs-verbs button small { font-size: 11px; font-weight: 400; color: var(--dim); }
+.god-panel .gs-verbs .wide { grid-column: 1 / -1; }
+.god-panel .gs-push { grid-column: 1 / -1; display: flex; gap: 4px; align-items: stretch; }
+.god-panel .gs-push > button:first-child { flex: 1; }
+.god-panel .gs-push .pd { flex: 0 0 auto; min-height: 0; padding: 4px 7px; font-size: 12px; font-weight: 500; align-items: center; justify-content: center; }
+.god-panel .gs-cap { margin: 8px 0 4px; padding: 8px 10px; border-radius: 8px; background: rgba(0, 0, 0, 0.35); border-left: 3px solid rgba(255, 200, 100, 0.4);
+  font-size: 13.5px; line-height: 1.35; color: #f2f5fb; min-height: 20px; transition: background 0.4s, border-color 0.4s; }
+.god-panel .gs-cap.fresh { background: rgba(255, 200, 100, 0.16); border-left-color: #ffd27a; }
+.god-panel .gs-cap.empty { color: var(--dim); }
+.god-panel .gs-sec { margin: 10px 0 4px; color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11.5px; }
+.god-panel .gs-create { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.god-panel .gs-create button { padding: 8px 4px; font-size: 14px; font-weight: 600; border-radius: 8px; }
+.god-panel .gs-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+.god-panel .gs-row2 button { padding: 7px; font-size: 14px; border-radius: 8px; }
+.god-panel .gs-try { margin: 10px 0 2px; padding: 8px 10px; border: 1px dashed rgba(127, 178, 255, 0.5); border-radius: 8px; font-size: 13px; }
+.god-panel .gs-try b { color: #ffd27a; }
+.god-panel .gs-try ol { margin: 4px 0 0; padding-left: 20px; }
+.god-panel .gs-try li { margin: 2px 0; color: var(--dim); }
+.god-panel .gs-try li.now { color: #fff; font-weight: 600; }
+.god-panel .gs-try li.done { text-decoration: line-through; }
+.god-panel .gs-try .x { float: right; font-size: 12px; }
+.god-panel .gs-aim { color: #ffd27a; }
+.god-panel details.adv { margin-top: 10px; border-top: 1px solid rgba(255, 200, 100, 0.25); padding-top: 6px; }
+.god-panel details.adv > summary { cursor: pointer; color: #ffd27a; font-weight: 600; font-size: 13px; }
 `;
 
 /** Editable fields: how they nudge (multiply or add) and their slider span. */
@@ -76,7 +109,7 @@ export class GodPanel {
   private lastKey = '';
   private timer = 0;
   private openMath = new Set<string>();
-  private closedGroups = new Set<string>(['climate']);
+  private closedGroups = new Set<string>(['climate', 'advanced']);
   private massUnit = 'M⊕';
   private view: BodyView | null = null;
 
@@ -149,7 +182,7 @@ export class GodPanel {
     this.view = v;
     const e = id !== null ? sb.entityOf(id) : null;
     // rebuild when what is edited changes (not while typing); the moving numbers refresh in place
-    const key = `${sb.active}|${sb.mode}|${id}|${e?.gm}|${e?.radius}|${e?.spin.rate}|${e?.spin.axis.x}|${JSON.stringify(e?.orbit?.el ?? null)}|${JSON.stringify(e?.phys ?? null)}|${this.god.tool}|${this.god.placeType}|${sb.canUndo}|${this.god.derive}|${this.massUnit}|${sb.entities.size}`;
+    const key = `${sb.active}|${sb.mode}|${id}|${e?.gm}|${e?.radius}|${e?.spin.rate}|${e?.spin.axis.x}|${JSON.stringify(e?.orbit?.el ?? null)}|${JSON.stringify(e?.phys ?? null)}|${this.god.tool}|${this.god.placeType}|${sb.canUndo}|${this.god.derive}|${this.massUnit}|${sb.entities.size}|${this.god.actions.serial}|${this.god.actions.hints.done.size}|${this.god.actions.hints.skipped}`;
     const typing = this.root.contains(document.activeElement) && (document.activeElement as HTMLElement).tagName === 'INPUT';
     if (key !== this.lastKey && !typing) { this.lastKey = key; this.render(v); }
     else this.live(v);
@@ -177,6 +210,55 @@ export class GodPanel {
   // ---------------------------------------------------------------- render
 
   private render(v: BodyView | null): void {
+    this.body.innerHTML = this.simple(v)
+      + `<details class="adv" data-g="advanced" ${this.closedGroups.has('advanced') ? '' : 'open'}><summary>⚙ Advanced: every value, the formulas, gravity, save</summary>${this.advanced(v)}</details>`;
+  }
+
+  /** The simple panel: a few big verbs on the selection, what the physics did, create, undo, the guide. */
+  private simple(v: BodyView | null): string {
+    const g = this.god, act = g.actions;
+    let h = '';
+    if (v) {
+      const kind = v.kind === 'hole' ? 'black hole' : v.kind;
+      h += `<div class="gs-name">${esc(v.name)}</div><div class="gs-sub">${kind}${v.orbit ? ` · orbits ${esc(v.orbit.parentName)}` : ''}</div>`;
+      const facts: string[] = [];
+      const m = v.massKg;
+      facts.push(m >= 0.01 * M_SUN ? `${num(m / M_SUN, 3)} M☉` : m >= 0.5 * M_JUPITER ? `${num(m / M_JUPITER, 3)} Jupiters` : `${num(m / M_EARTH, 3)} Earths`);
+      if (v.kind !== 'hole') facts.push(`${fmtLength(v.radius)} radius`);
+      if (v.orbit && v.orbit.el.e < 1) {
+        const P = orbitalPeriod(v.orbit.el.q / (1 - v.orbit.el.e), v.orbit.parentMassKg, m).value;
+        facts.push(`${v.kind === 'moon' ? 'month' : 'year'} ${P > 2 * 3.15576e7 ? `${num(P / 3.15576e7, 3)} yr` : `${num(P / DAY, 3)} d`}`);
+      }
+      h += `<div class="gs-facts">${facts.map((f) => `<span>${f}</span>`).join('')}</div>`;
+      const aiming = g.tool === 'push';
+      h += `<div class="gs-verbs">
+        <button data-v="heavier"><span>⬆ Heavier</span><small>2× the mass</small></button>
+        <button data-v="lighter"><span>⬇ Lighter</span><small>half the mass</small></button>
+        <button data-v="bigger" ${v.kind === 'hole' ? 'disabled' : ''}><span>⤢ Bigger</span><small>2× the size</small></button>
+        <button data-v="smaller" ${v.kind === 'hole' ? 'disabled' : ''}><span>⤡ Smaller</span><small>half the size</small></button>
+        <div class="gs-push"><button data-a="pushaim" class="${aiming ? 'on' : ''}" ${v.orbit ? '' : 'disabled'}><span>➜ Push</span><small class="${aiming ? 'gs-aim' : ''}">${aiming ? 'now click in the view where to push it (Esc: cancel)' : 'then click where to push it'}</small></button>
+          ${(['forward', 'back', 'out', 'in'] as const).map((d) => `<button class="pd" data-v="push" data-k="${d}" ${v.orbit ? '' : 'disabled'} title="Push ${d}: +20% of the circular speed">${{ forward: '↑ fwd', back: '↓ back', out: '→ out', in: '← in' }[d]}</button>`).join('')}</div>
+        <button data-v="reverse" ${v.orbit ? '' : 'disabled'}><span>⇄ Reverse orbit</span><small>same speed, other way</small></button>
+        <button data-v="delete" class="danger"><span>✕ Delete</span><small>its moons stay</small></button>
+      </div>`;
+    } else {
+      h += `<div class="gs-name">Pick something</div><div class="gs-sub">Click a planet, moon, star or black hole in the view, then change it here.</div>`;
+    }
+    const fresh = act.caption && performance.now() - act.captionAt < 3000;
+    h += `<div class="gs-cap ${act.caption ? '' : 'empty'} ${fresh ? 'fresh' : ''}" data-cap>${act.caption ? esc(act.caption) : 'Press a button: the orbit line morphs and this line says what physics did.'}</div>`;
+    h += `<div class="gs-sec">Create ${v ? `next to ${esc(v.name)}` : 'in the Solar System'}</div><div class="gs-create">${QUICK_CREATE.map((q) => `<button data-q="${q.type}">${q.icon} ${q.label}</button>`).join('')}</div>`;
+    h += `<div class="gs-row2"><button data-a="undo" ${g.sandbox.canUndo ? '' : 'disabled'} title="Ctrl+Z">↶ Undo</button><button data-a="reset" ${g.sandbox.active ? '' : 'disabled'}>⟲ Real universe</button></div>`;
+    h += `<div class="hint">${v ? 'Drag the body itself to move it, or the yellow arrow\'s tip to change its speed.' : ''}</div>`;
+    const hints = act.hints;
+    if (hints.visible) {
+      const next = hints.next;
+      h += `<div class="gs-try"><span class="x" data-a="hintskip" title="Hide the guide">skip ✕</span><b>Try:</b><ol>${HINT_STEPS.map((st) => `<li class="${hints.done.has(st.id) ? 'done' : st === next ? 'now' : ''}">${esc(st.text)}</li>`).join('')}</ol></div>`;
+    }
+    return h;
+  }
+
+  /** The full editor (SpaceEngine-style): every value typed or nudged, every derived value with its formula. */
+  private advanced(v: BodyView | null): string {
     const g = this.god, sb = g.sandbox;
     let html = '';
     if (v) {
@@ -203,8 +285,9 @@ export class GodPanel {
       <div class="row"><button data-a="undo" ${sb.canUndo ? '' : 'disabled'} title="Ctrl+Z">↶ Undo</button>
         <button data-a="reset" ${sb.active ? '' : 'disabled'}>⟲ Real universe</button></div>
       <div class="row"><button data-a="save" ${sb.active ? '' : 'disabled'}>Save</button><button data-a="load" ${sb.hasSave() ? '' : 'disabled'}>Load</button>
-        <button data-a="export" ${sb.active ? '' : 'disabled'}>Export JSON</button><button data-a="import">Import</button></div>`);
-    this.body.innerHTML = html;
+        <button data-a="export" ${sb.active ? '' : 'disabled'}>Export JSON</button><button data-a="import">Import</button></div>
+      <div class="row"><button data-a="hintrestart">Show the “Try:” guide again</button></div>`);
+    return html;
   }
 
   private physicalGroup(v: BodyView): string {
@@ -315,6 +398,8 @@ export class GodPanel {
 
   /** Moving values: refresh in place. */
   private live(v: BodyView | null): void {
+    const cap = this.body.querySelector<HTMLElement>('[data-cap]');
+    if (cap) cap.classList.toggle('fresh', performance.now() - this.god.actions.captionAt < 3000);
     if (!v) return;
     const set = (k: string, d: Derived) => {
       const b = this.body.querySelector<HTMLElement>(`[data-live="${k}"]`);
@@ -370,9 +455,11 @@ export class GodPanel {
   }
 
   private click(ev: Event): void {
-    const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-a],[data-n]');
+    const t = (ev.target as HTMLElement).closest<HTMLElement>('[data-a],[data-n],[data-v],[data-q]');
     if (!t || (t as HTMLButtonElement).disabled) return;
     const g = this.god, sb = g.sandbox, app = g.app;
+    if (t.dataset.v) { g.actions.run(t.dataset.v as Verb, this.view?.id ?? null, t.dataset.k as PushDir | undefined); this.refresh(); return; }
+    if (t.dataset.q) { g.actions.create(t.dataset.q as SpawnType); this.refresh(); return; }
     if (t.dataset.n) {
       const key = t.dataset.n, k = Number(t.dataset.k);
       const cur = this.fieldValue(key);
@@ -383,8 +470,11 @@ export class GodPanel {
     const id = this.view?.id ?? null;
     switch (a) {
       case 'close': this.toggle(); return;
-      case 'reset': g.reset(); break;
-      case 'undo': g.undo(); break;
+      case 'reset': g.actions.reset(); break;
+      case 'undo': g.actions.undo(); break;
+      case 'pushaim': g.tool = g.tool === 'push' ? 'none' : 'push'; break;
+      case 'hintskip': g.actions.hints.skip(); break;
+      case 'hintrestart': g.actions.hints.restart(); break;
       case 'save': app.hud.toast(sb.save() ? 'Universe saved in this browser' : 'Could not save (storage unavailable)', 2); break;
       case 'load': app.hud.toast(sb.load() ? 'Universe loaded' : 'No saved universe', 2); break;
       case 'export': this.download(sb.exportJson()); break;

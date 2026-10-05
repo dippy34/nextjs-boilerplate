@@ -1,24 +1,109 @@
 import type { App } from '../app/App';
-import { COLORS, type Panel } from '../vr/Panel';
+import { COLORS, FONT, type Panel } from '../vr/Panel';
+import { QUICK_CREATE } from './Actions';
 import { bodyView, type BodyView } from './BodyView';
 import { SPAWN_TYPES } from './God';
 import { PRESETS } from './script/ConsoleUI';
 import {
   AU, type Derived, density, equilibriumTemp, escapeVelocity, M_EARTH, M_SUN, num, orbitalPeriod, schwarzschildRadius, surfaceGravity, surfaceTemp,
 } from './physics';
+import { HINT_STEPS } from './verbs';
 
 /** derived value whose working is shown at the bottom of the tab */
 let shownMath: string | null = null;
 /** what the last preset script said */
 let scriptSaid: string | null = null;
 
+/** the full editor is showing instead of the simple verbs */
+let advanced = false;
+
 /**
- * The headset menu's God tab: the same editor as the desktop panel, with nudge buttons instead
+ * The headset menu's God tab. Simple first: the selection's name in big type, eight big verbs
+ * (heavier, lighter, bigger, smaller, push with the laser, faster, reverse, delete), the caption
+ * saying what the physics did, three big Create buttons, undo and reset, and the "Try:" guide.
+ * "Advanced" swaps in the full editor (paintGodAdvanced).
+ */
+export function paintGodTab(p: Panel, a: { x: number; y: number; w: number; h: number }, app: App, close: () => void): void {
+  if (advanced) { paintGodAdvanced(p, a, app, close); return; }
+  const g = app.god, sb = g.sandbox, act = g.actions;
+  g.vr.armed = true;
+  const run = (f: () => void) => () => { f(); p.dirty = true; };
+  const id = g.selectedId();
+  const v = id !== null ? bodyView(g, id) : null;
+  // header: the selection, big; undo, reset, advanced
+  if (v) {
+    p.text(v.name, a.x + 10, a.y + 28, 50, COLORS.sel, 700, 'left', 700);
+    const kind = v.kind === 'hole' ? 'black hole' : v.kind;
+    p.text(`${kind}${v.orbit ? ` · orbits ${v.orbit.parentName}` : ''}${sb.active ? (sb.mode === 'nbody' ? ' · gravity simulated' : ' · edited') : ''}`, a.x + 12, a.y + 76, 24, COLORS.dim, 400, 'left', 760);
+  } else {
+    p.text('Pick something', a.x + 10, a.y + 28, 50, COLORS.sel, 700);
+    p.text('Point at a planet, moon or star and pull the trigger', a.x + 12, a.y + 76, 24, COLORS.dim);
+  }
+  p.button('god:undo', a.x + 800, a.y, 220, 76, '↶ Undo', run(() => act.undo()), { size: 32, disabled: !sb.canUndo });
+  p.button('god:reset', a.x + 1034, a.y, 250, 76, '⟲ Real', run(() => act.reset()), { size: 32, disabled: !sb.active, sub: 'universe' });
+  p.button('god:adv', a.x + 1298, a.y, 222, 76, '⚙ Advanced', run(() => { advanced = true; }), { size: 28 });
+  // the verbs: 4 x 2 big buttons
+  const top = a.y + 110, bw = (a.w - 3 * 14) / 4, bh = 112;
+  const verb = (i: number, key: string, label: string, sub: string, f: () => void, opts: { disabled?: boolean; color?: string; active?: boolean } = {}) => {
+    const x = a.x + (i % 4) * (bw + 14), y = top + Math.floor(i / 4) * (bh + 14);
+    p.button(`god:v:${key}`, x, y, bw, bh, label, run(f), { size: 36, sub, ...opts, disabled: opts.disabled || !v });
+  };
+  const vid = v?.id ?? null;
+  verb(0, 'heavier', '⬆ Heavier', '2× the mass', () => act.run('heavier', vid));
+  verb(1, 'lighter', '⬇ Lighter', 'half the mass', () => act.run('lighter', vid));
+  verb(2, 'bigger', '⤢ Bigger', '2× the size', () => act.run('bigger', vid), { disabled: v?.kind === 'hole' });
+  verb(3, 'smaller', '⤡ Smaller', 'half the size', () => act.run('smaller', vid), { disabled: v?.kind === 'hole' });
+  verb(4, 'push', '➜ Push', g.tool === 'push' ? 'aim, pull trigger' : 'aim with the laser', () => {
+    g.tool = 'push';
+    app.vr?.flash('Aim the laser where to push it, pull the trigger');
+    close();
+  }, { disabled: !v?.orbit, active: g.tool === 'push' });
+  verb(5, 'faster', '⏩ Faster', '+20% speed forward', () => act.run('push', vid, 'forward'), { disabled: !v?.orbit });
+  verb(6, 'reverse', '⇄ Reverse', 'orbit the other way', () => act.run('reverse', vid), { disabled: !v?.orbit });
+  verb(7, 'delete', '✕ Delete', 'its moons stay', () => act.run('delete', vid), { color: COLORS.warn });
+  // what the physics did
+  const cy = top + 2 * (bh + 14) + 4, ch = 118;
+  const fresh = act.caption && performance.now() - act.captionAt < 3000;
+  p.rect(a.x, cy, a.w, ch, 18, fresh ? 'rgba(255, 200, 100, 0.16)' : 'rgba(0, 0, 0, 0.35)', fresh ? '#ffd27a' : 'rgba(255, 200, 100, 0.3)', 3);
+  wrap(p, act.caption || 'Press a button: the orbit line morphs, the body glows, and this says what physics did.', a.x + 24, cy + 36, a.w - 48, 30, act.caption ? COLORS.text : COLORS.dim, 2);
+  // create
+  const ky = cy + ch + 18;
+  p.text('Create', a.x + 10, ky + 46, 32, COLORS.text, 700);
+  const cw = (a.w - 200 - 2 * 14) / 3;
+  QUICK_CREATE.forEach((q, i) => p.button(`god:q:${q.type}`, a.x + 200 + i * (cw + 14), ky, cw, 92, `${q.icon} ${q.label}`, run(() => act.create(q.type)), { size: 34 }));
+  // the guide, or how to grab
+  const hy = a.y + a.h - 46;
+  const hints = act.hints;
+  if (hints.visible && hints.next) {
+    p.text(`Try (${hints.done.size + 1}/${HINT_STEPS.length}): ${hints.next.text}`, a.x + 10, hy + 20, 28, '#ffd27a', 600, 'left', a.w - 200);
+    p.button('god:hintskip', a.x + a.w - 170, hy - 6, 170, 52, 'Skip', run(() => hints.skip()), { size: 24 });
+  } else {
+    p.text('Right grip on a body: grab it, swing, let go to throw it', a.x + 10, hy + 20, 26, COLORS.dim);
+  }
+}
+
+/** Word-wrapped text, up to `maxLines` lines. */
+function wrap(p: Panel, t: string, x: number, y: number, w: number, size: number, color: string, maxLines: number): void {
+  const c = p.ctx;
+  c.font = `500 ${size}px ${FONT}`;
+  const words = t.split(' ');
+  const lines: string[] = [];
+  let cur = '';
+  for (const wd of words) {
+    const next = cur ? `${cur} ${wd}` : wd;
+    if (c.measureText(next).width > w && cur) { lines.push(cur); cur = wd; } else cur = next;
+  }
+  if (cur) lines.push(cur);
+  lines.slice(0, maxLines).forEach((l, i) => p.text(i === maxLines - 1 && lines.length > maxLines ? `${l} ${lines.slice(maxLines).join(' ')}` : l, x, y + i * size * 1.45, size, color, 500, 'left', w));
+}
+
+/**
+ * The full editor in the headset: the same editor as the desktop panel, with nudge buttons instead
  * of typed values. Left: physical properties; right: the orbit; tap a derived value to see its
  * formula with the numbers in. Below: create, N-body switch, undo and reset. The right grip
  * grabs and throws bodies.
  */
-export function paintGodTab(p: Panel, a: { x: number; y: number; w: number; h: number }, app: App, close: () => void): void {
+function paintGodAdvanced(p: Panel, a: { x: number; y: number; w: number; h: number }, app: App, close: () => void): void {
   const g = app.god;
   const sb = g.sandbox;
   g.vr.armed = true;
@@ -26,9 +111,9 @@ export function paintGodTab(p: Panel, a: { x: number; y: number; w: number; h: n
   // header: state of the universe
   p.text(!sb.active ? '● Real ephemeris' : sb.mode === 'nbody' ? '● N-body simulation' : '● Edited (Kepler orbits)', a.x + 10, a.y + 26, 28, sb.active ? COLORS.warn : COLORS.accent, 700);
   p.button('god:nbody', a.x + 720, a.y, 330, 60, sb.active && sb.mode === 'nbody' ? '✓ Simulate gravity' : 'Simulate gravity', act(() => g.setSimulation(!(sb.active && sb.mode === 'nbody'))), { size: 24, active: sb.active && sb.mode === 'nbody' });
-  p.button('god:undo', a.x + 1064, a.y, 140, 60, '↶ Undo', act(() => g.undo()), { size: 24, disabled: !sb.canUndo });
-  p.button('god:reset', a.x + 1218, a.y, 200, 60, '⟲ Real', act(() => g.reset()), { size: 24, disabled: !sb.active });
-  p.button('god:pause', a.x + 1432, a.y, 88, 60, app.clock.paused ? '▶' : '⏸', act(() => app.togglePause()), { size: 28 });
+  p.button('god:undo', a.x + 1064, a.y, 140, 60, '↶ Undo', act(() => g.actions.undo()), { size: 24, disabled: !sb.canUndo });
+  p.button('god:reset', a.x + 1218, a.y, 200, 60, '⟲ Real', act(() => g.actions.reset()), { size: 24, disabled: !sb.active });
+  p.button('god:simple', a.x + 1432, a.y, 88, 60, '◂', act(() => { advanced = false; }), { size: 30 });
 
   const id = g.selectedId();
   const v = id !== null ? bodyView(g, id) : null;

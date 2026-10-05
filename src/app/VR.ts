@@ -331,7 +331,7 @@ export class VRSupport {
     this.menu.open('god' as never);
     this.menu.panel.update();
     this.menu.panel.dirty = true;
-    return { tab: this.menu.panel.has('tab:god') && this.menu.panel.has('god:spawn:hole') };
+    return { tab: this.menu.panel.has('tab:god') && (this.menu.panel.has('god:spawn:hole') || this.menu.panel.has('god:q:hole')) };
   }
   debugPressGod(id: string): boolean {
     if (id === 'open') { if (!this.menu.isOpen) this.toggleMenu(); this.menu.open('god' as never); this.menu.panel.update(); return true; }

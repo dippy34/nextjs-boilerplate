@@ -125,6 +125,8 @@ interface Ring { around: Entity; radius: number; n: Vector3; e1: Vector3; e2: Ve
 const TRAIL_POINTS = 360;
 const ORBIT_POINTS = 180;
 const MAX_ORBITS = 48;
+/** how long an edited orbit's line takes to morph to the new orbit */
+const MORPH_MS = 900;
 
 /**
  * God mode's overlays in the scene: orbit trails (where things have been), predicted orbits
@@ -159,6 +161,22 @@ export class GodLayer {
   /** where the arrow's tip was drawn (camera-relative, m), for dragging */
   readonly tip = new Vector3();
   tipVisible = false;
+  /** the selection's orbit before a verb: the line morphs from it to the new one (src/god/Actions.ts) */
+  /** how many morphs were started (tests) */
+  morphs = 0;
+  private morph: { id: number; primary: number; relV: Vector3; mu: number; t0: number } | null = null;
+
+  /** Morph the selection's orbit line from its current orbit to whatever the next edit makes; glow. */
+  startMorph(e: Entity, primary: Entity | null): void {
+    this.morphs++;
+    if (primary) this.morph = { id: e.id, primary: primary.id, relV: e.vel.clone().sub(primary.vel), mu: primary.gm + e.gm, t0: performance.now() };
+    this.glow(e);
+  }
+
+  /** A short glow on a body (a verb did something to it). */
+  glow(e: Entity): void {
+    this.burst(e.pos.clone(), e, 0.9, 48, [1, 0.88, 0.5], 0.9, false, Math.max(e.radius, 1e5) * 1.2);
+  }
 
   constructor(private sandbox: Sandbox) {
     this.group.name = 'god';
@@ -293,9 +311,19 @@ export class GodLayer {
     this.arrowTip.points.visible = false;
     this.tipVisible = false;
     if (s) {
-      const v = this.previewVel ?? s.vel;
-      this.drawOrbit(s, v, this.preview, camV, true);
+      let v = this.previewVel ?? s.vel;
       const p = sb.primaryOf(s);
+      let mu: number | undefined;
+      const m = this.morph;
+      if (m && m.id === s.id && p && m.primary === p.id && !this.previewVel) {
+        const t = (performance.now() - m.t0) / MORPH_MS;
+        if (t < 1) {
+          const k = t * t * (3 - 2 * t);
+          v = m.relV.clone().lerp(s.vel.clone().sub(p.vel), k).add(p.vel);
+          mu = m.mu + (p.gm + s.gm - m.mu) * k;
+        } else this.morph = null;
+      }
+      this.drawOrbit(s, v, this.preview, camV, true, mu);
       const relV = v.clone().sub(p?.vel ?? new Vector3());
       const vc = p ? Math.sqrt((p.gm + s.gm) / Math.max(s.pos.distanceTo(p.pos), 1)) : Math.max(relV.length(), 1);
       const base = s.pos.clone().sub(camV);
@@ -343,11 +371,11 @@ export class GodLayer {
   }
 
   /** Osculating conic of `e` (moving at `vel`) about its primary. */
-  private drawOrbit(e: Entity, vel: Vector3, L: DynLine, camV: Vector3, selected: boolean): boolean {
+  private drawOrbit(e: Entity, vel: Vector3, L: DynLine, camV: Vector3, selected: boolean, muOverride?: number): boolean {
     const p = this.sandbox.primaryOf(e);
     if (!p) { L.line.visible = false; return false; }
     const r = e.pos.clone().sub(p.pos), v = vel.clone().sub(p.vel);
-    const mu = p.gm + e.gm;
+    const mu = muOverride ?? p.gm + e.gm;
     if (r.lengthSq() === 0 || mu <= 0) { L.line.visible = false; return false; }
     const el = stateToElements(r, v, mu, 0);
     const n = sampleOrbit(el, ORBIT_POINTS, this.tmp, r.length() * 6);

@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import type { SpaceObject } from '../universe/Body';
 import type { God } from './God';
+import { pushCaption } from './verbs';
 
 /**
  * God mode in the headset: the right grip grabs the body under the laser (once God mode is in
@@ -13,6 +14,11 @@ export class GodVR {
   /** grip grabs bodies (set once the God tab has been used, so the grip keeps orbiting before that) */
   armed = false;
   private grab: { id: number; dist: number; samples: { t: number; p: Vector3 }[] } | null = null;
+  /** the body under the laser last frame (a light tick when it changes: "this can be grabbed") */
+  private hoverId: number | null = null;
+  private lastBuzz = 0;
+
+  private buzz(intensity: number, ms: number): void { this.god.app.vr?.pulse(intensity, ms); }
 
   constructor(private god: God) {}
 
@@ -33,6 +39,10 @@ export class GodVR {
     if (!this.armed) return false;
     const absOrigin = eye.clone().add(origin);
     if (!this.grab) {
+      const hid = g.idOf(hover);
+      if (hid !== this.hoverId) { this.hoverId = hid; if (hid !== null) this.buzz(0.12, 12); }
+    }
+    if (!this.grab) {
       const target = hover ?? g.app.selection;
       const id = g.idOf(hover);
       if (id === null || !target) return false;
@@ -44,6 +54,9 @@ export class GodVR {
       this.grab = { id, dist: e.pos.distanceTo(absOrigin), samples: [] };
       if (g.app.selection !== target) g.app.select(target);
       g.audio.whoosh();
+      this.buzz(0.7, 60);
+      g.layer.startMorph(e, g.sandbox.primaryOf(e));
+      g.app.vr?.flash(`Holding ${e.name}: swing and let go to throw`);
     }
     const e = g.sandbox.entityOf(this.grab.id);
     if (!e) { this.grab = null; return false; }
@@ -52,6 +65,13 @@ export class GodVR {
     this.grab.samples.push({ t: now, p: at.clone() });
     while (this.grab.samples.length > 2 && now - this.grab.samples[0].t > 150) this.grab.samples.shift();
     g.layer.movePreview = { e, at };
+    // a faint rumble while held, stronger the faster the hand moves
+    if (now - this.lastBuzz > 120 && this.grab.samples.length > 1) {
+      const s0 = this.grab.samples[0], dtS = (now - s0.t) / 1000;
+      const sp = dtS > 0 ? at.distanceTo(s0.p) / dtS / Math.max(this.grab.dist, 1) : 0; // laser sweep, rad/s
+      this.buzz(Math.min(0.5, 0.06 + sp * 0.2), 40);
+      this.lastBuzz = now;
+    }
     return true;
   }
 
@@ -67,12 +87,35 @@ export class GodVR {
     const first = s[0], last = s[s.length - 1];
     const dtReal = first && last ? (last.t - first.t) / 1000 : 0;
     const shown = dtReal > 0.02 ? last.p.clone().sub(first.p).divideScalar(dtReal) : new Vector3();
+    const c = g.actions.ctx(e);
     g.drop(gr.id, at, shown);
+    const after = g.sandbox.entityOf(gr.id);
+    if (!after) return;
+    const { r, v } = g.sandbox.relative(after);
+    const thrown = shown.lengthSq() > 0 && v.length() > 0;
+    const circ = Math.sqrt(((g.sandbox.primaryOf(after)?.gm ?? 0) + after.gm) / Math.max(r.length(), 1));
+    // a throw that leaves a near-circular orbit reads as "dropped"
+    const say = thrown && Math.abs(v.length() / Math.max(circ, 1e-9) - 1) > 0.05
+      ? pushCaption({ ...c, parentGm: g.sandbox.primaryOf(after)?.gm, parentName: g.sandbox.primaryOf(after)?.name }, r.toArray(), r.clone().cross(v).cross(r).setLength(circ).toArray(), v.toArray(), 'by hand').replace('Pushed by hand', 'Thrown')
+      : `Dropped ${e.name} on a circular orbit${g.sandbox.primaryOf(after) ? ` round ${g.sandbox.primaryOf(after)!.name}` : ''}`;
+    g.actions.say(say, { verb: 'grab' });
+    g.app.vr?.flash(say);
+    this.buzz(thrown ? 0.9 : 0.4, thrown ? 90 : 40);
   }
 
   /** Trigger in space: place what the creation tool holds at the laser. True when it did. */
   trigger(origin: Vector3, dir: Vector3): boolean {
     const g = this.god;
+    if (g.tool === 'push') {
+      // aimed push: towards the laser point on the orbit plane
+      g.tool = 'none';
+      const id = g.selectedId(), sel = g.app.selection;
+      const at = g.placeOnRay(g.app.rig.upos.toVector3().add(origin), dir);
+      if (id === null || !sel || !at) return false;
+      g.actions.push(id, at.sub(sel.upos.toVector3()));
+      g.app.vr?.flash(g.actions.caption);
+      return true;
+    }
     if (g.tool !== 'place') return false;
     const eye = g.app.rig.upos.toVector3();
     const at = g.placeOnRay(eye.add(origin), dir);

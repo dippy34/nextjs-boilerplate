@@ -5,6 +5,7 @@ import { Body, type SpaceObject } from '../universe/Body';
 import { BlackHole } from '../universe/BlackHoles';
 import { ALBEDO, ExoPlanet, type PlanetSpec, PlanetarySystem, type PlanetType, REARTH } from '../universe/Planets';
 import { CatalogStar } from '../universe/Stars';
+import { GodActions } from './Actions';
 import { GodAudio } from './GodAudio';
 import { GodLayer } from './GodLayer';
 import { GodPanel } from './GodPanel';
@@ -15,6 +16,7 @@ import { CLIMATE, starLuminosity } from './BodyView';
 import { SUN_LIGHT } from '../astro/photometry';
 import { earthLikeAtmosphere } from '../render/Atmospheres';
 import { FLAG_BLACK_HOLE, FLAG_RIGID, FLAG_STAR } from './NBody';
+import { pushCaption } from './verbs';
 import { type Entity, Sandbox, type SpawnSpec } from './Sandbox';
 
 export const G = 6.6743e-11;
@@ -95,6 +97,8 @@ interface Proxy { system?: SandboxSystem; star?: CatalogStar; hole?: BlackHole }
 export class God {
   readonly sandbox: Sandbox;
   readonly layer: GodLayer;
+  /** the simple verbs (heavier, push, reverse…) with their captions */
+  readonly actions: GodActions;
   readonly panel: GodPanel;
   readonly audio = new GodAudio();
   /** headset: grip grab-and-throw, laser placement */
@@ -104,7 +108,7 @@ export class God {
   private proxies = new Map<number, Proxy>();
   private lights = new Map<number, CatalogStar>();
   /** desktop tool in use */
-  tool: 'none' | 'move' | 'place' = 'none';
+  tool: 'none' | 'move' | 'place' | 'push' = 'none';
   placeType: SpawnType = 'terran';
   placeMass = 1;
   private drag: { kind: 'arrow' | 'move' | 'place'; id: number; start: Vector3; plane: Vector3; at: Vector3; startX: number; startY: number; t0: number } | null = null;
@@ -117,6 +121,7 @@ export class God {
       destroy: (e) => this.destroyProxy(e),
       changed: (e) => this.changedProxy(e),
     };
+    this.actions = new GodActions(this);
     this.panel = new GodPanel(this);
     this.vr = new GodVR(this);
     this.console = new GodConsole(this);
@@ -692,25 +697,34 @@ export class God {
       e.stopImmediatePropagation();
       return;
     }
+    if (this.tool === 'push') {
+      // aimed push: towards the point clicked (on the orbit plane)
+      const id = this.idOf(app.selection);
+      const at = this.placeAt(e.clientX, e.clientY);
+      this.tool = 'none';
+      if (id === null || !at || !app.selection) return;
+      this.actions.push(id, at.sub(app.selection.upos.toVector3()));
+      e.stopImmediatePropagation();
+      return;
+    }
     const sel = this.entityOf(app.selection);
     // the velocity handle's tip
     if (sel && this.layer.tipVisible) {
       const p = app.project(this.layer.tip);
-      if (p && Math.hypot(p.x - e.clientX, p.y - e.clientY) < 14) {
+      if (p && Math.hypot(p.x - e.clientX, p.y - e.clientY) < 22) {
         this.drag = { kind: 'arrow', id: sel.id, start: this.layer.tip.clone().add(cam), plane: viewDir, at: this.layer.tip.clone().add(cam), startX: e.clientX, startY: e.clientY, t0: performance.now() };
         e.stopImmediatePropagation();
         return;
       }
     }
-    if (this.tool === 'move') {
+    // with the panel open the selected body itself can be dragged (the Move tool: anywhere near it)
+    if (this.tool === 'move' || (this.panel.open && this.tool === 'none')) {
       const id = this.idOf(app.selection);
-      if (id === null) return;
-      this.ensureActive();
-      const ent = this.sandbox.entityOf(id);
-      if (!ent) return;
-      const p = app.project(ent.pos.clone().sub(cam));
-      if (!p || Math.hypot(p.x - e.clientX, p.y - e.clientY) > 60) return;
-      this.drag = { kind: 'move', id, start: ent.pos.clone(), plane: viewDir, at: ent.pos.clone(), startX: e.clientX, startY: e.clientY, t0: performance.now() };
+      if (id === null || !app.selection) return;
+      const pos = app.selection.upos.toVector3();
+      const p = app.project(pos.clone().sub(cam));
+      if (!p || Math.hypot(p.x - e.clientX, p.y - e.clientY) > (this.tool === 'move' ? 60 : 26)) return;
+      this.drag = { kind: 'move', id, start: pos.clone(), plane: viewDir, at: pos.clone(), startX: e.clientX, startY: e.clientY, t0: performance.now() };
       e.stopImmediatePropagation();
     }
   }
@@ -733,6 +747,7 @@ export class God {
       if (!ent) return;
       this.layer.previewVel = this.arrowVelocity(ent, d.at);
     } else if (d.kind === 'move') {
+      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 4) this.ensureActive();
       const ent = this.sandbox.entityOf(d.id);
       if (ent) this.layer.movePreview = { e: ent, at: d.at.clone() };
     } else if (d.kind === 'place') {
@@ -759,7 +774,15 @@ export class God {
     const moved = Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 4;
     if (d.kind === 'arrow' && moved) {
       const ent = this.sandbox.entityOf(d.id);
-      if (ent) this.setVelocity(d.id, this.arrowVelocity(ent, d.at));
+      if (ent) {
+        const p = this.sandbox.primaryOf(ent);
+        this.layer.startMorph(ent, p);
+        const c = this.actions.ctx(ent);
+        const { r, v } = this.sandbox.relative(ent);
+        const nv = this.arrowVelocity(ent, d.at);
+        this.setVelocity(d.id, nv);
+        this.actions.say(pushCaption(c, r.toArray(), v.toArray(), nv.clone().sub(p?.vel ?? new Vector3()).toArray(), 'by hand'), { verb: 'push' });
+      }
     } else if (d.kind === 'move' && moved) {
       const ent = this.sandbox.entityOf(d.id);
       // dropped where it is, keeping its velocity relative to its new surroundings' primary
@@ -767,7 +790,9 @@ export class God {
         const pOld = this.sandbox.primaryOf(ent);
         const relV = ent.vel.clone().sub(pOld?.vel ?? new Vector3());
         const pNew = this.sandbox.primaryAt(d.at, ent.gm);
+        this.layer.glow(ent);
         this.setPosition(d.id, d.at, relV.add(pNew?.vel ?? new Vector3()));
+        this.actions.say(`Moved ${ent.name}: same speed, new place${pNew ? ` → it now orbits ${pNew.name}` : ''}`);
       }
     } else if (d.kind === 'place') {
       let vel: Vector3 | undefined;
@@ -794,10 +819,11 @@ export class God {
   onKey(e: KeyboardEvent): boolean {
     if (e.code === 'KeyY') { this.panel.toggle(); return true; }
     if (e.code === 'Backquote') { this.console.toggle(); e.preventDefault(); return true; }
-    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { this.undo(); e.preventDefault(); return true; }
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { this.actions.undo(); e.preventDefault(); return true; }
     if (!this.panel.open) return false;
     const id = this.selectedId();
-    if ((e.code === 'Delete' || (e.code === 'Backspace' && e.shiftKey)) && id !== null) { this.remove(id); e.preventDefault(); return true; }
+    if ((e.code === 'Delete' || (e.code === 'Backspace' && e.shiftKey)) && id !== null) { this.actions.remove(id); e.preventDefault(); return true; }
+    if (e.code === 'Escape' && this.tool !== 'none') { this.tool = 'none'; this.panel.refresh(); return true; }
     return false;
   }
 

@@ -1,4 +1,5 @@
-// Drives God mode in headless Chromium: the physics editor (mass/radius/density, Kepler elements,
+// Drives God mode in headless Chromium: the simple verbs (heavier, push, reverse, create) with their
+// captions, the orbit-line morph and the "Try:" guide, dragging the body itself, the physics editor (mass/radius/density, Kepler elements,
 // the math lines), reversing Earth's orbit, Kepler III after a mass change, deleting the Earth (the
 // Moon wanders off), the N-body switch, a black hole, a collision, undo, save/load, reset, and the
 // in-headset God tab with an emulated Meta Quest 3.
@@ -43,11 +44,53 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   await frames(3);
   st = await page.evaluate(() => ({ open: !document.querySelector('.god-panel').classList.contains('hidden'), name: document.querySelector('.god-panel h4')?.textContent }));
   check('Y opens the God panel on the selection', st.open && st.name === 'Earth', JSON.stringify(st));
+  st = await page.evaluate(() => ({ verbs: [...document.querySelectorAll('.god-panel button[data-v]')].map((b) => b.dataset.v), advOpen: document.querySelector('.god-panel details.adv').open,
+    tryNow: document.querySelector('.god-panel .gs-try li.now')?.textContent }));
+  check('simple first: big verbs on top, the full editor folded under Advanced, the "Try:" guide', ['heavier', 'lighter', 'bigger', 'smaller', 'push', 'reverse', 'delete'].every((v) => st.verbs.includes(v)) && !st.advOpen && /Heavier/.test(st.tryNow ?? ''), JSON.stringify(st));
   await shot(page, 'god1-panel.png');
+
+  // 1b. Heavier: 2x Earth's mass, the Moon's month 29% shorter, said in the caption; the orbit line morphs, the guide ticks
+  const moonPeriod = () => page.evaluate(() => { const v = window.app.god.sandbox.orbitOf(window.app.god.sandbox.entityOf(301)); const a = v.el.q / (1 - v.el.e); return 2 * Math.PI * Math.sqrt(a ** 3 / v.el.mu) / 86400; });
+  await page.click('button[data-v="heavier"]');
+  await frames(2);
+  st = await page.evaluate(() => ({ gm: window.app.system.byId.get(399).gm, cap: document.querySelector('.god-panel [data-cap]')?.textContent, fresh: document.querySelector('.god-panel [data-cap]')?.classList.contains('fresh'),
+    morph: window.app.god.layer.morphs > 0, done: document.querySelectorAll('.god-panel .gs-try li.done').length, r: window.app.system.byId.get(399).radius }));
+  const pm = await moonPeriod();
+  check('Heavier doubles the mass (radius kept); the caption says the Moon\'s month is 29% shorter', Math.abs(st.gm / 3.986004418e14 - 2) < 1e-3 && Math.abs(st.r - 6371e3) < 1e3 && /Moon's month is 29% shorter/.test(st.cap ?? '') && st.fresh && Math.abs(pm / 27.32 - 0.707) < 0.03, JSON.stringify({ ...st, pm }));
+  check('a verb morphs the orbit line and ticks the guide', st.morph && st.done === 1, JSON.stringify(st));
+  await shot(page, 'god1b-heavier.png');
+  await page.click('button[data-a="undo"]');
+  await frames(2);
+  // push forward: +20% of the circular speed, the caption gives the stretched orbit
+  const v0 = await helio('Earth');
+  await page.click('button[data-v="push"][data-k="forward"]');
+  await frames(2);
+  const v1 = await helio('Earth');
+  st = await page.evaluate(() => document.querySelector('.god-panel [data-cap]')?.textContent);
+  check('Push forward: +20% speed, the orbit stretches (caption)', Math.abs(v1.v / v0.v - 1.2) < 0.02 && /stretches: it swings out to 2\.\d+ AU, and its year is 2\.\d× longer/.test(st ?? ''), `${(v1.v / v0.v).toFixed(3)} ${st}`);
+  await page.click('button[data-a="undo"]');
+  await frames(2);
+  // drag the body itself (no tool): it moves to where it is let go
+  const drag = await page.evaluate(() => { const a = window.app, b = a.system.byId.get(399); const p = a.project(b.upos.toVector3().sub(a.rig.upos.toVector3())); return p ? { x: p.x, y: p.y, pos: b.upos.toVector3().toArray() } : null; });
+  if (drag) {
+    await page.mouse.move(drag.x, drag.y);
+    await page.mouse.down();
+    await page.mouse.move(drag.x + 40, drag.y + 10, { steps: 3 });
+    await page.mouse.move(drag.x + 90, drag.y + 20, { steps: 3 });
+    await page.mouse.up();
+    await frames(3);
+  }
+  st = await page.evaluate((d) => { const b = window.app.system.byId.get(399); const p = b.upos.toVector3(); return { moved: d ? Math.hypot(p.x - d.pos[0], p.y - d.pos[1], p.z - d.pos[2]) : 0, cap: document.querySelector('.god-panel [data-cap]')?.textContent }; }, drag);
+  check('drag the selected body in the view to move it', st.moved > 1e7 && /Moved Earth/.test(st.cap ?? ''), JSON.stringify(st));
+  await page.click('button[data-a="undo"]');
+  await frames(2);
+  // the editor lives under Advanced
+  await page.click('.god-panel details.adv > summary');
+  await frames(2);
 
   // 2. reverse Earth's orbit: the sandbox takes over and Earth goes round the other way
   const before = await helio('Earth');
-  await page.click('button[data-a="v"][data-k="reverse"]');
+  await page.click('button[data-v="reverse"]');
   await frames(3);
   const after = await helio('Earth');
   st = await page.evaluate(() => ({ active: window.app.god.active, badge: document.querySelector('.god-badge')?.textContent, n: window.app.god.sandbox.entities.size }));
@@ -186,6 +229,21 @@ const shot = (page, name) => page.screenshot({ path: path.join(outDir, name), ti
   });
   check('save and load a universe', st.ok && st.back && st.same && st.json > 1000, JSON.stringify(st));
 
+  // 8b. Create: a black hole next to the selection with one click; gravity switches on; the guide ticks
+  st = await page.evaluate(() => { const a = window.app; a.select(a.system.byId.get(499)); a.god.panel.refresh(); return a.blackHoles.filter((h) => h.key.startsWith('god:')).length; });
+  await frames(2);
+  await page.click('button[data-q="hole"]');
+  await frames(3);
+  st = await page.evaluate((n0) => ({ holes: window.app.blackHoles.filter((h) => h.key.startsWith('god:')).length - n0, mode: window.app.god.sandbox.mode, cap: document.querySelector('.god-panel [data-cap]')?.textContent, sel: window.app.selection?.name }), st);
+  check('Create ● Black hole: one click, next to the selection, with a caption', st.holes === 1 && st.mode === 'nbody' && /black hole .* from Mars/.test(st.cap ?? '') && /Black hole/.test(st.sel ?? ''), JSON.stringify(st));
+  await page.click('button[data-a="undo"]');
+  await frames(2);
+  st = await page.evaluate(() => !!document.querySelector('.god-panel .gs-try'));
+  if (st) await page.click('.god-panel .gs-try [data-a="hintskip"]');
+  await frames(2);
+  st = await page.evaluate(() => ({ shown: !!document.querySelector('.god-panel .gs-try'), saved: localStorage.getItem('space-explorer-god-hints') }));
+  check('the guide can be skipped (and stays skipped)', !st.shown && /"skipped":true/.test(st.saved ?? ''), JSON.stringify(st));
+
   // 9. create a planet with the panel tool, placed by clicking in the view
   await page.evaluate(() => { const a = window.app; a.select(a.system.byId.get(399).valid ? a.system.byId.get(399) : a.system.sun); a.god.panel.refresh(); });
   await frames(2);
@@ -277,10 +335,30 @@ if (!skipVr) {
     await press('open');
     await frames(10);
     await page.screenshot({ path: path.join(outDir, 'god5-vr-tab.png'), timeout: 180000 });
+    const simple = await page.evaluate(() => ['heavier', 'lighter', 'bigger', 'smaller', 'push', 'faster', 'reverse', 'delete'].every((k) => window.app.vr.menu.panel.has(`god:v:${k}`)) && window.app.vr.menu.panel.has('god:q:hole'));
+    check('VR: the God tab opens on eight big verbs and three Create buttons', simple, '');
+    const g0 = await page.evaluate(() => window.app.system.byId.get(399).gm);
+    await press('v:heavier');
+    st0.cap = await page.evaluate(() => window.app.god.actions.caption);
+    const g1 = await page.evaluate(() => window.app.system.byId.get(399).gm);
+    check('VR: Heavier doubles the mass, with the caption', Math.abs(g1 / g0 - 2) < 1e-6 && /29% shorter/.test(st0.cap), st0.cap);
+    await press('undo');
+    // aimed push: Push closes the menu, the trigger pushes towards the laser point
+    await press('v:push');
+    st0.push = await page.evaluate(() => {
+      const a = window.app, g = a.god, e = g.sandbox.entityOf(399), v0 = e.vel.clone();
+      const eye = a.rig.upos.toVector3(), dir = e.pos.clone().add(e.vel.clone().normalize().multiplyScalar(1e9)).sub(eye).normalize();
+      const ok = g.vr.trigger(new e.pos.constructor(), dir);
+      return { tool: g.tool, ok, dv: g.sandbox.entityOf(399).vel.distanceTo(v0), cap: g.actions.caption };
+    });
+    check('VR: Push, aim with the laser, trigger', st0.push.ok && st0.push.dv > 1000 && /Pushed/.test(st0.push.cap) && st0.push.tool === 'none', JSON.stringify(st0.push));
+    await press('open');
+    await press('undo');
     const pressed = await press('v:reverse');
     const s1 = await page.evaluate(() => ({ active: window.app.god.active, hEcl: (() => { const a = window.app, b = a.system.byId.get(399), s = a.system.sun; const h = b.pos.clone().sub(s.pos).cross(b.vel.clone().sub(s.vel)).normalize(); return h.y * -0.3977771559 + h.z * 0.9174820621; })() }));
     check('VR: Reverse orbit from the God tab', pressed && s1.active && s1.hEcl < -0.99, JSON.stringify(s1));
-    // the editor in the headset: mass x1.1 with a nudge, and a derived value's working
+    // the editor in the headset (Advanced): mass x1.1 with a nudge, and a derived value's working
+    await press('adv');
     const gm0 = await page.evaluate(() => window.app.system.byId.get(399).gm);
     const nud = await press('mass:3');
     const m1 = await page.evaluate(() => window.app.system.byId.get(399).gm);
