@@ -6,7 +6,7 @@ import { AU, GM_SUN } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { Comet } from './SmallBodies';
 import { VOLUMES } from './Renderer';
-import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
+import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, PROJECT_PARS, QUALITY_LEVEL } from './shaders/xr';
 
 const VERT = /* glsl */ `
 #include <common>
@@ -64,6 +64,7 @@ uniform float uL0;
 uniform float uGain;
 uniform float uSeed;
 uniform float uLite;
+uniform float uQuality;
 varying vec3 vP;
 float th(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
 float tn(vec3 p) {
@@ -87,8 +88,9 @@ void main() {
   float t0 = max(max(tl.x, tl.y), max(tl.z, 0.0)), t1 = min(min(tu.x, tu.y), tu.z);
   float ion = 0.0, dust = 0.0;
   if (t1 > t0) {
-    int N = uLite > 0.5 ? 32 : 96;
-    float dsMax = (t1 - t0) / (uLite > 0.5 ? 12.0 : 28.0);
+    // (headset: fewer steps, fewer still at the governor's lower levels)
+    int N = uLite > 0.5 ? 32 - 6 * int(uQuality) : 96;
+    float dsMax = (t1 - t0) / (uLite > 0.5 ? 12.0 - 2.0 * uQuality : 28.0);
     float dyz = max(length(d.yz), 0.02), dz = max(abs(d.z), 0.02);
     float jit = th(vec3(gl_FragCoord.xy, uSeed));
     float t = t0;
@@ -291,7 +293,7 @@ export class CometTails {
         uniforms: {
           uCam: { value: new Vector3() }, uBoxC: { value: new Vector3() }, uBoxE: { value: new Vector3(1, 1, 1) },
           uLi: { value: 1 }, uLd: { value: 1 }, uBend: { value: 0 }, uL0: { value: 0 }, uSeed: { value: i * 7.3 },
-          uGain: this.gain, uLite: LITE.uLite, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+          uGain: this.gain, uLite: LITE.uLite, uQuality: QUALITY_LEVEL.uQuality, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
         },
         transparent: true, depthWrite: false, blending: AdditiveBlending, side: BackSide,
       }));

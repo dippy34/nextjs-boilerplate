@@ -145,6 +145,7 @@ export async function uploadBitmap(bmp: ImageBitmap, setup?: (tex: Texture) => v
       // allocate the storage (all mip levels) without data
       tex.source.dataReady = false;
       tex.generateMipmaps = wantMips;
+      tex.needsUpdate = true;   // (version 0 is never uploaded: nothing would be allocated)
       r.initTexture(tex);
     }
     // mipmaps once, with the last strip

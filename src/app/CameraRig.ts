@@ -2,6 +2,7 @@ import { Matrix4, Quaternion, Vector3 } from 'three';
 import { UPos } from '../core/upos';
 import type { SpaceObject } from '../universe/Body';
 import type { Input } from './Input';
+import { approachWeight } from '../universe/Scale';
 
 /**
  * Camera state in universal coordinates plus the SpaceEngine-style flight
@@ -112,12 +113,13 @@ export class CameraRig {
       const Lv = Math.max(L1, Math.log(Math.max(target.radius, 1) * 300));
       if (L0 > Lv + 0.7) {
         const TA = clamp(1.0 + 0.15 * (L0 - Lv), 1.7, 3.6);
-        const TB = clamp(1.4 + 0.5 * Math.abs(Lv - L1), 2.4, 4.6);
+        // giants: a slower, heavier final approach (approachWeight: Jupiter ~1.75x, Sun 2x)
+        const TB = clamp(1.4 + 0.5 * Math.abs(Lv - L1), 2.4, 4.6) * approachWeight(target.radius);
         const sA = (Lv - L0) / TA, sB = (L1 - Lv) / TB;
         const mJ = sA * sB > 0 ? (2 * sA * sB) / (sA + sB) : 0;
         knots = [{ t: 0, L: L0, m: 0 }, { t: TA, L: Lv, m: mJ }, { t: TA + TB, L: L1, m: 0 }];
       } else {
-        knots = [{ t: 0, L: L0, m: 0 }, { t: clamp(1.8 + 0.5 * Math.abs(L0 - L1), 2.2, 4.6), L: L1, m: 0 }];
+        knots = [{ t: 0, L: L0, m: 0 }, { t: clamp(1.8 + 0.5 * Math.abs(L0 - L1), 2.2, 4.6) * (L1 < L0 ? approachWeight(target.radius) : 1), L: L1, m: 0 }];
       }
     }
     const T = knots[knots.length - 1].t;

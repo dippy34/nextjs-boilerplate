@@ -419,12 +419,14 @@ ${OUTPUT_FRAGMENT}
         if (!this.warnedXrTarget) console.warn('XR frame without the XR render target bound', target);
         this.warnedXrTarget = true;
       }
-      gl.setClearColor(0x000000, 1);
-      gl.clear(true, true, true);
       if (this.depthMode === 'reversed-z') this.reverseXrProjections();
       const xrTarget = gl.getRenderTarget();
+      // the volume pass first: on a tiled GPU (a standalone headset) leaving the eye buffers after
+      // clearing them would write the cleared tiles out and read them back in for the scene
       this.volQuad.visible = xrTarget ? this.volumePass(xrTarget.width, xrTarget.height, VOLUMES.scaleXr * XR_VOLUME_FACTOR[QUALITY.level]) : false;
       gl.setRenderTarget(xrTarget);
+      gl.setClearColor(0x000000, 1);
+      gl.clear(true, true, true);
       gl.render(this.scene, this.camera);
       return;
     }

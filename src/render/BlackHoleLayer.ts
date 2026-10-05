@@ -7,6 +7,7 @@ import { blackbodySurface } from '../astro/photometry';
 import { AU, SUN_RADIUS } from '../core/units';
 import type { UPos } from '../core/upos';
 import type { BlackHole } from '../universe/BlackHoles';
+import { QUALITY } from './Quality';
 import { BH_FRAG, BH_VERT } from './shaders/blackhole';
 import { GLOBALS } from './shaders/xr';
 
@@ -206,7 +207,8 @@ export class BlackHoleLayer {
       this.fullCapture = true;
       return;
     }
-    const size = this.vr ? 512 : 1024;
+    // (headset: 512 px faces, 256 at the lower quality levels: the capture redraws the scene)
+    const size = this.vr ? (QUALITY.level >= 2 ? 256 : 512) : 1024;
     if (this.env.width !== size) {
       this.env.dispose();
       this.env = makeEnv(size);
