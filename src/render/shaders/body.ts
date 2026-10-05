@@ -761,6 +761,16 @@ varying vec2 vXY;
 float h2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 float n2(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(h2(i), h2(i + vec2(1, 0)), f.x), mix(h2(i + vec2(0, 1)), h2(i + vec2(1, 1)), f.x), f.y); }
+// a closed magnetic loop of a prominence standing on the limb at angle a0 (footpoints half_
+// apart), h high: distance (star radii) from the loop's arch, seen side-on
+float loopDist(vec2 p, float a0, float half_, float h) {
+  vec2 n = vec2(cos(a0), sin(a0)), t = vec2(-n.y, n.x);
+  vec2 q = vec2(dot(p, t), dot(p, n) - 1.0);           // along the limb, height above it
+  float w = half_;
+  // an arch: an ellipse through both footpoints, h high
+  vec2 e = vec2(q.x / w, q.y / max(h, 1e-3));
+  return abs(length(e) - 1.0) * min(w, h) + max(-q.y, 0.0) * 4.0;
+}
 void main() {
   vec2 p = vXY * uQuad;                   // in star radii
   // distance from the centre in units of the disk's (elliptical) edge: the glow starts at the limb
@@ -769,15 +779,48 @@ void main() {
   // under the faceted sphere's outline, so no dark sliver shows between the two)
   if (r < 0.96) discard;
   float a = atan(vXY.y, vXY.x);
-  // streamers: angular structure that widens outwards (periodic in angle)
-  float st = n2(vec2(cos(a) * 3.0 + uSeed, sin(a) * 3.0 + uTime * 0.01)) * 0.7 + n2(vec2(cos(a) * 9.0, sin(a) * 9.0 + uSeed)) * 0.3;
-  float glow = uCorona * (0.55 * exp(-max(r - 1.0, 0.0) * 7.0) + (0.05 + 0.12 * st) / (r * r));
+  vec2 dir = vec2(cos(a), sin(a));
+  // magnetic latitude on the limb: streamers gather towards the equator, thin plumes at the poles
+  float pole = abs(dot(dir, uAxis2));
+  float eq = 1.0 - smoothstep(0.25, 0.85, pole);
+  // helmet streamers: broad, bright, tapering to points a few radii out, slowly turning with time
+  float x = max(r - 1.0, 0.0);
+  float sBig = n2(vec2(dir.x * 2.2 + uSeed, dir.y * 2.2 + uTime * 0.004)) * 0.6 + n2(vec2(dir.x * 5.0 - uSeed, dir.y * 5.0)) * 0.4;
+  float helmet = pow(smoothstep(0.35, 0.85, sBig), 1.5) * eq;
+  float taper = exp(-x * mix(3.2, 1.1, helmet));            // streamers reach farther
+  // fine radial rays all round (polar plumes, the rays of eclipse photographs), drifting slowly
+  float rays = 0.55 + 0.9 * pow(n2(vec2(dir.x * 26.0 + uSeed * 3.0, dir.y * 26.0 + uTime * 0.006)), 2.0);
+  float k = 0.55 * exp(-x * 7.0) + (0.05 + 0.2 * helmet) * taper * rays / (r * r);
+  float glow = uCorona * k;
   // (starts right at the disk's edge, faded in over about a pixel only: no dark gap around the disk)
   glow *= (1.0 - smoothstep(0.7, 1.0, length(vXY))) * smoothstep(0.96, 1.0, r);
-  // prominences: bright loops just above the limb
-  float pn = n2(vec2(cos(a) * 14.0 + uSeed, sin(a) * 14.0 + r * 9.0 - uTime * 0.02));
-  float prom = uProm * pow(pn, 7.0) * 6.0 * smoothstep(1.16, 1.0, r);
-  vec3 c = uColor * glow + vec3(1.0, 0.32, 0.42) * prom;
+  // prominences: arches of cool, glowing (H-alpha, pink-red) gas on the limb, threaded by fine
+  // strands, slowly rising and falling; on active stars an eruption now and then lifts one away
+  float prom = 0.0;
+  float pAct = 0.25 + uProm;
+  for (int i = 0; i < 5; i++) {
+    float fi = float(i);
+    float hs = fract(sin(fi * 91.7 + uSeed * 3.1) * 4375.85);
+    if (hs > 0.35 + 0.6 * pAct) continue;
+    float a0 = fract(sin(fi * 12.3 + uSeed) * 917.13) * 6.2832;
+    float half_ = 0.04 + 0.08 * fract(hs * 7.31);
+    float life = uTime * (0.01 + 0.01 * hs) + hs * 10.0;
+    float h = (0.04 + 0.1 * fract(hs * 3.7)) * (0.8 + 0.25 * sin(life * 6.2832));
+    // an eruption: every so often one loop rises and fades
+    float ep = fract(uTime / 90.0 + hs);
+    float erupt = step(0.75, hs + uProm * 0.4) * smoothstep(0.0, 0.6, ep);
+    h *= 1.0 + 4.0 * erupt;
+    float d = loopDist(p, a0, half_ * (1.0 + erupt), h);
+    float strands = 0.55 + 0.9 * n2(vec2(dot(p, vec2(-sin(a0), cos(a0))) * 160.0, fi * 7.0 + uTime * 0.05));
+    prom += exp(-pow(d / (0.006 + 0.01 * h), 2.0)) * strands * (1.0 - 0.8 * erupt * ep);
+    // the loop's diffuse body
+    prom += 0.15 * exp(-pow(d / (0.03 + 0.03 * h), 2.0));
+  }
+  // and a low fringe of spicules all round the limb
+  float spic = n2(dir * 48.0 + uSeed) * exp(-x * 60.0);
+  prom = prom * pAct * 1.6 + spic * 0.35 * pAct;
+  prom *= smoothstep(0.98, 1.0, r);
+  vec3 c = uColor * glow + vec3(1.0, 0.3, 0.38) * prom;
   gl_FragColor = vec4(c * uIntensity, 1.0);
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>

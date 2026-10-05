@@ -84,7 +84,8 @@ export function starLook(key: string, teff: number, radiusSun: number, absMag: n
   else if (T < 3900) activity = 0.15 + 0.85 * r1 * r1;
   else if (T < 5300) activity = 0.6 * r1 * r1;
   else activity = 0.4 * r1 ** 3;
-  if (sun) activity = 0.12;
+  // (the Sun near the maximum of its cycle, as in 2024-2026: a few spot groups, bright faculae, prominences)
+  if (sun) activity = 0.3;
   const spots = activity * (T < 3900 ? 0.35 : 0.18);
   const fast = !sun && (T < 3900 ? r4 > 0.5 : r4 > 0.85);
   const limbA = Math.min(0.78, Math.max(0.22, 0.44 + ((5772 - T) / 2228) * 0.16));

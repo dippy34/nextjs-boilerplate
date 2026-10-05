@@ -4,7 +4,7 @@ import {
 } from 'three';
 import { buildStarColorLut } from '../astro/photometry';
 import type { StarCatalog, StarNode } from '../universe/StarCatalog';
-import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX } from './shaders/psf';
+import { PSF_FRAGMENT, PSF_UNIFORMS, PSF_VERTEX, TWINKLE_VERTEX } from './shaders/psf';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS, POINT_CLIP } from './shaders/xr';
 
 export const STAR_VERT = /* glsl */ `
@@ -25,6 +25,7 @@ varying vec3 vColor;
 varying float vEnergy;
 varying float vRadius;
 ${PSF_VERTEX}
+${TWINKLE_VERTEX}
 const float PC = 3.0856775814913673e16;
 void main() {
   vec3 rel = uOffset + aPos * uScale;
@@ -32,7 +33,7 @@ void main() {
   float absMag = uAbsMin + mod(aMT, 256.0) * uAbsStep;
   float m = absMag + 1.50515 * log2(max(d, 1e-9)) - 5.0 + uExtinction;  // 5 log10(d) = 1.50515 log2(d)
   float energy;
-  float radius = psfSetup(magToIrradiance(m), energy);
+  float radius = psfSetup(magToIrradiance(m) * twinkle(rel / max(d, 1e-30), aPos.x * 73.1 + aPos.y * 19.7 + aPos.z * 41.3 + aMT * 0.37), energy);
   if (radius <= 0.0 || d < uHideRadius) {
     // culled: outside the clip volume. (A point size <= 0 is undefined in GLSL ES and crashes
     // some software rasterisers, so keep it at 1.)
@@ -63,6 +64,38 @@ void main() {
 ${OUTPUT_FRAGMENT}
   #include <logdepthbuf_fragment>
 }`;
+
+/**
+ * Scintillation: stars twinkle only when seen through an atmosphere (turbulent air bends their
+ * light), more the closer they are to the horizon (more air on the way). Shared by every star layer.
+ */
+export const TWINKLE = {
+  uTwinkle: { value: 0 },             // strength (1 = standing on Earth's surface)
+  uTwUp: { value: new Vector3(0, 0, 1) }, // local zenith (world)
+  uTwTime: { value: 0 },
+};
+
+/** Strength of twinkling for an observer `altitude` m up in an atmosphere of zenith optical depth `tau` and scale height `H` (m). */
+export function twinkleStrength(tau: number, H: number, altitude: number): number {
+  return Math.min(1.5, Math.max(0, (tau * Math.exp(-Math.max(altitude, 0) / H)) / 0.1));
+}
+
+interface TwinkleView { body: { radius: number }; rel: Vector3; dist: number; resolved: boolean }
+/** Update TWINKLE from the bodies around the camera (`spec` gives a body's atmosphere, if any). */
+export function updateTwinkle<V extends TwinkleView>(views: Iterable<V>, spec: (v: V) => { betaR: number[]; HR: number; top: number } | null, time: number): void {
+  let best = 0;
+  for (const v of views) {
+    if (!v.resolved) continue;
+    const a = spec(v);
+    if (!a) continue;
+    const alt = v.dist - v.body.radius;
+    if (alt > a.top) continue;
+    const k = twinkleStrength(a.betaR[1] * a.HR, a.HR, alt);
+    if (k > best) { best = k; TWINKLE.uTwUp.value.copy(v.rel).negate().normalize(); }
+  }
+  TWINKLE.uTwinkle.value = best;
+  TWINKLE.uTwTime.value = time % 1000;
+}
 
 export class StarFieldLayer {
   readonly group = new Group();
@@ -105,6 +138,7 @@ export class StarFieldLayer {
         uHideRadius: { value: 0.0 },
         uExtinction: { value: 0.0 },
         uColorLut: { value: this.colorLut },
+        ...TWINKLE,
       },
       transparent: true,
       depthWrite: false,
@@ -123,7 +157,7 @@ export class StarFieldLayer {
     geo.setAttribute('position', posAttr);
     const mat = this.template.clone();
     // share the PSF uniform objects so one update reaches every node
-    Object.assign(mat.uniforms, this.psf, { uColorLut: { value: this.colorLut } });
+    Object.assign(mat.uniforms, this.psf, TWINKLE, { uColorLut: { value: this.colorLut } });
     const pts = new Points(geo, mat);
     pts.frustumCulled = false;
     pts.matrixAutoUpdate = false;

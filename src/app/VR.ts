@@ -176,7 +176,7 @@ export class VRSupport {
     const app = this.app;
     app.renderer.setXrMode(true);
     this.saved = { starLimit: app.starMagLimit, orbits: app.orbits.enabled };
-    app.starMagLimit = Math.min(app.starMagLimit, 6.8); // fewer, brighter points: keeps headset frame rates up
+    app.starMagLimit = Math.min(app.starMagLimit, 7.2); // a little shallower than the desktop: keeps headset frame rates up, yet a dense sky
     app.orbits.enabled = this.settings.orbits;
     if (this.button) this.button.textContent = 'EXIT VR';
     if (this.hands.length === 0) for (let i = 0; i < 2; i++) this.hands.push(this.makeHand(i));

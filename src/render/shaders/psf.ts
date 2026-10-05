@@ -95,3 +95,24 @@ vec3 psfShade(vec2 pointCoord, float radius, float energy, vec3 color) {
   return c * lum;
 }
 `;
+
+/**
+ * Twinkling (scintillation) of a star seen through an atmosphere: a multiplier on its light that
+ * flickers a few times a second, by up to ~±40 % near the horizon and little overhead (it grows with
+ * airmass). `dir`: direction to the star (world, unit); `seed`: per-star phase. 1 in space.
+ */
+export const TWINKLE_VERTEX = /* glsl */ `
+uniform float uTwinkle;
+uniform vec3 uTwUp;
+uniform float uTwTime;
+float twinkle(vec3 dir, float seed) {
+  if (uTwinkle <= 0.0) return 1.0;
+  float cz = dot(dir, uTwUp);
+  if (cz < -0.05) return 1.0;
+  float airmass = 1.0 / max(cz + 0.06, 0.08);
+  float amp = uTwinkle * min(0.06 * airmass, 0.4);
+  float ph = fract(seed) * 6.2832, t = uTwTime;
+  float s = 0.5 * sin(t * 7.1 + ph) + 0.3 * sin(t * 12.7 + ph * 2.3) + 0.2 * sin(t * 19.3 + ph * 4.1);
+  return max(1.0 + amp * 2.0 * s, 0.2);
+}
+`;

@@ -1,5 +1,6 @@
 import { BackSide, type CubeTexture, LinearFilter, LinearMipmapLinearFilter, Mesh, RepeatWrapping, ShaderMaterial, SphereGeometry, SRGBColorSpace, TextureLoader, type Vector3 } from 'three';
 import { MilkyWayVolume } from './MilkyWayVolume';
+import { noise3D } from './Noise3D';
 import { FIX_LOGDEPTH, GLOBALS, OUTPUT_FRAGMENT, PROJECT_PARS } from './shaders/xr';
 
 /**
@@ -34,7 +35,10 @@ uniform float uMix;       // 0: the NASA map only, 1: the galaxy model only
 uniform float uModelK;    // display value of a model column of uModelRef
 uniform float uModelRef;
 uniform float uModelExp;
+uniform sampler3D uNoise;
+uniform float uDetail;    // strength of the synthesised fine structure
 varying vec3 vDir;
+float ridge(float n) { return 1.0 - abs(2.0 * n - 1.0); }
 void main() {
   vec3 d = normalize(vDir);
   float ra = atan(d.y, d.x);
@@ -48,6 +52,27 @@ void main() {
   vec2 g2x = vec2(dFdx(u2), dFdx(v)), g2y = vec2(dFdy(u2), dFdy(v));
   bool alt = abs(g2x.x) + abs(g2y.x) < abs(g1x.x) + abs(g1y.x);
   vec3 c = textureGrad(uMap, vec2(fract(u), v), alt ? g2x : g1x, alt ? g2y : g1y).rgb;
+  if (uDetail > 0.0) {
+    // Fine structure below the map's resolution (a map pixel is ~5', several headset pixels): star
+    // clouds and thin dust filaments, synthesised at the eye's resolution and laid only on the band
+    // (strongest where it is bright), so the Milky Way is not a smooth smear up close. Each octave
+    // fades out as it shrinks below a pixel (no shimmer).
+    float Ym = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float band = smoothstep(0.015, 0.12, Ym) * uDetail;
+    float fw = max(length(fwidth(d)), 1e-6);
+    float l1 = log2(fw * 24.0 * 64.0), l2 = l1 + 1.44;
+    float w1 = 1.0 - smoothstep(1.5, 3.0, l1), w2 = 1.0 - smoothstep(1.5, 3.0, l2);
+    if (band * w1 > 0.0) {
+      vec4 a = textureLod(uNoise, d * 24.0, max(l1, 0.0));
+      vec4 b = w2 > 0.0 ? textureLod(uNoise, d * 65.0 + 0.37, max(l2, 0.0)) : vec4(0.5);
+      // mottled star clouds, brighter knots and darker gaps
+      float clouds = (a.r - 0.5) * 0.7 * w1 + (b.g - 0.5) * 0.5 * w2;
+      // dark filaments (ridges of the noise), stronger where the map already shows dust (reddish, dim)
+      float dustF = smoothstep(0.82, 0.97, ridge(a.b)) * w1 * 0.5 + smoothstep(0.86, 0.98, ridge(b.a)) * w2 * 0.35;
+      float dusty = 0.6 + 0.8 * smoothstep(0.0, 0.25, c.r / max(c.b, 1e-4) - 1.1);
+      c *= max(1.0 + band * (clouds - dustF * dusty + 0.06), 0.15);
+    }
+  }
   c *= uGain;
   if (uMix > 0.0) {
     // galaxy model: V-band column luminosity, mapped like the map (its pixels go as flux^1.65)
@@ -93,7 +118,7 @@ export class SkyLayer {
       name: 'sky', vertexShader: VERT, fragmentShader: FRAG,
       uniforms: {
         uMap: { value: tex }, uGain: this.gain, uGalaxy: { value: null }, uMix: { value: 0 }, uModelK: { value: 0 },
-        uModelRef: { value: SkyLayer.MODEL_REF }, uModelExp: { value: 1.65 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
+        uModelRef: { value: SkyLayer.MODEL_REF }, uModelExp: { value: 1.65 }, uNoise: { value: noise3D().tex }, uDetail: { value: 1 }, uPullIn: GLOBALS.uPullIn, uDepthK: GLOBALS.uDepthK,
       },
       side: BackSide, depthTest: false, depthWrite: false,
     });

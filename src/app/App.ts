@@ -20,7 +20,7 @@ import { Renderer, type ViewInfo } from '../render/Renderer';
 import { GLOBALS, LITE, depthK } from '../render/shaders/xr';
 import { SkyLayer } from '../render/Sky';
 import { Comet, SmallBodiesLayer } from '../render/SmallBodies';
-import { StarFieldLayer } from '../render/StarField';
+import { StarFieldLayer, updateTwinkle } from '../render/StarField';
 import { TileDetail } from '../render/TileDetail';
 import { type CraftView, SpacecraftLayer } from '../render/SpacecraftLayer';
 import { loadMaterials } from '../render/Materials';
@@ -53,8 +53,8 @@ import { Walk } from './Walk';
 import { God } from '../god/God';
 
 /** display level of a view-filling star disk (eye adaptation key), and the most a big resolved star disk is shown at */
-const STAR_KEY = 0.9;
-const STAR_CAP = 0.8;
+const STAR_KEY = 0.75;
+const STAR_CAP = 0.7;
 const DATA = `${import.meta.env.BASE_URL}data`;
 /** catalogue stars closer than this (pc) are drawn individually by the near-star layer */
 const NEAR_STAR_RADIUS = 0.02;
@@ -1201,7 +1201,8 @@ export class App {
     for (const v of this.bodies.views.values()) {
       if (!v.resolved || v.pixelRadius <= 1.5 || (!onScreen(v.rel) && this.bigCoverage(v.rel, v.body.radius) < 0.02)) continue;
       const b = v.body;
-      if (b.kind === 'star') lightCap = Math.min(lightCap, 1.8 / (AU / SUN_RADIUS) ** 2);
+      // (the Sun like any star: a small disk bright, a big one below white so its limb, spots and granulation show)
+      if (b.kind === 'star') lightCap = Math.min(lightCap, (1.8 + (STAR_CAP - 1.8) * smoothstep(12, 90, v.pixelRadius / this.view.pixelRatio)) / (AU / SUN_RADIUS) ** 2);
       else diskCap = Math.min(diskCap, 1.6 / (((Math.min(1, 1.5 * this.surfaceAlbedo(b)) * sunIrradianceAt(Math.max(b.pos.distanceTo(this.system.sun.pos), 1))) / Math.PI) * (this.bodies.sunlit.get(b) ?? 1)));
     }
     for (const cv of this.craft.views) {
@@ -1792,6 +1793,7 @@ export class App {
     psf.uDpr.value = dpr;
     // a headset's pixels are large and the head never still: slightly wider cores keep faint stars from shimmering
     if (psf.uMinSigma) psf.uMinSigma.value = this.vr.active ? 0.8 : 0.6;
+    updateTwinkle(this.bodies.views.values(), (v) => this.atmospheres.spec(v.body), now / 1000);
     this.bodies.surfaceExposure.value = xSurf;
     for (const c of this.catalogs) c.update(this.camPc, mLim, this.fieldMinDistPc);
     for (const f of this.starFields) f.update(this.camPc, NEAR_STAR_RADIUS);

@@ -103,18 +103,25 @@ void main() {
   // (white-light pictures of the Sun show little of it; this is artistic, kept subtle)
   float mottVis = smoothstep(2.0, 8.0, cellPx * uGranFreq / 9.0);
   gran *= 1.0 + 0.28 * mottVis * (fbm3(q * 9.0 + 41.0) - 0.5) * (uGranAmp > 0.02 ? 1.0 : 0.3);
-  // spots in the active latitudes: umbra and penumbra
+  // spots in the active latitudes: active regions (large, few) hold groups of small spots, each a
+  // dark umbra inside a lighter penumbra; more and bigger on more active stars
   float band = exp(-pow((abs(lat) - uSpotLat) / 0.22, 2.0));
-  float sf = fbm3(q * 7.0 + 31.0) * band;
+  // (fbm3 clusters tightly around 0.5: stretched, so its tails reach the thresholds)
+  float region = clamp((fbm3(q * 4.0 + 31.0) - 0.5) * 2.6 + 0.5, 0.0, 1.0) * band;
   float thr = 1.0 - clamp(uSpots * 2.2, 0.0, 0.95);
-  float pen = smoothstep(thr - 0.06, thr, sf);
-  float umb = smoothstep(thr + 0.03, thr + 0.08, sf);
+  float act = smoothstep(thr - 0.1, thr + 0.05, region);
+  float sf = act * (0.55 + 0.45 * clamp((fbm3(q * 26.0 + 7.0) - 0.5) * 2.6 + 0.5, 0.0, 1.0));
+  float pen = smoothstep(0.86, 0.9, sf);
+  float umb = smoothstep(0.93, 0.96, sf);
   float spot = pen * 0.45 + umb * 0.5;
   // faculae: bright network around active regions, visible towards the limb
-  float fac = uFaculae * smoothstep(thr - 0.2, thr - 0.05, sf) * (1.0 - spot) * pow(1.0 - mu, 1.5) * 0.6;
+  float fac = uFaculae * smoothstep(thr - 0.25, thr - 0.02, region) * (1.0 - spot) * pow(1.0 - mu, 1.5) * 0.6;
   // limb darkening (quadratic law, normalised to unit mean) and gravity darkening
+  // (per colour: limb darkening is stronger in blue than in red, as measured on the Sun, so the limb
+  // is darker and warmer than the middle, as in white-light photographs)
   float x = 1.0 - mu;
-  float ld = (1.0 - uLimbA * x - uLimbB * x * x) / (1.0 - uLimbA / 3.0 - uLimbB / 6.0);
+  vec3 lA = min(uLimbA * vec3(0.84, 1.0, 1.22), vec3(0.95));
+  vec3 ld = max((1.0 - lA * x - uLimbB * x * x) / (1.0 - lA / 3.0 - uLimbB / 6.0), 0.0);
   float gd = 1.0 - uGravDark * (1.0 - lat * lat);
   vec3 col = uColor * ld * gd * gran * (1.0 - spot) * (1.0 + fac);
   // cooler (redder) spots, lanes and equator; hotter cell centres a little whiter; and a redder
@@ -125,7 +132,7 @@ void main() {
   // impression of a star's colour are): an M star orange-red, a G star yellow-white, an O star blue
   // (with a slight warm bias: the Sun reads yellow-white, as in photographs, not pinkish grey)
   col *= vec3(1.0, 0.97, 0.84);
-  col = max(mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, 1.4), 0.0);
+  col = max(mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, 2.0), 0.0);
   // (the display curve keeps hues now: the blackbody colour is shown as it is, a G star white)
   // flares on active red dwarfs: a bright patch that flashes up and fades
   if (uFlares > 0.0) {
