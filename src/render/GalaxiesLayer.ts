@@ -1,6 +1,7 @@
 import { AdditiveBlending, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, Group, Matrix3, Matrix4, Mesh, Points, Quaternion, ShaderMaterial, Vector2, Vector3, Vector4 } from 'three';
 import type { UPos } from '../core/upos';
 import { discFrame, type Galaxy } from '../universe/Galaxies';
+import { GalaxyClusters } from './GalaxyClusters';
 import { F_LOG0, F_N, F_STEP, INTERIOR } from './interiorState';
 import { noise3D, sampleNoise } from './Noise3D';
 import { VOLUMES } from './Renderer';
@@ -18,7 +19,7 @@ import { FIX_LOGDEPTH, GLOBALS, LITE, OUTPUT_FRAGMENT, POINT_CLIP, PROJECT_PARS 
  * galaxy's light (normalised on the CPU) times its catalogued brightness. Mirrored in TypeScript by
  * `GalaxyModel` (keep the two in step).
  */
-const GAL_MODEL = /* glsl */ `
+export const GAL_MODEL = /* glsl */ `
 uniform sampler3D uNoise;
 uniform float uSeed;
 uniform vec4 uArmP;    // arms, 1/tan(pitch), irregularity, phase
@@ -150,7 +151,10 @@ void main() {
     float ds = disc ? max(abs(pd0.z) * 0.5, 0.0035) / adz : 1.0;
     if (disc && abs(pd0.z) < 0.15) ds = min(ds, dsMax);
     if (uBulgeW.x > 0.0) ds = min(ds, 0.3 * length(pg0 * uBulgeAx) + 0.003);
-    ds = clamp(ds, 0.002, 0.3);
+    // and around the eye a fraction of the distance (log-spaced): flying through, the nearby dust
+    // clouds and nebulae stay sharp, with no shells or slices
+    ds = min(ds, max(0.2 * t, 0.0015));
+    ds = clamp(ds, 0.0015, 0.3);
     ds = min(max(ds, (t1 - t) / float(N - i)), t1 - t);
     float tt = t + ds * jit;
     vec3 pg = uCam + dir * tt;
@@ -189,6 +193,10 @@ void main() {
         float fil = hi ? smoothstep(0.15, 0.85, 0.5 * gI.b + 0.5 * gS.b) : 0.5 * (gI.b + gS.b);
         float hd = 0.4 * hz;
         k = uDustP.x * dustSheet(fil) * (exp(-az / hd) / (2.0 * hd) + uDustP.z * exp(-az / 0.03) * 16.7 * smoothstep(0.55, 0.85, gA.a) * 3.0) * win;
+        // up close a finer octave (tens of parsecs in a large spiral): dark globules and filaments
+        // instead of soft blobs; its mean is 1, so the dust column is kept, and it fades in by footprint
+        float lf = lod + 5.3;
+        if (hi && lf < 2.0 && k > 0.0) k *= mix(0.2 + 1.6 * nz(pd * 40.0 + uSeed * 3.1, lf).r, 1.0, clamp(lf * 0.5, 0.0, 1.0));
       }
     }
     if (uNearOn > 0.5) {
@@ -212,6 +220,30 @@ ${OUTPUT_FRAGMENT}
 }`;
 
 /**
+ * Optical depth (V) of the dust layer between two galaxy-frame points (GLSL, after GAL_MODEL): its
+ * vertical profile integrated exactly along the segment, its horizontal factor taken where the
+ * segment crosses the plane.
+ */
+export const DUST_TAU = /* glsl */ `
+float dustTau(vec3 ag, vec3 bg) {
+  if (uDustP.x <= 0.0) return 0.0;
+  vec3 a = warpD(uDiscRot * ag), b = warpD(uDiscRot * bg);
+  float L = length(b - a);
+  if (L <= 0.0) return 0.0;
+  float dz = b.z - a.z;
+  float f = abs(dz) > 1e-6 ? clamp(-a.z / dz, 0.0, 1.0) : 0.5;
+  vec3 c = mix(a, b, f);
+  discNoise(vec3(c.xy, 0.0), 0.0);
+  float h = 0.4 * hzF(gr);
+  float K = uDustP.x * dustSheet(smoothstep(0.15, 0.85, 0.5 * gI.b + 0.5 * gS.b));
+  // Laplace cumulative distribution of the layer between the two heights
+  float Fa = a.z < 0.0 ? 0.5 * exp(a.z / h) : 1.0 - 0.5 * exp(-a.z / h);
+  float Fb = b.z < 0.0 ? 0.5 * exp(b.z / h) : 1.0 - 0.5 * exp(-b.z / h);
+  return abs(dz) > 1e-4 * h ? K * L * abs(Fb - Fa) / abs(dz) : K * L * exp(-abs(a.z) / h) / (2.0 * h);
+}
+`;
+
+/**
  * The nearest galaxy as a 3D cloud: star clouds (soft sprites of a fixed size in space, so their
  * surface brightness stays the same from any distance) and single stars, drawn from the same model
  * as the volume. Flying in, they spread apart with parallax. Each is dimmed by the dust layer
@@ -233,24 +265,7 @@ uniform float uClipScale;
 uniform vec3 uCamG;       // camera in the galaxy frame (radii)
 varying vec3 vCol;
 ${GAL_MODEL}
-// optical depth (V) of the dust layer between the eye and p: its vertical profile integrated
-// exactly along the segment, its horizontal factor taken where the segment crosses the plane
-float dustTau(vec3 ag, vec3 bg) {
-  if (uDustP.x <= 0.0) return 0.0;
-  vec3 a = warpD(uDiscRot * ag), b = warpD(uDiscRot * bg);
-  float L = length(b - a);
-  if (L <= 0.0) return 0.0;
-  float dz = b.z - a.z;
-  float f = abs(dz) > 1e-6 ? clamp(-a.z / dz, 0.0, 1.0) : 0.5;
-  vec3 c = mix(a, b, f);
-  discNoise(vec3(c.xy, 0.0), 0.0);
-  float h = 0.4 * hzF(gr);
-  float K = uDustP.x * dustSheet(smoothstep(0.15, 0.85, 0.5 * gI.b + 0.5 * gS.b));
-  // Laplace cumulative distribution of the layer between the two heights
-  float Fa = a.z < 0.0 ? 0.5 * exp(a.z / h) : 1.0 - 0.5 * exp(-a.z / h);
-  float Fb = b.z < 0.0 ? 0.5 * exp(b.z / h) : 1.0 - 0.5 * exp(-b.z / h);
-  return abs(dz) > 1e-4 * h ? K * L * abs(Fb - Fa) / abs(dz) : K * L * exp(-abs(a.z) / h) / (2.0 * h);
-}
+${DUST_TAU}
 void main() {
   vec4 mv = modelViewMatrix * vec4(aStar.xyz, 1.0);
   // distance in galaxy radii (in metres its square would overflow 32-bit floats)
@@ -734,6 +749,8 @@ export class GalaxiesLayer {
   private nClouds: number;
   private nStars: number;
   private pixAng = { value: 1e-3 };
+  /** globular and open clusters and H II regions of the nearest galaxy */
+  readonly clusters: GalaxyClusters;
 
   constructor(readonly galaxies: Galaxy[], psf?: Record<string, { value: number }>, vr = false) {
     this.group.name = 'galaxies';
@@ -765,6 +782,8 @@ export class GalaxiesLayer {
     this.cloud.renderOrder = -1;
     this.cloud.name = 'galaxy cloud';
     this.group.add(this.cloud);
+    this.clusters = new GalaxyClusters(this.gain, psf, vr);
+    this.group.add(this.clusters.points);
     this.base = galaxies.length;
     for (const g of galaxies) this.makeVolume(g);
   }
@@ -937,6 +956,8 @@ export class GalaxiesLayer {
       u.uClipScale.value = 1 / Math.max(rel.length(), R);
       (u.uCamG.value as Vector3).set(-rel.dot(near.major) / R, -rel.dot(near.minor) / R, -rel.dot(near.normal) / R);
     }
+    if (near) near.upos.sub(cam, rel);
+    this.clusters.update(near, near ? this.modelOf(near) : null, rel, nearK, fade);
     for (const g of this.galaxies) {
       g.upos.sub(cam, rel);
       const dist = rel.length();
