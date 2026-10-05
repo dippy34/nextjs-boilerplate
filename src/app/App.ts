@@ -218,7 +218,7 @@ export class App {
     app.holes = new BlackHoleLayer(blackHoles, bodies.surfaceExposure, renderer.depthMode === 'reversed-z');
     app.jets = new JetsLayer(blackHoles);
     app.galaxy = new GalaxyGlow();
-    app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut);
+    app.procStars = new ProceduralStarLayer(starField.psf, starField.colorLut, xrCapable);
     app.exo = new ExoPlanetLayer(starField.psf, bodies.surfaceExposure);
     app.exo.gl = renderer.gl;
     app.tiles = new TileDetail(`${DATA}/tiles`, xrCapable);
