@@ -14,10 +14,19 @@ import { QUALITY_LEVEL } from './shaders/xr';
  * the renderer scales its internal resolution on a desktop (RENDER_SCALE); in a headset, whose
  * framebuffer is fixed for the session, the volume pass and the terrain coarsen instead.
  *
+ * CPU-bound frames are told apart: a late frame whose main-thread time (App.frame) took most of the
+ * budget (and, where the GPU timer exists, more than the GPU) is CPU-bound. Lowering resolution
+ * cannot help those (the Quest 3 benchmark: CPU 10-22 ms against 13.3, level stuck at 3 for
+ * nothing), so they neither step the level down nor hold a step back up. `QUALITY.cpuBound` says
+ * whether most of the recent late frames were CPU-bound (for the perf HUD).
+ *
  * Off in automated browsers (navigator.webdriver: software rendering misses every frame, and test
  * screenshots must not change), unless the page has ?governor=1; ?governor=0 turns it off.
  */
-export const QUALITY = { level: 0, levels: 4, enabled: true };
+export const QUALITY = { level: 0, levels: 4, enabled: true, cpuBound: false };
+
+/** a late frame whose main thread took this share of the budget is CPU-bound */
+export const CPU_BOUND_SHARE = 0.8;
 
 /** keep the shader-side copy (shaders/xr.ts QUALITY_LEVEL) in step */
 function setLevel(l: number): void {
@@ -38,6 +47,8 @@ export class Governor {
   private sinceChange = 0;
   private upWait = 5000;
   private lastUpAt = -1e9;
+  /** of the recent late frames, which were CPU-bound */
+  private cpuLate: boolean[] = [];
 
   constructor(enabled: boolean) {
     QUALITY.enabled = enabled;
@@ -52,14 +63,27 @@ export class Governor {
     return !(typeof navigator !== 'undefined' && navigator.webdriver);
   }
 
-  /** Once per frame at time `now` (ms) with the frame budget (ms); true when the level changed. */
-  update(now: number, budgetMs: number): boolean {
+  /**
+   * Once per frame at time `now` (ms) with the frame budget (ms) and the previous frame's
+   * main-thread and GPU times (ms, -1 when unknown); true when the level changed.
+   */
+  update(now: number, budgetMs: number, cpuMs = -1, gpuMs = -1): boolean {
     const dt = now - this.last;
     this.last = now;
     // (paused tabs, the first frame, a session starting: no measurement)
     if (!QUALITY.enabled || !(dt > 0) || dt > 1000) return false;
-    this.misses.push(dt > budgetMs * 1.3);
+    const late = dt > budgetMs * 1.3;
+    const cpuBound = late && cpuMs >= budgetMs * CPU_BOUND_SHARE && !(gpuMs > cpuMs);
+    // only the late frames a lower quality could fix count as misses
+    this.misses.push(late && !cpuBound);
     if (this.misses.length > 45) this.misses.shift();
+    if (late) {
+      this.cpuLate.push(cpuBound);
+      if (this.cpuLate.length > 45) this.cpuLate.shift();
+      let n = 0;
+      for (const c of this.cpuLate) if (c) n++;
+      QUALITY.cpuBound = n > this.cpuLate.length / 2;
+    }
     this.sinceChange += dt;
     let missed = 0;
     for (const m of this.misses) if (m) missed++;
