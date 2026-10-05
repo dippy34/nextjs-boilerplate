@@ -1706,7 +1706,7 @@ export class App {
     }
     const jd = this.clock.jdTdb;
     if (!this.god.active) {
-      this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate));
+      this.system.update(jd, this.clock.paused ? 0 : Math.sign(this.clock.rate), this.simFocus());
       this.god.frameTime(jd, rawDt);
     }
     HITCH.lap('solarSystem');
@@ -1905,6 +1905,20 @@ export class App {
     HITCH.end(info.programs ?? 0, info.memory.textures);
     PERF.lap('overlay');
     PERF.frameEnd();
+  }
+
+  private readonly focusSet = new Set<Body>();
+  /**
+   * The Solar System bodies whose motion must be exact this frame (SolarSystem.update scales the
+   * rest with what is on screen): where the camera is and what it is going to or has selected, and
+   * every body drawn larger than a pixel last frame.
+   */
+  private simFocus(): ReadonlySet<Body> {
+    const f = this.focusSet;
+    f.clear();
+    for (const o of [this.rig.anchor, this.rig.target, this.selection]) if (o instanceof Body) f.add(o);
+    for (const v of this.bodies.views.values()) if (v.pixelRadius > 0.7) f.add(v.body);
+    return f;
   }
 
   private updateHud(): void {
