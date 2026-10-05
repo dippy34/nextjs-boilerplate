@@ -167,7 +167,8 @@ const SHOTS = {
     const dir = path.join(outDir, 'a'); fs.mkdirSync(dir, { recursive: true });
     for (let i = 0; i < n; i++) {
       await frame(page, ctl, [i, setup]);
-      if (i % STRIDE === 0) { await raf(page); await grab(cdp, path.join(dir, `f${String(i).padStart(4, '0')}.jpg`)); }
+      const ff = path.join(dir, `f${String(i).padStart(4, '0')}.jpg`);
+      if (i % STRIDE === 0 && !fs.existsSync(ff)) { await raf(page); await grab(cdp, ff); }
       if (i % 24 === 0) console.log('a', i, JSON.stringify(await page.evaluate(() => { const r = window.app.game.flight.readout; return { alt: Math.round(r.altitude), v: Math.round(r.vertSpeed), landed: r.landed, end: window.app.game.flight.ending?.title ?? null }; })));
     }
     await page.close();
@@ -217,7 +218,8 @@ const SHOTS = {
         // the view lifts a little toward Earth over the clip
         w.pitch = 0.46 + 0.10 * Math.sin((i / 119) * Math.PI);
       }, [i]);
-      if (i % STRIDE === 0) { await raf(page); await grab(cdp, path.join(dir, `f${String(i).padStart(4, '0')}.jpg`)); }
+      const ff = path.join(dir, `f${String(i).padStart(4, '0')}.jpg`);
+      if (i % STRIDE === 0 && !fs.existsSync(ff)) { await raf(page); await grab(cdp, ff); }
       if (i % 24 === 0) console.log('b', i, JSON.stringify(await page.evaluate(() => { const d = window.app.walk.debug(); return { g: d.onGround, apex: +d.apex?.toFixed?.(2), spd: +d.speed.toFixed(2) }; })));
     }
     await page.keyboard.up('KeyW');
