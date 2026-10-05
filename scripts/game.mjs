@@ -112,9 +112,10 @@ check('thrust undocks', st.docked === null);
 
 // 8. landing: come down onto the Moon
 // (dropped 12 m over the ground with no speed: lunar gravity sets it down at ~6 m/s)
-await page.evaluate(() => { const a = window.app; const m = a.findByName('Moon'); a.select(m); a.placeNear(m, m.radius + 5000, 30, 20); });
+await page.evaluate(() => { const a = window.app; const m = a.findByName('Moon'); a.select(m); a.placeNear(m, m.radius + 5000, 30, 20); a.clock.paused = true; });
 await page.waitForFunction(() => window.app.terrain.owner === window.app.findByName('Moon') && !!window.app.terrain.below(window.app.rig.upos), null, { timeout: 240000 }).catch(() => undefined);
-await page.evaluate(() => window.app.game.flight.hoverOverGround(12));
+// (time held while the terrain streams in: at a few frames a second the ship would otherwise fall the 5 km)
+await page.evaluate(() => { window.app.game.flight.hoverOverGround(12); window.app.clock.paused = false; });
 await page.waitForFunction(() => !!window.app.game.flight.readout.landed || !!window.app.game.flight.ending, null, { timeout: 240000 }).catch(() => undefined);
 await frames(4);
 st = await page.evaluate(() => ({ landed: window.app.game.flight.readout.landed || null, alt: window.app.rig.altitude, ending: window.app.game.flight.ending?.title ?? null }));

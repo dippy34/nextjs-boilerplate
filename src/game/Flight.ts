@@ -319,6 +319,7 @@ export class Flight {
     ship.upos.copy(D.upos).addVec(rel);
     ship.vel.copy(D.vel).add(new Vector3().crossVectors(core.spin, rel));
     core.landed = null;
+    this.ending = null;
     core.syncRel();
     this.app.rig.upos.copy(ship.upos);
   }
