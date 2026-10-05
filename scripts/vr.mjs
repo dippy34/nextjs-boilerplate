@@ -19,7 +19,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'warning' && /XR render target/.test(m.text())) errors.push(m.text()); });
 // Mean brightness of what the headset shows (IWER composites the eye images into the page canvas).
 const headsetBrightness = () => page.evaluate(() => {
-  const src = document.querySelector('canvas');
+  const src = window.app.renderer.canvas; // (not the first canvas: the perf HUD has its own)
   const c = document.createElement('canvas'); c.width = 96; c.height = 54;
   const ctx = c.getContext('2d'); ctx.drawImage(src, 0, 0, c.width, c.height);
   const d = ctx.getImageData(0, 0, c.width, c.height).data; let sum = 0, lit = 0;
@@ -133,8 +133,10 @@ await page.screenshot({ path: path.join(outDir, 'vr1-menu.png'), timeout: 180000
 
 // 1b. Scale: the layer's depth stays away from the compositor (log depth would read as centimetres
 //     there), Earth at 2 radii has no parallax, a rock 5 m away has true 6.3 cm stereo
-st = await page.evaluate(() => { const L = window.app.renderer.gl.xr.getBaseLayer(); return { init: L?.madeWith ?? null, ignore: L?.ignoreDepthValues }; });
-check('headset layer is made without depth for the compositor', !!st.init && st.init.depthFormat === 0 && st.ignore === true, JSON.stringify(st));
+// (a projection layer, as in the Quest Browser, is made without depth; IWER falls back to an
+// XRWebGLLayer, whose runtime must then say it ignores depth: three keeps its own buffer either way)
+st = await page.evaluate(() => { const L = window.app.renderer.gl.xr.getBaseLayer(); return { kind: L?.madeWith ? 'projection' : 'webgl', init: L?.madeWith ?? null, ignore: L?.ignoreDepthValues }; });
+check('the compositor never reads the log depth', st.ignore === true && (st.kind === 'webgl' || st.init.depthFormat === 0), JSON.stringify(st));
 await page.evaluate(() => { const a = window.app; const e = a.system.bodies.find((b) => b.name === 'Earth'); a.placeNear(e, 2 * e.radius, 40, 10); a.rig.lookAt(e.upos.sub(a.rig.upos).normalize()); });
 await quietHead();
 await frames(4);

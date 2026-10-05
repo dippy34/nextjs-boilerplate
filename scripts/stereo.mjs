@@ -15,7 +15,7 @@ export async function measureDisparity(page, relExpr, { half = 40, search = 24 }
   return page.evaluate(([expr, half, search]) => {
     const a = window.app;
     const T = new Function('a', `return ${expr};`)(a);
-    const canvas = document.querySelector('canvas');
+    const canvas = window.app.renderer.canvas;
     const W = canvas.width, H = canvas.height, eyeW = W / 2;
     const xc = a.renderer.gl.xr.getCamera();
     const cams = xc.cameras;
