@@ -68,8 +68,12 @@ export class HitchMonitor {
 
   constructor(private readonly now: () => number = () => performance.now()) {}
 
+  /** off (`?hitch=0`): every call returns at once */
+  off = false;
+
   /** Start of a frame: judges the gap since the previous frame's start. */
   begin(): void {
+    if (this.off) return;
     const t = this.now();
     if (this.frameStart >= 0) {
       const gap = t - this.frameStart;
@@ -84,6 +88,7 @@ export class HitchMonitor {
 
   /** The named subsystem just finished (its time is since the previous lap or begin). */
   lap(name: string): void {
+    if (this.off) return;
     const t = this.now();
     if (this.frameStart < 0) { this.lastLap = t; return; }
     let i = this.index.get(name);
@@ -103,6 +108,7 @@ export class HitchMonitor {
    * and its running count of textures.
    */
   end(programs: number | readonly { name?: string }[] = 0, textures = 0): void {
+    if (this.off) return;
     const t = this.now();
     this.jsMs = t - this.frameStart;
     if (typeof programs !== 'number') programs = this.scanPrograms(programs);
@@ -195,4 +201,8 @@ function round(ms: number): number {
 
 /** The app's monitor. */
 export const HITCH = new HitchMonitor();
-if (typeof location !== 'undefined') HITCH.log = new URLSearchParams(location.search).get('hitch') === 'log';
+if (typeof location !== 'undefined') {
+  const h = new URLSearchParams(location.search).get('hitch');
+  HITCH.log = h === 'log';
+  HITCH.off = h === '0';
+}
