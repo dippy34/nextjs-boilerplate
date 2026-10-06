@@ -13,6 +13,9 @@ import { DataTexture, LinearFilter, NearestFilter, RGBAFormat, Texture, Unsigned
  *   inside a draw.
  */
 
+/** `?uploads=sync`: decode off-thread but upload each map whole at once (the old way; for A/B) */
+const SYNC = typeof location !== 'undefined' && new URLSearchParams(location.search).get('uploads') === 'sync';
+
 /** rows per strip: 4096 × 256 RGBA = 4 MB a copy */
 export const STRIP_BYTES = 4096 * 256 * 4;
 
@@ -85,6 +88,7 @@ export function setUploadRenderer(r: WebGLRenderer): void {
 
 /** Upload an existing texture (whole) in the queue; resolves when it is on the GPU. */
 export function uploadTexture(tex: Texture): Promise<Texture> {
+  if (SYNC) { renderer?.initTexture(tex); return Promise.resolve(tex); }
   return UPLOADS.add(() => renderer?.initTexture(tex)).then(() => tex);
 }
 
@@ -119,7 +123,7 @@ export async function loadMap(url: string, opts: MapOptions = {}): Promise<MapRe
 export async function uploadBitmap(bmp: ImageBitmap, setup?: (tex: Texture) => void): Promise<Texture> {
   const w = bmp.width, h = bmp.height;
   const parts = strips(w, h);
-  if (parts.length === 1 || !renderer) {
+  if (parts.length === 1 || !renderer || SYNC) {
     // small: one piece
     const tex = new Texture(bmp);
     tex.flipY = false;

@@ -1913,7 +1913,8 @@ export class App {
    * rest with what is on screen): where the camera is and what it is going to or has selected, and
    * every body drawn larger than a pixel last frame.
    */
-  private simFocus(): ReadonlySet<Body> {
+  private simFocus(): ReadonlySet<Body> | undefined {
+    if (SIM_FOCUS_OFF) return undefined;
     const f = this.focusSet;
     f.clear();
     for (const o of [this.rig.anchor, this.rig.target, this.selection]) if (o instanceof Body) f.add(o);
@@ -1982,6 +1983,9 @@ export class App {
     };
   }
 }
+
+/** `?simfocus=0`: update every body every frame (A/B of the focus-scaled update) */
+const SIM_FOCUS_OFF = typeof location !== 'undefined' && new URLSearchParams(location.search).get('simfocus') === '0';
 
 function smoothstep(a: number, b: number, x: number): number {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
