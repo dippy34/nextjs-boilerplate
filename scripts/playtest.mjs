@@ -60,9 +60,13 @@ const frames = async (page, n, timeout = 300000) => {
   const f = await page.evaluate(() => window.app.frameCount);
   await page.waitForFunction((x) => window.app.frameCount > x, f + n, { timeout });
 };
-/** ms per frame over n frames (SwiftShader: only relative between scenes) */
-const frameMs = async (page, n = 6) => {
-  const t0 = Date.now(); await frames(page, n); return Math.round((Date.now() - t0) / n);
+/** ms per frame (SwiftShader: only relative between builds and scenes) */
+const frameMs = async (page, n = 20, runs = 3) => {
+  // median of `runs` samples of n frames each, after 3 settling frames; single short samples swing ~2x
+  await frames(page, 3);
+  const ms = [];
+  for (let i = 0; i < runs; i++) { const t0 = Date.now(); await frames(page, n); ms.push((Date.now() - t0) / n); }
+  return Math.round(ms.sort((a, b) => a - b)[runs >> 1]);
 };
 
 // Image statistics of a PNG, decoded in the page: mean/std luminance, lit/white fractions, and a
@@ -294,7 +298,7 @@ if (which !== 'vr') {
       await p.evaluate((kk) => { const a = window.app, o = a.findByName('Orion Nebula'); a.select(o); const d = o.upos.sub(a.rig.upos).normalize(); a.rig.upos.copy(o.upos).addVec(d, -o.radius * kk); a.rig.lookAt(d); }, k);
       await frames(p, 10);
       const st = await look(p, nm, { label: k > 1.5 });
-      metric(`frameMs@${k}R`, await frameMs(p, 4));
+      metric(`frameMs@${k}R`, await frameMs(p));
       return st;
     };
     await at(3, 'd10-orion-approach');

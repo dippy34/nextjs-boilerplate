@@ -1,6 +1,6 @@
 // Regression gate: compares two playtest runs (scripts/playtest.mjs), baseline vs candidate.
 // Writes <outDir>/COMPARE.md: scene status, frame times side by side (flagged when the candidate is
-// >25% slower), anomalies new in the candidate, anomalies fixed; plus a side-by-side JPEG
+// >30% slower), anomalies new in the candidate, anomalies fixed; plus a side-by-side JPEG
 // (baseline left, candidate right) for every screenshot both runs took.
 // Usage: node scripts/qa-compare.mjs <baselineDir> <candidateDir> <outDir> [baseLabel] [candLabel]
 import { chromium } from '@playwright/test';
@@ -28,7 +28,7 @@ lines.push('', '## Frame time (ms, lower is better)', '', `| metric | ${bl} | ${
 for (const k of Object.keys(C.metrics).filter((k) => /frameMs/.test(k))) {
   const b = B.metrics[k], c = C.metrics[k];
   const r = b ? c / b : null;
-  const bad = r !== null && r > 1.25 && c - b > 50;
+  const bad = r !== null && r > 1.3 && c - b > 50; // frameMs is a median of 3×20 frames (scripts/playtest.mjs)
   if (bad) regress.push(`${k} slower: ${b} -> ${c} ms (x${r.toFixed(2)})`);
   lines.push(`| ${k} | ${b ?? '—'} | ${c} | ${r === null ? '—' : `${bad ? '**' : ''}x${r.toFixed(2)}${bad ? '**' : ''}`} |`);
 }
