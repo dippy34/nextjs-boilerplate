@@ -1,0 +1,548 @@
+{
+ "blackholes": [
+  {
+   "name": "SWIFT J1357.2-0933",
+   "aliases": [],
+   "kind": "stellar",
+   "raDeg": 209.32008333333332,
+   "decDeg": -9.544041666666667,
+   "distPc": 2290.0,
+   "massSun": 8.9,
+   "companion": {
+    "spType": "M2-4V",
+    "teff": 3560.0,
+    "massSun": 0.35600000000000004,
+    "radiusM": 1921056216.435867,
+    "periodDays": 2.8,
+    "sepM": 12212471354.131649,
+    "incDeg": 90.0
+   },
+   "diskOuterM": 6299902518.104908,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "XTE J1650-500",
+   "aliases": [],
+   "kind": "stellar",
+   "raDeg": 252.5040833333333,
+   "decDeg": -49.96211111111111,
+   "distPc": 2600.0,
+   "massSun": 7.3,
+   "companion": {
+    "spType": "~K4V",
+    "teff": 4500,
+    "massSun": 0.73,
+    "radiusM": 4723241658.87711,
+    "periodDays": 7.69,
+    "sepM": 22842650595.849136,
+    "incDeg": 47.0
+   },
+   "diskOuterM": 10565525033.94488,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "XTE J1118+480",
+   "aliases": [
+    "KV UMa"
+   ],
+   "kind": "stellar",
+   "raDeg": 169.54495833333334,
+   "decDeg": 48.03678333333333,
+   "distPc": 1700.0,
+   "massSun": 6.9,
+   "companion": {
+    "spType": "K7-M1V",
+    "teff": 4100.0,
+    "massSun": 0.16560000000000002,
+    "radiusM": 1927422224.9250832,
+    "periodDays": 4.078414,
+    "sepM": 14341711334.458382,
+    "incDeg": 68.0
+   },
+   "diskOuterM": 7759463748.395937,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "XTE J1859+226",
+   "aliases": [
+    "V406 Vul"
+   ],
+   "kind": "stellar",
+   "raDeg": 284.67325,
+   "decDeg": 22.658166666666666,
+   "distPc": 12500.0,
+   "massSun": 5.42,
+   "companion": {
+    "spType": "~K5V",
+    "teff": 4500,
+    "massSun": 0.542,
+    "radiusM": 3854771839.4365096,
+    "periodDays": 6.58,
+    "sepM": 18642536760.632397,
+    "incDeg": 70.0
+   },
+   "diskOuterM": 8622825447.257484,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "SAX J1819.3-2525",
+   "aliases": [
+    "V4641 Sgr"
+   ],
+   "kind": "stellar",
+   "raDeg": 274.8399166666666,
+   "decDeg": -25.406972222222223,
+   "distPc": 6200.0,
+   "massSun": 6.4,
+   "companion": {
+    "spType": "B9III",
+    "teff": 10700.0,
+    "massSun": 4.032,
+    "radiusM": 36069699041.18605,
+    "periodDays": 67.6152,
+    "sepM": 106179947419.5127,
+    "incDeg": 72.0
+   },
+   "diskOuterM": 35630833095.35094,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "XTE J1550-564",
+   "aliases": [
+    "V381 Nor"
+   ],
+   "kind": "stellar",
+   "raDeg": 237.74458333333337,
+   "decDeg": -56.476444444444446,
+   "distPc": 4500.0,
+   "massSun": 7.81,
+   "companion": {
+    "spType": "K2-K4IV",
+    "teff": 5100.0,
+    "massSun": 0.23429999999999998,
+    "radiusM": 9382535540.967686,
+    "periodDays": 37.0088,
+    "sepM": 65151313671.251976,
+    "incDeg": 75.0
+   },
+   "diskOuterM": 34560430428.05289,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "GRS 1009-45",
+   "aliases": [
+    "N. Vel 1993=MM Vel"
+   ],
+   "kind": "stellar",
+   "raDeg": 153.39833333333334,
+   "decDeg": -45.07646666666667,
+   "distPc": 3800.0,
+   "massSun": 4.4,
+   "companion": {
+    "spType": "K7-M0V",
+    "teff": 4100.0,
+    "massSun": 0.6160000000000001,
+    "radiusM": 4115757883.930701,
+    "periodDays": 6.8449,
+    "sepM": 18068454354.4936,
+    "incDeg": 37.0
+   },
+   "diskOuterM": 7963067000.612542,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "GRS 1915+105",
+   "aliases": [
+    "V1487 Aql"
+   ],
+   "kind": "stellar",
+   "raDeg": 288.798125,
+   "decDeg": 10.945777777777778,
+   "distPc": 9000.0,
+   "massSun": 10.1,
+   "companion": {
+    "spType": "K1-5III",
+    "teff": 5170.0,
+    "massSun": 0.4242,
+    "radiusM": 89163171120.51074,
+    "periodDays": 812.0,
+    "sepM": 558458371513.0377,
+    "incDeg": 66.0
+   },
+   "diskOuterM": 286642354867.3754,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "GRO J0422+32",
+   "aliases": [
+    "V518 Per"
+   ],
+   "kind": "stellar",
+   "raDeg": 65.42829166666667,
+   "decDeg": 32.90752777777777,
+   "distPc": 2490.0,
+   "massSun": 2.0,
+   "companion": {
+    "spType": "M4-5V",
+    "teff": 3210.0,
+    "massSun": 0.22,
+    "radiusM": 2403748492.287739,
+    "periodDays": 5.094185,
+    "sepM": 11308141176.158974,
+    "incDeg": 10.0
+   },
+   "diskOuterM": 5161707279.76184,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "GRS 1124-684",
+   "aliases": [
+    "N. Mus 1991=GU Mus"
+   ],
+   "kind": "stellar",
+   "raDeg": 171.61104166666667,
+   "decDeg": -68.67578611111112,
+   "distPc": 5900.0,
+   "massSun": 3.8,
+   "companion": {
+    "spType": "K3-5V",
+    "teff": 4830.0,
+    "massSun": 0.34199999999999997,
+    "radiusM": 4487130036.48985,
+    "periodDays": 10.38254,
+    "sepM": 22378425574.748512,
+    "incDeg": 39.0
+   },
+   "diskOuterM": 10498769214.538311,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "GS 2023+338",
+   "aliases": [
+    "V404 Cyg"
+   ],
+   "kind": "stellar",
+   "raDeg": 306.0159166666666,
+   "decDeg": 33.86719444444444,
+   "distPc": 2390.0,
+   "massSun": 9.0,
+   "companion": {
+    "spType": "K3III",
+    "teff": 4830.0,
+    "massSun": 0.495,
+    "radiusM": 31033319113.996162,
+    "periodDays": 155.311,
+    "sepM": 179139031613.87607,
+    "incDeg": 52.0
+   },
+   "diskOuterM": 89292060996.14471,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "GS 2000+251",
+   "aliases": [
+    "QZ Vul"
+   ],
+   "kind": "stellar",
+   "raDeg": 300.7061666666667,
+   "decDeg": 25.23648888888889,
+   "distPc": 2700.0,
+   "massSun": 5.5,
+   "companion": {
+    "spType": "K3-7V",
+    "teff": 4830.0,
+    "massSun": 0.22,
+    "radiusM": 3365210203.719894,
+    "periodDays": 8.258095,
+    "sepM": 21393196545.70491,
+    "incDeg": 54.0
+   },
+   "diskOuterM": 11035854159.281471,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "GS 1354-64",
+   "aliases": [
+    "BW Cir"
+   ],
+   "kind": "stellar",
+   "raDeg": 209.54041666666666,
+   "decDeg": -64.73494444444445,
+   "distPc": 25000.0,
+   "massSun": 7.6,
+   "companion": {
+    "spType": "G5III",
+    "teff": 5660.0,
+    "massSun": 0.9119999999999999,
+    "radiusM": 20206962543.50756,
+    "periodDays": 61.068,
+    "sepM": 92706479976.92648,
+    "incDeg": 79.0
+   },
+   "diskOuterM": 41795635316.29783,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "H 1705-250",
+   "aliases": [
+    "N. Oph 1977=V2107 Oph"
+   ],
+   "kind": "stellar",
+   "raDeg": 257.06466666666665,
+   "decDeg": -25.091708333333333,
+   "distPc": 8600.0,
+   "massSun": 4.9,
+   "companion": {
+    "spType": "K3-M0V",
+    "teff": 4830.0,
+    "massSun": 0.2597,
+    "radiusM": 4670884353.34269,
+    "periodDays": 12.51,
+    "sepM": 27264870883.08702,
+    "incDeg": 48.0
+   },
+   "diskOuterM": 13647181283.155712,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "3A 0620-003",
+   "aliases": [
+    "N. Mon 1975=V616 Mon"
+   ],
+   "kind": "stellar",
+   "raDeg": 95.68541666666665,
+   "decDeg": -0.34575555555555554,
+   "distPc": 1060.0,
+   "massSun": 6.6,
+   "companion": {
+    "spType": "K2-7V",
+    "teff": 5100.0,
+    "massSun": 0.48839999999999995,
+    "radiusM": 4169963650.499536,
+    "periodDays": 7.7523372,
+    "sepM": 22030698346.30863,
+    "incDeg": 51.0
+   },
+   "diskOuterM": 10599456247.975609,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "1H 1659-487",
+   "aliases": [
+    "GX 339-4"
+   ],
+   "kind": "stellar",
+   "raDeg": 255.70583333333335,
+   "decDeg": -48.789833333333334,
+   "distPc": 6000.0,
+   "massSun": 6.0,
+   "companion": {
+    "spType": ">GIV",
+    "teff": 4500,
+    "massSun": 0.75,
+    "radiusM": 14777489927.50646,
+    "periodDays": 42.14,
+    "sepM": 67007184001.22193,
+    "incDeg": 60.0
+   },
+   "diskOuterM": 30031125442.000366,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "4U 1543-475",
+   "aliases": [
+    "IL Lup"
+   ],
+   "kind": "stellar",
+   "raDeg": 236.78466666666665,
+   "decDeg": -47.669666666666664,
+   "distPc": 7500.0,
+   "massSun": 8.4,
+   "companion": {
+    "spType": "A2V",
+    "teff": 8800.0,
+    "massSun": 26.880000000000003,
+    "radiusM": 41425535998.149155,
+    "periodDays": 26.79377,
+    "sepM": 85984960745.9068,
+    "incDeg": 20.7
+   },
+   "diskOuterM": 19542334052.204155,
+   "ref": "BlackCAT, Corral-Santana et al. 2016, A&A 587, A61"
+  },
+  {
+   "name": "Sagittarius A*",
+   "aliases": [
+    "NAME Sgr A*"
+   ],
+   "kind": "supermassive",
+   "raDeg": 266.41681662499997,
+   "decDeg": -29.00782497222222,
+   "distPc": 8277.0,
+   "massSun": 4297000.0,
+   "ref": "GRAVITY Collaboration 2022, A&A 657, L12 (mass, distance R0); position: SIMBAD"
+  },
+  {
+   "name": "M87*",
+   "aliases": [
+    "M  87"
+   ],
+   "kind": "supermassive",
+   "raDeg": 187.70593076725,
+   "decDeg": 12.391123246083334,
+   "distPc": 16800000.0,
+   "massSun": 6500000000.0,
+   "ref": "Event Horizon Telescope Collaboration 2019, ApJL 875, L6 (mass, distance); position: SIMBAD"
+  },
+  {
+   "name": "Cygnus X-1",
+   "aliases": [
+    "HD 226868"
+   ],
+   "kind": "stellar",
+   "raDeg": 299.59031556498,
+   "decDeg": 35.20160680908,
+   "distPc": 2220.0,
+   "massSun": 21.2,
+   "ref": "Miller-Jones et al. 2021, Science 371, 1046 (BH 21.2 Msun, donor 40.6 Msun, d = 2.22 kpc); Orosz et al. 2011, ApJ 742, 84 (P, donor); position: SIMBAD",
+   "companion": {
+    "spType": "O9.7Iab",
+    "teff": 31100,
+    "massSun": 40.6,
+    "radiusM": 15514110000.0,
+    "periodDays": 5.599829,
+    "sepM": 36503661094.76482,
+    "incDeg": 27.5
+   },
+   "diskOuterM": 5919031072.991496
+  },
+  {
+   "name": "Gaia BH1",
+   "aliases": [
+    "GALEX J172841.0-003451"
+   ],
+   "kind": "stellar",
+   "raDeg": 262.1712358858566,
+   "decDeg": -0.5809787160997222,
+   "distPc": 483.09178743961354,
+   "massSun": 9.62,
+   "ref": "El-Badry et al. 2023, MNRAS 518, 1057; position: SIMBAD",
+   "companion": {
+    "spType": "G",
+    "teff": 5850,
+    "massSun": 0.93,
+    "radiusM": 688743000.0,
+    "periodDays": 185.59,
+    "sepM": 208934883948.2602,
+    "incDeg": 126.6
+   }
+  },
+  {
+   "name": "Gaia BH2",
+   "aliases": [
+    "UCAC4 154-126202"
+   ],
+   "kind": "stellar",
+   "raDeg": 207.56978233407668,
+   "decDeg": -59.23898075028999,
+   "distPc": 1160.0,
+   "massSun": 8.94,
+   "ref": "El-Badry et al. 2023, MNRAS 521, 4323; position: SIMBAD",
+   "companion": {
+    "spType": "K giant",
+    "teff": 4600,
+    "massSun": 1.07,
+    "radiusM": 5405589000.0,
+    "periodDays": 1276.7,
+    "sepM": 742610387744.495,
+    "incDeg": 34.9
+   }
+  },
+  {
+   "name": "Gaia BH3",
+   "aliases": [
+    "LS  II +14   13"
+   ],
+   "kind": "stellar",
+   "raDeg": 294.82796478104,
+   "decDeg": 14.931669719919999,
+   "distPc": 590.0,
+   "massSun": 32.7,
+   "ref": "Gaia Collaboration, Panuzzo et al. 2024, A&A 686, L2; position: SIMBAD",
+   "companion": {
+    "spType": "G giant",
+    "teff": 5212,
+    "massSun": 0.76,
+    "radiusM": 3436758000.0000005,
+    "periodDays": 4253.1,
+    "sepM": 2476677526873.52,
+    "incDeg": 110.6
+   }
+  },
+  {
+   "name": "M31*",
+   "aliases": [
+    "M  31"
+   ],
+   "kind": "supermassive",
+   "raDeg": 10.684708333333333,
+   "decDeg": 41.268750000000004,
+   "distPc": 779500.0,
+   "massSun": 140000000.0,
+   "ref": "Bender et al. 2005, ApJ 631, 280 (mass); position and distance: galaxies.json (SIMBAD)"
+  },
+  {
+   "name": "M32*",
+   "aliases": [
+    "M  32"
+   ],
+   "kind": "supermassive",
+   "raDeg": 10.67427,
+   "decDeg": 40.86517,
+   "distPc": 780000.0,
+   "massSun": 2500000.0,
+   "ref": "van den Bosch & de Zeeuw 2010, MNRAS 401, 1770 (mass); position and distance: galaxies.json (SIMBAD)"
+  },
+  {
+   "name": "M81*",
+   "aliases": [
+    "M  81"
+   ],
+   "kind": "supermassive",
+   "raDeg": 148.88821939854,
+   "decDeg": 69.06529514038,
+   "distPc": 3610000.0,
+   "massSun": 70000000.0,
+   "ref": "Devereux et al. 2003, AJ 125, 1226 (mass); position and distance: galaxies.json (SIMBAD)"
+  },
+  {
+   "name": "Centaurus A*",
+   "aliases": [
+    "NAME Centaurus A"
+   ],
+   "kind": "supermassive",
+   "raDeg": 201.36506337683332,
+   "decDeg": -43.019112508083325,
+   "distPc": 3715000.0,
+   "massSun": 55000000.0,
+   "ref": "Cappellari et al. 2009, MNRAS 394, 660 (mass); position and distance: galaxies.json (SIMBAD)"
+  },
+  {
+   "name": "M104*",
+   "aliases": [
+    "M 104"
+   ],
+   "kind": "supermassive",
+   "raDeg": 189.99763274591663,
+   "decDeg": -11.623054494444448,
+   "distPc": 11270000.0,
+   "massSun": 660000000.0,
+   "ref": "Kormendy & Ho 2013, ARA&A 51, 511 (mass); position and distance: galaxies.json (SIMBAD)"
+  }
+ ],
+ "sources": [
+  "BlackCAT (Corral-Santana et al. 2016), VizieR J/A+A/587/A61",
+  "SIMBAD (CDS)",
+  "Pecaut & Mamajek 2013 / Mamajek online table"
+ ]
+}
