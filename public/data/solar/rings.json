@@ -1,0 +1,9 @@
+{
+ "saturn": {
+  "innerKm": 72000.0,
+  "outerKm": 142500.0,
+  "texture": "saturn_rings.png",
+  "encoding": "alpha = 1 - exp(-tau_normal); tau=99 (opaque) mapped to 5",
+  "source": "PDS Rings Node VG_2801 Voyager 2 PPS delta Sco occultation, 10 km resolution (PS1P01)"
+ }
+}

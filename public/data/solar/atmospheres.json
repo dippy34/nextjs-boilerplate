@@ -1,0 +1,51 @@
+{
+ "Venus": {
+  "scaleHeightKm": 15.9,
+  "meanMolecularWeight": 43.45,
+  "source": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/venusfact.html",
+  "surfacePressureBar": 92.0,
+  "temperatureK": 737.0
+ },
+ "Earth": {
+  "scaleHeightKm": 8.5,
+  "meanMolecularWeight": 28.97,
+  "source": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/earthfact.html",
+  "surfacePressureBar": 1.014,
+  "temperatureK": 288.0
+ },
+ "Mars": {
+  "scaleHeightKm": 11.0,
+  "meanMolecularWeight": 43.49,
+  "source": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/marsfact.html",
+  "surfacePressureBar": 0.00636,
+  "temperatureK": 214.0
+ },
+ "Jupiter": {
+  "scaleHeightKm": 27.0,
+  "meanMolecularWeight": 2.22,
+  "source": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/jupiterfact.html",
+  "surfacePressureBar": 1.0,
+  "temperatureK": 165.0
+ },
+ "Saturn": {
+  "scaleHeightKm": 59.5,
+  "meanMolecularWeight": 2.07,
+  "source": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/saturnfact.html",
+  "surfacePressureBar": 1.0,
+  "temperatureK": 134.0
+ },
+ "Uranus": {
+  "scaleHeightKm": 27.7,
+  "meanMolecularWeight": 2.64,
+  "source": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/uranusfact.html",
+  "surfacePressureBar": 1.0,
+  "temperatureK": 76.0
+ },
+ "Neptune": {
+  "scaleHeightKm": 19.700000000000003,
+  "meanMolecularWeight": 2.61,
+  "source": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/neptunefact.html",
+  "surfacePressureBar": 1.0,
+  "temperatureK": 72.0
+ }
+}

@@ -1,0 +1,318 @@
+# Handoff: where the project stands
+
+Branch: `claude/upbeat-allen-8ok26x` · Live: https://dippy34.github.io/nextjs-boilerplate/ ·
+Deploy: `bash scripts/deploy-pages.sh` (builds and force-pushes `gh-pages`).
+
+## Goal (from the owner)
+
+A SpaceEngine-like explorer that is **native to VR** (Meta Quest), eventually published on the
+Meta Horizon Store (likely as a Unity app built on a Mac; the web version stays as a demo). The owner
+wants it to feel like SpaceEngine: visit "everything", black holes, beautiful stars and planets,
+smooth travel. Real data wherever it exists (downloaded by `pipeline/`, credited in `CREDITS.md`),
+procedural generation for the rest. Never use SpaceEngine's own files.
+
+## Done
+
+* Engine: Three.js + TypeScript + Vite, double-double positions, floating origin, log/reversed-Z depth,
+  HDR, JPL DE442S ephemeris, 459 moons, small bodies, 2.75 M real stars (AT-HYG, Gaia DR3 100 pc).
+* VR (WebXR): in-headset menu (Planets, Moons, Small worlds, Stars, Search keyboard, Settings), laser
+  pointing, hover/haptics, info cards, wrist panel, hands. Renders into the XR render target.
+  Depth in the headset: logarithmic by default (it writes the fragment depth, so the GPU cannot
+  reject hidden fragments early); `?xrdepth=reversed` tries reversed-Z instead (needs
+  EXT_clip_control, else log depth; the console says which): `Renderer.reverseXrProjections`
+  rebuilds the runtime's eye projections as reversed-Z each frame (three has no reversed-Z path for
+  XR cameras), and the far-geometry pull-in is off in that mode. For an A/B on the device.
+* Adaptive quality (`src/render/Quality.ts`): a governor in Renderer.render steps `QUALITY.level`
+  (0 full .. 3) down when frames miss the budget (60 Hz desktop, the session's rate in a headset)
+  and back up after a clean run (with back-off). Desktop: internal render resolution 1/0.85/0.72/0.6
+  (the composite upscales; view.pixelRatio reports render pixels per CSS pixel). Headset: the
+  volume pass and the terrain's split threshold coarsen. Off under automation (navigator.webdriver)
+  unless ?governor=1; ?governor=0 turns it off. Other layers may read QUALITY.level.
+* Volume pass (`Renderer.ts`, `VOLUMES`): ray-marched volumes are drawn at reduced resolution
+  (desktop 0.75, headset 0.5) into their own target, then added to the frame by a full-screen quad
+  in the scene at the far plane with the volumes' old draw order (after everything opaque, sky
+  included; whatever opaque is in front still covers it, also in a headset). A layer joins by putting
+  its meshes on `VOLUMES.layer` only and adding them to `VOLUMES.meshes`; DeepSkyLayer's nebulae
+  do. Inside a nebula (SwiftShader, 800x450) frames went from 5.7-8.3 s to 3.1-3.5 s at half
+  resolution; in the emulated headset the cost of being inside Orion fell from 2.7 s to 1.0 s.
+* Visuals: NASA SVS Milky Way, atmospheres, relief maps (LOLA/MOLA/MESSENGER/ETOPO), 8k maps (desktop
+  only), Hubble OPAL giants, spectral colours.
+* Earlier: autopilot uses a two-stretch log-distance Hermite curve (`src/app/CameraRig.ts`,
+  test `tests/rig.test.ts`); destination textures are prefetched and every shader is compiled up front
+  (`App.warmUp`, `BodiesLayer.prefetch`), no 8k maps in VR (upload stalls); VR travel = blink, re-aim,
+  open eyes, one continuous flight. New star look (`src/render/shaders/psf.ts`): coloured core,
+  halo/spikes sized by brightness above the limit, saturation `uSat`.
+
+* Black holes (done, live): `pipeline/build_blackholes.py` -> `public/data/blackholes.json` (23 real
+  holes), `src/universe/BlackHoles.ts`, renderer `src/render/BlackHoleLayer.ts` + `shaders/blackhole.ts`
+  (per-pixel Schwarzschild tracing over an environment cube captured at the eye, thin disks with
+  Doppler/gravitational shifts). Note: three.js maps AlwaysDepth to NeverDepth with a reversed-Z
+  buffer — the layer asks for NeverDepth there on purpose.
+* Milky Way (done): `src/universe/Galaxy.ts` (parametric model, CPU reference `glowColumn`),
+  `src/render/GalaxyLayer.ts` + `shaders/galaxy.ts` (glow ray-marched into a cube, one face per frame
+  while moving), `Sky.updateWith` cross-fades the NASA map to it 120-700 pc from the Sun (calibration
+  constants in `SkyLayer`). Procedural stars: `src/universe/ProceduralStars.ts` (bands x cells,
+  deterministic, no catalogue duplicates), generated in `src/workers/stars.worker.ts`, drawn by
+  `src/render/ProceduralStarLayer.ts`. "Milky Way" destination: `src/universe/MilkyWay.ts`.
+
+* Overnight session (2026-10-03), all live:
+  - Unique looks: per-star surfaces (`src/render/StarLook.ts`, `StarCorona.ts`), per-hole disks and
+    jets (`Jets.ts`), procedural surfaces/lumpy shapes for map-less bodies, 4K moon maps.
+    The corona quad is drawn on a scaled-down copy 1e4 km from the eye (a 1e12 m quad around a giant
+    was garbled) and starts at the disk's elliptical outline; big star disks are exposed below white
+    (`STAR_KEY`/`STAR_CAP` in App.ts). Catalogue stars move from the name list's rounded position to
+    the octree's when their tile loads; `App.getStar` carries a parked explorer along.
+  - GPU crash fix: point sprites of very distant stars overflowed the clipper (`POINT_CLIP` in
+    `shaders/xr.ts` rescales point clip coordinates; meshes at Mpc use a per-object `uClipScale`).
+  - Exoplanets: `src/app/Systems.ts` (archive <-> catalogue matching, claims), `src/universe/Planets.ts`
+    (generator + Kepler systems), `src/render/ExoPlanetLayer.ts`, `shaders/planet.ts`.
+  - Close-up tiles: `pipeline/build_tiles.py` -> `public/data/tiles/` (16k pyramids, 15 bodies),
+    runtime `src/render/TileDetail.ts` (detail atlas around the view, bound by `BodiesLayer.updateDetail`).
+  - Spacecraft (`pipeline/build_spacecraft.py`, `src/universe/Spacecraft.ts`, `src/render/SpacecraftLayer.ts`),
+    galaxies (`build_galaxies.py`, `src/universe/Galaxies.ts`, `src/render/GalaxiesLayer.ts`), nebulae and
+    clusters (`build_deepsky.py`, `src/universe/DeepSky.ts`, `src/render/DeepSkyLayer.ts`).
+  - Game mode (`src/game/`): `Game.ts` (modes, warp, docking, landing, light), `Cockpit.ts`, `ShipModel.ts`
+    (display-referred `litMaterial`), `WarpFx.ts`, `Traffic.ts` + `Station.ts`, `Missions.ts`, `Audio.ts`
+    (Web Audio synthesis). CameraRig got `inertia`, `braking`, `thrust`, `stop()`, `gotoRemaining`.
+  - VR quality tier: `LITE.uLite` (1 while presenting) trims the heavy procedural shaders.
+  - Planet terrain (replaces the old single landing patch): `src/render/PlanetTerrain.ts` — a
+    quadtree on the 6 faces of an equi-angular cube on every solid world within 2 radii
+    (`PlanetTerrain.reach`), tiles of 32x32 cells (`universe/TerrainTiles.ts`: heights with a border
+    for continuous normals, skirts, the parent's shape for geomorphing, relief shadows), split by
+    screen-space error (`pixPerCell`), horizon-culled, about `drawCap` drawn, built in Web Workers
+    (`workers/terrainTiles.worker.ts`, `inFlight` jobs a frame; the tile holding the explorer comes
+    with its whole column down to the detail wanted, `chain`). The worker rebuilds the same height
+    function from plain data (`universe/TerrainHeights.ts`: `TerrainSource`/`ExoGround` state) and
+    samples the elevation pyramids (`TerrainSource.elevSample`, below). Tiles morph in from their
+    parent's shape and a rebuilt drawn tile morphs from its old shape, so `below()`/`groundRadius()`
+    (the drawn triangles, exactly) never jump. The world's sphere is cut away entirely (`uHoleCos`
+    -2) while the terrain covers it; the surface shader reads the close-up weight per vertex
+    (`tileFragment`: `uHScale` -> `vHScale`, fading out with distance), so far tiles shade like the
+    globe, and drops the sphere's `discard` (a discard anywhere turns off early depth rejection).
+    Skirts (`skirtMasks`: one of 16 shared index buffers per tile) hang only on edges bordering a
+    tile of another level, on both sides, and on cube-face borders; their depth is a few times
+    the tile's step from its parent's shape along the edges (deep skirts cost fill rate, which a
+    software rasteriser pays in full). Tunables (desktop / headset): `pixPerCell` 18/24,
+    `drawCap` 96/72 (a soft target: `lodScale` raises the split threshold evenly while the count
+    is over it; a hard stop at 1.5x — a hard cap tested during the depth-first walk let the deep
+    column under a walker starve the far field), `inFlight` 8/4, `budgetMs`/`budgetVrMs` 4/2 (main-thread builds only when
+    workers are unavailable), `maxTiles` 420/200. Shader warm-up: `App.warmUp` compiles inside
+    `Renderer.withSceneTarget` — three builds one program per output target, and the scene is
+    drawn into the HDR target, so compiling against the canvas left every program to compile again
+    on first use (the terrain's on arrival at a planet). `TerrainPatch.ts` is now an alias kept for importers. Heights: `pipeline/build_terrain.py`
+    -> `public/data/terrain/` (coarse global maps), `src/universe/Terrain.ts` (map or pyramid +
+    generated hills and craters below their resolution). Shot script: `scripts/shots/terrain-lod.mjs`.
+    `App.keepAboveGround` and `computeAltitude` use `TerrainPatch.groundRadius`. Shadows: `aSun`
+    is the Sun's clearance over the relief in penumbra widths (ray-marched per vertex, signed),
+    and the shaders light a pixel by `clamp(0.5 + vSun, 0, 1)`. Earth: the map's `"sea": 0` makes
+    lower ground flat water and limits generated hills to land (more on high ground); the data
+    stores everything at or below 0 m as -200 m, so `Terrain.DEPRESSIONS` (circles) gives dry
+    basins a dry floor (Death Valley -80 m, Qattara, ...) and lakes below sea level their own
+    surface (Caspian -28 m, ...). Sea query for walking: `PlanetTerrain.isSea(nBF)` (the drawn
+    ground lies flat at the local water level) and `waterLevel(nBF)` (m, or null where no water;
+    generated ocean and Earth-like planets: 0); the painted
+    clouds fade out on descent (`uCloudVis`, set in `Bodies`) while `render/CloudLayer.ts` (a
+    sphere 7 km up, same map + generated billows) fades in, clearing again below 12-30 km. Draw order: atmosphere shell (19.8),
+    terrain (19.9, transparent pass but opaque), terrain haze (19.95: `ATMO_HAZE_FRAG` on the
+    terrain geometry, marching to the real ground), then cockpit/HUD (20+). Earth and Mars get a
+    skylight term in BODY_FRAG (`uAtmo`); ground without craters (Earth) gets `bnAt` rock/soil
+    detail on the split lattices. Landmarks may set `elev` (viewpoint elevation, degrees): Earth's
+    mountains are seen from a few degrees above, across the sunlight.
+  - Cockpit HUD (`src/game/HudMarkers.ts`): target bracket, flight-path marker, boresight.
+  - Generated planets: `src/universe/ExoTerrain.ts` (CPU copy of EXO_FRAG `terrain()` so ground matches
+    colours), Earth-like atmosphere shells for temperate/ocean types (`Atmospheres.updateExo`).
+  - Saturn's rings up close: `src/render/RingParticles.ts` (instanced ice, density from the ring
+    opacity texture, inertial ring frame from `universe/RingSpot.ts`, which is also the search target).
+  - Comets: `src/render/CometTails.ts` (coma/ion/dust quad per active comet, sky display gain; nucleus
+    mesh + jets for the nearest one within 30,000 km, fed to the exposure as `nucleusView`).
+  - Landmarks: `src/universe/Landmarks.ts` (places with coordinates; search ids `lm:`; VR Places tab).
+    Sharper regional heights around them: `pipeline/build_terrain_patches.py` -> `terrain/patches/`,
+    loaded by `TerrainSource.nearPatches` (via `Ground.prepare`), blended in `TerrainSource.height`.
+  - Tour (T, `App.tourItems` / `prepareTour`: time jumps for the eclipse and the next Jupiter shadow),
+    photo mode (U).
+  - Eclipses: `BodiesLayer.updateEclipses` picks up to 4 occluders per body; `sunVisible()` in
+    `shaders/body.ts` (disc-overlap penumbra, red glow in Earth's shadow); `sunlit` feeds the exposure.
+  - Walking: `App.keepAboveGround` keeps eye height within 4 m of the ground unless climbing.
+  - Nebula volumes: `DeepSkyLayer` (VOL_FRAG ray-marches the nearest nebula from 8 radii in, replacing
+    the billboards). Emission nebulae are a cavity around a young cluster: ridged filaments on the
+    walls, teal near the stars, red beyond, dust pillars/lanes; 40 jittered steps (16 in VR).
+  - Galaxy clouds: `GalaxiesLayer` turns the nearest galaxy into a 3D cloud from 40 radii in (`fillCloud`:
+    disc, arms, bar, bulge, single stars; sprites of fixed size in space, so surface brightness holds
+    at any distance and flux is kept below a pixel; distances in the shader are in galaxy radii, as
+    metres squared overflow 32-bit floats); the disc picture fades out as the cloud fades in.
+  - Galaxy volumes (`GalaxiesLayer`, VOL_FRAG): every galaxy is a box in its catalogued frame, ray-marched
+    per pixel (old disc, young clumpy arms with H II knots, bulge, bar; a thinner dust layer that
+    absorbs, more in blue); the step follows the height above the mid-plane so thin discs resolve at
+    any angle; ellipticals are Sérsic spheroids normalised to the old picture's light (`sersicNorm`).
+    The nearest galaxy's cloud sprites are dimmed by the dust in front of them (`dustTau`, exact
+    through the dust layer's vertical profile).
+  - Generated planet surfaces (`shaders/planet.ts`): warped continents, ridged mountain belts, relief
+    shading from finite differences of `terrain()`, octaves down to the pixel (`detail`), climate
+    biomes, cyclone clouds with shadows, sheared giant bands. `terrain()` is mirrored in
+    `universe/ExoTerrain.ts` (`exoTerrain`); sea level = the quantile of the planet's land fraction
+    (`exoQuantile`).
+  - Ground materials (`render/Materials.ts`): Poly Haven CC0 scans in two texture arrays (colour ÷ mean,
+    normal + height); `groundDetail` in the terrain shaders blends flat/steep/snow materials at three
+    scales by slope and height, as detail around the world's own colour. `render/Rocks.ts` scatters
+    rocks per body-fixed cell on the drawn ground (`TerrainPatch.groundRadius`).
+  - Display curve (`shaders/tone.ts`): the ACES fit applied to luminance only, so hues and
+    saturation survive (per-channel ACES bleached mid-tones: Saturn came out off-white); highlights
+    above ~60% of white blend towards white. Same curve in the headset via `CustomToneMapping`.
+  - Comet tails (`CometTails`, TAIL_FRAG): a box in the comet's frame (x away from the Sun, y in the
+    orbit plane behind the motion from the orbital elements, z the orbit normal), in coma radii;
+    1/b coma integrated analytically, ion tube with plasma rays and curved, striated dust fan
+    ray-marched with steps that shrink near the tube's axis and the fan's plane.
+  - Saturn's rings: `shaders/rings.ts` (per-ring particle colour, ringlets below the profile's
+    resolution, backscattering phase function with opposition surge, penumbra, Saturnshine). Within
+    3 km of the plane `RingParticles.slab` draws the whole ring as a medium (Gaussian layer, σ 4.5 m,
+    measured optical depth, sunlight dimmed by the layer, self-gravity wakes) on a sphere around the
+    eye; the ice chunks are shaded and fogged by the same layer (`LAYER_GLSL`).
+  - Star surfaces: `shaders/star.ts` (arithmetic hash: `sin` of large arguments lined the granules
+    up on a grid; granules ~1000 km on the Sun; bright points; mesogranulation); the corona glow
+    fades close to a star (`StarCorona`).
+  - Milky Way from outside: `MilkyWayVolume` ray-marches the galaxy model per pixel (with H II knots,
+    OB associations, dust lanes on the arms' inner edges, feathers) and takes over from the glow cube
+    a few kpc outside the disc.
+  - Point sources fade in over the last ~1.3 mag above the cut-off (`psf.ts`).
+  - Shot scripts for visual review: `scripts/shots/{comet,rings,solar}.mjs`.
+  - Spacecraft models (`SpacecraftLayer.parts`): ISS (Sun-tracking arrays), Hubble, JWST, Voyager,
+    New Horizons built from parts, baked per finish (`bake`); HULL_FRAG adds cells/foil/quilting/truss
+    lattice from the part-local position (`aLoc`).
+  - Tests: `scripts/terrain.mjs` (landing terrain, the Tycho / Olympus Mons / Everest patches and the
+    atmosphere over terrain, 14 checks),
+    `scripts/places.mjs` (rings, comet, lunar eclipse, Jupiter moon shadow, landmarks, inside the
+    Orion Nebula).
+
+## Global elevation pyramids (elevation worker)
+
+`pipeline/build_elevation.py` (sources and resumable downloads in `pipeline/elevation_sources.py`,
+raw files and int16 work grids in `data-raw/elevation/`, ~25 GB while building) ->
+`public/data/elevation/<body>/<level>/<face>-<s>-<bx>-<by>.pak` (small spatial packs: the tiles of a
+4x4 block of siblings, or 2x2 where 4x4 would pass 1.5 MB, one face at levels 0-1; 977 packs instead
+of 6,617 PNGs) + `manifest.json` (each level's `packs`: tiles in file order with byte lengths), and
+`index.json`. Elevation.ts reads a tile with an HTTP range request (GitHub Pages answers 206); a host
+that ignores ranges (Cloudflare Pages, `python3 -m http.server`: 200 with the whole file) gets the
+whole pack once and every tile in it is kept, and from then on whole packs are fetched directly
+(concurrent first requests for one pack share one download). The build writes loose PNGs, then
+`pack()` packs them (`python3 build_elevation.py pack` re-packs).
+Runtime: `src/universe/Elevation.ts` (no DOM, Web-Worker safe), tests `tests/elevation.test.ts`
+(fixture `tests/fixtures/elevation_points.json` is written by the build).
+
+* Cube: faces 0..5 = +X,-X,+Y,-Y,+Z,-Z of the body-fixed frame (+X = 0 deg E, +Z = north); image
+  right/down axes +X:(+Y,-Z) -X:(-Y,-Z) +Y:(-X,-Z) -Y:(+X,-Z) +Z:(+Y,+X) -Z:(+Y,-X); equi-angular
+  (`normalize(N + tan((2u-1)pi/4) U + tan((2v-1)pi/4) V)`). Level L: 2^L x 2^L tiles a face, 256
+  intervals a tile, 257 vertex-registered samples + a 1-sample apron = 259 x 259 16-bit greyscale
+  PNG; height = manifest `offset` + `step` (1 m) x value.
+* Bodies, MB, finest level: Moon 115 MB (all to 1.3 km, half to 666 m, landmarks 333 m), Mars 105
+  (all to 2.6 km, most to 1.3 km, 650/325 m at the volcanoes, canyons and landing sites), Earth 80
+  (sea floor to 9.8 km; land to 4.9 km, mountains to 1.2 km/611 m, landmarks 305 m), Mercury 25
+  (1.9 km), Ceres 7.6, Vesta 7.0: 340 MB in all. Deep tiles are chosen greedily by the RMS detail
+  they add over the parent x 2^(-level/2) under a per-body byte budget (`BODIES` in the script).
+* API: `Elevation.configure({ base, maxBytes })` (absolute base inside a worker), `load(body)`,
+  `levels(body)`, `request(body, face, level, x, y)`, `prefetch(body, dir, metresPerSample, ring)`,
+  `sample(body, dirBF, metresPerSample)` (sync bicubic, metres above the reference, null when
+  nothing loaded covers the point; blends adjacent levels; `lastMetresPerSample`/`lastLevel` say
+  what it used), `maxLevelAt(body, dir)`, `exists`, `loaded`, `version(body)`; helpers
+  `faceToDir`, `dirToFace`, `tileOf`, `decodePng16` (own PNG decoder over `DecompressionStream`,
+  so heights stay exact 16-bit). LRU cache, 24 MB default, levels 0-1 never evicted.
+* Regional levels (`pipeline/elevation_hires.py`, run by the build or `python3 build_elevation.py
+  hires [earth|moon]`): Earth L8/L9 (153/76 m, 1551 tiles, 90 MB) from Copernicus DEM GLO-90 over the
+  Alps, Everest Himalaya, Aconcagua, Grand Canyon, Kilimanjaro, Mauna Kea, Fuji, Denali; Moon L6/L7
+  (167/83 m, 881 tiles, 45 MB) from SLDEM2015 in 10 x 10 degree boxes around the Apollo 11/15/17
+  sites, Chang'e 4, Tycho, Copernicus. These levels list their tiles (`list`: flat face, x, y) instead
+  of a bitmap. Elevation total now ~475 MB; the whole site ~910 MB (keep it under ~950).
+* Reference surface for consumers: heights are metres above the body's ellipsoid (`radii`), exactly
+  like the older `terrain/*.png` maps (Moon: the 1737.4 km sphere). `referenceRadius` is the mean
+  radius for `metresPerSample` only. The tile worker (`workers/terrainTiles.worker.ts`) uses them so.
+* Checked in the app (vite preview, software GL): flying to Everest, the Matterhorn and Apollo 17
+  requests levels 8-9 (Earth) and 6-7 (Moon) and the ground under Everest is at +8.5 km, Apollo 17 at
+  -2.6 km. Each tile worker fetches and decodes its own copy (~90 tiles, ~12 MB per worker per descent).
+* Memory: each `ElevationStore` caps decoded tiles at 24 MB by default (about 180 tiles, 2x a
+  descent's working set; tested in `tests/elevation.test.ts`). With 3-4 tile workers that is at
+  most ~100 MB on Quest. A cache shared between workers would need SharedArrayBuffer (cross-origin
+  isolation, not available on GitHub Pages); routing all `sample` calls through one worker is the
+  alternative if memory gets tight.
+* Regenerate: `cd pipeline && python3 build_elevation.py [body ...]` (downloads ~14 GB once, plus
+  ~0.6 GB of Copernicus tiles and SLDEM rows by range requests).
+* Mercury's older `public/data/terrain/mercury.png` was twice too tall: `terrain.json` now applies
+  the GeoTIFF's 0.5 m scale (and `build_terrain.py` bakes it in on a rebuild); the pyramids were
+  always right. Mars/Earth heights are relative to the
+  areoid/geoid but the engine adds them to the ellipsoid (as before: the difference is a smooth,
+  very long-wavelength undulation, kilometre-scale on Mars, ~100 m on Earth). Earth land below sea level (Dead Sea, Caspian) is stored as ocean in the fine levels.
+
+## The catalogue of real objects (catalog worker)
+
+`pipeline/build_catalog.py` (downloads: `pipeline/catalog_sources.py`, raw in `data-raw/catalog/`;
+the ATNF `psrcat` program is compiled there to get pulsar distances) -> `public/data/catalog/`
+(20 MB): `manifest.json`, `rec/<category>/<k>.tsv` (4,000 records a file), `idx/<k>.txt` (the search
+index: 356,000 names sorted by normalised key, 8,000 a file; 102 files in all; the manifest has each file's first
+key). 199,996 objects: stars 112,879 (Hipparcos/Gliese, HD/HR/HIP/Gl/Bayer/Flamsteed names), galaxies
+62,301 (Cosmicflows-4 + OpenNGC + UNGC), clusters 7,186, TESS planet hosts 6,266, pulsars 4,319, nebulae
+2,336 (PNe, SNRs, WISE H II), white dwarfs 2,132 (50 pc), quasars 1,908 (with SMBH masses; incl. 3C 273, OJ 287, TON 618), X-ray
+binaries 419, brown dwarfs 250. Sources and licences: CREDITS.md.
+
+* Runtime: `src/universe/CatalogSearch.ts` (no DOM: `normKey` mirrors the pipeline's `norm`; a query
+  loads 1-3 index files, ~60 kB; records load per file) and `src/universe/Catalog.ts` (results with
+  their records preloaded so picking is synchronous, `resolve('cat:<c>:<row>')`, `featured(code,
+  page)` for browsing, `onUpdate` when async results land). Objects become the engine's own kinds:
+  `CatalogStar` subclasses (stars, white/brown dwarfs, planet hosts, neutron-star X-ray binaries),
+  `BlackHole` (black-hole X-ray binaries with a Roche-lobe companion; quasars as supermassive holes),
+  `Galaxy`, `DeepSkyObject` (clusters, nebulae); pulsars are 12 km stars at ~500,000 K. Catalogue
+  stars the star tiles lack join the near-star list when close (`Catalog.nearStars`). If the app already has the
+  object (curated galaxies/nebulae/holes, named stars) that one is used (`App.catalogExisting`).
+* Hooks (all marked `[catalog]`): `App.objCatalog`, created in `App.create` with callbacks that push
+  black holes into `app.blackHoles` and call the new `GalaxiesLayer.add(g)` /
+  `DeepSkyLayer.add(o, psf, lut, vr)` (appended methods; they set objects up like the constructors);
+  `App.searchItems` merges catalogue results (exact designation matches rank first);
+  `App.resolveSearchId` handles `cat:` ids; `Hud.refreshSearch` is public so late results show; the VR
+  Search tab shows a category browser (6 per page) when nothing is typed.
+* Not yet: catalogue objects are not labelled in the sky or pickable by pointing until selected
+  (search/browse only); TESS hosts get the engine's generated planets besides their candidates'
+  info row; picking many galaxies adds one volume mesh each (never removed).
+* Regenerate: `cd pipeline && python3 build_catalog.py` (downloads ~260 MB once).
+
+## Next
+
+1. Quest performance pass on a real headset (cockpit, planet/galaxy/nebula shaders, tile atlas size,
+   black hole steps).
+2. Terrain: stream sharper elevation tiles everywhere (the full LOLA/MOLA/ETOPO resolution; today
+   only the landmark patches have it), a real cloud layer for Earth; OpenNGC for more deep-sky objects, a sharper galaxy
+   impostor from outside.
+3. Unity port planning (the data pipeline outputs are engine-agnostic JSON/JPEG).
+
+## Checks before every deploy
+
+`npm run typecheck`, `npm test`, then with `npx vite preview --port 4173` running:
+`node scripts/interact.mjs http://127.0.0.1:4173/ out`, `node scripts/verify.mjs ...`,
+`node scripts/vr.mjs http://127.0.0.1:4173/ out` (IWER Quest 3 emulator; 27 checks),
+`node scripts/game.mjs http://127.0.0.1:4173/ out` (game mode; 16 checks),
+`node scripts/terrain.mjs http://127.0.0.1:4173/ out` (landing terrain),
+`node scripts/places.mjs http://127.0.0.1:4173/ out` (rings, comets, eclipses). Run them one at a time
+(parallel runs starve the software renderer and screenshots time out). `SKIP_BUILD=1 bash
+scripts/deploy-pages.sh` publishes the exact build that was verified. On a machine
+with a real GPU these run far faster than in the cloud container (software rendering, ~1 fps).
+
+## Licences to keep in mind
+
+Gaia DR3 supplement (`public/data/stars-gaia/`) is CC BY-NC: drop it for a paid store app. AT-HYG
+tiles are CC BY-SA 4.0; OPAL maps CC BY 4.0; NASA/USGS/NOAA public domain. See `CREDITS.md`.
+
+## God mode (src/god/)
+
+* `physics.ts`: every formula of the editor, each returning its value and its working
+  ("show the math"); tests in `tests/physics.test.ts` (textbook values).
+* `Sandbox.ts`: the edited universe. `mode = 'kepler'` (default): edited bodies follow exact
+  two-body orbits (`Entity.orbit`, ecliptic J2000 elements about a parent), their moons ride along,
+  everything else stays on the ephemeris (SolarSystem.update runs first each frame). `mode = 'nbody'`:
+  IAS15 N-body simulation in `nbody.worker.ts` (`NBody.ts`, `runner.ts`; fast small moons ride Kepler
+  orbits with their mass in the planet's particle, `initial.ts`), the display interpolates snapshots.
+  Edits go through `edit()` (undo snapshot, `WorldState` JSON also used by save/load/export).
+  Spawned planets/stars are Bodies in `system.bodies` (`hidden`, drawn by the exoplanet / near-star
+  layers via proxies in `God.ts`), spawned holes are in `app.blackHoles`; deleted bodies are
+  `valid = false`, `gm = 0`.
+* `God.ts` (glue, proxies, mouse tools, climate -> `SUN_LIGHT` and `AtmospheresLayer.setTweak`),
+  `GodPanel.ts` (desktop editor, Y), `GodTab.ts` (VR menu tab), `GodVR.ts` (grip grab/throw, laser
+  placement), `GodLayer.ts` (trails, predicted orbits, velocity arrow, flashes, debris rings),
+  `BodyView.ts` (what the editors show, real values in `CLIMATE`).
+* Browser suite: `scripts/god.mjs` (desktop + IWER headset); unit: `tests/nbody.test.ts`
+  (1 year vs DE442S, conservation, reversal, merges), `tests/physics.test.ts`.
